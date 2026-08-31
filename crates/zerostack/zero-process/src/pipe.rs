@@ -1,11 +1,5 @@
-//! Safe Windows named-pipe server/client primitives with a protected
-//! current-user-only ACL and connected-client SID verification.
-//!
-//! Every HANDLE and every security-descriptor allocation has exactly one RAII
-//! owner ([`super::identity::Handle`] and [`LocalBuffer`]); no default or
-//! ambient ACL is ever used, and no polling is performed: reads and writes
-//! block on kernel events (overlapped I/O) and are interruptible only through
-//! the connection's cancel event.
+//! Safe Windows named-pipe server/client primitives with a protected current-user-only ACL and
+//! connected-client SID verification.
 #![cfg(windows)]
 
 use std::io::{self, Read, Write};
@@ -129,7 +123,7 @@ impl LocalBuffer {
 
 impl Drop for LocalBuffer {
     fn drop(&mut self) {
-        // SAFETY: `self.0` is our own LocalAlloc block; Drop runs exactly once.
+        // SAFETY: `self.0` is the owned LocalAlloc block; Drop runs exactly once.
         unsafe {
             LocalFree(self.0);
         }
@@ -141,7 +135,7 @@ impl Drop for LocalBuffer {
 unsafe impl Send for LocalBuffer {} // ubs:ignore — FFI wrapper, invariants: unique LocalAlloc owner
 unsafe impl Sync for LocalBuffer {} // ubs:ignore — FFI wrapper, invariants: unique LocalAlloc owner
 
-/// Zeroed OVERLAPPED with our completion event. All fields are integer/handle
+/// Zeroed OVERLAPPED with the completion event. All fields are integer or handle
 /// POD; the anonymous union is the documented Offset/Pointer overlay.
 fn overlapped_with_event(event: HANDLE) -> OVERLAPPED {
     OVERLAPPED {
@@ -154,10 +148,9 @@ fn overlapped_with_event(event: HANDLE) -> OVERLAPPED {
     }
 }
 
-/// Explicit security descriptor with a DACL granting only the current user.
-/// The descriptor and ACL allocations are both owned by this RAII struct, so
-/// every pipe instance created from it carries the same protected ACL and no
-/// default ACL is ever applied.
+/// Explicit security descriptor with a DACL granting only the current user. The
+/// descriptor and ACL allocations are both owned by this RAII struct, so every pipe
+/// instance created from it carries the same protected ACL and no default ACL is ever applied.
 pub struct PipeSecurity {
     descriptor: LocalBuffer,
     /// Held only to keep the ACL allocation alive for the descriptor's
@@ -212,10 +205,9 @@ impl PipeSecurity {
     }
 }
 
-/// Server side of a named pipe. `new` creates the first instance with the
-/// protected current-user-only ACL; each [`accept`](Self::accept) connects the
-/// current instance and immediately creates the next one, so clients can
-/// connect while a handler runs.
+/// Server side of a named pipe. `new` creates the first instance with the protected
+/// current-user-only ACL; each [`accept`](Self::accept) connects the current instance
+/// and immediately creates the next one, so clients can connect while a handler runs.
 pub struct PipeListener {
     security: Arc<PipeSecurity>,
     name: Vec<u16>,
@@ -267,7 +259,7 @@ impl PipeListener {
         let raw = instance.raw();
         let event = Handle::create_event(false)?;
         let mut overlapped = overlapped_with_event(event.raw());
-        // SAFETY: raw is our own pipe instance; overlapped is zeroed with a
+        // SAFETY: raw is the owned pipe instance; overlapped is zeroed with a
         // fresh event; the instance was created with FILE_FLAG_OVERLAPPED.
         let rc = unsafe { ConnectNamedPipe(raw, &mut overlapped) };
         if rc == 0 {
@@ -275,7 +267,7 @@ impl PipeListener {
             match error.raw_os_error() {
                 Some(code) if code == ERROR_IO_PENDING as i32 => {
                     let handles = [event.raw(), self.cancel.raw()];
-                    // SAFETY: both handles are our live kernel events.
+                    // SAFETY: both handles are live owned kernel events.
                     let wait = unsafe {
                         WaitForMultipleObjects(handles.len() as u32, handles.as_ptr(), 0, INFINITE)
                     };
@@ -332,7 +324,7 @@ impl PipeListener {
                 0
             };
         let attributes = self.security.security_attributes();
-        // SAFETY: name is a valid pipe path; attributes carries our explicit
+        // SAFETY: name is a valid pipe path; attributes carries the explicit
         // protected DACL; the returned handle is owned by this listener.
         let raw = unsafe {
             CreateNamedPipeW(
@@ -359,7 +351,7 @@ pub struct PipeListenerCancel(Arc<Handle>);
 
 impl PipeListenerCancel {
     pub fn cancel(&self) -> io::Result<()> {
-        // SAFETY: this is our own manual-reset cancellation event.
+        // SAFETY: this is the owned manual-reset cancellation event.
         if unsafe { windows_sys::Win32::System::Threading::SetEvent(self.0.raw()) } != 0 {
             Ok(())
         } else {
@@ -471,7 +463,7 @@ impl PipeConnection {
     /// Cancel the connection: any blocked read returns EOF and the connection
     /// is unusable afterwards. Used for teardown of handler threads.
     pub fn cancel(&self) {
-        // SAFETY: our own manual-reset event handle.
+        // SAFETY: the manual-reset event handle is owned.
         unsafe {
             windows_sys::Win32::System::Threading::SetEvent(self.state.cancel.raw());
         }
@@ -497,7 +489,7 @@ impl PipeConnection {
     /// queries the client pid; the client queries the server pid.
     pub fn peer_is_current_user(&self) -> io::Result<bool> {
         let mut pid = 0u32;
-        // SAFETY: our pipe handle and endpoint role select the matching peer.
+        // SAFETY: the owned pipe handle and endpoint role select the matching peer.
         let ok = unsafe {
             if self.server_end {
                 GetNamedPipeClientProcessId(self.handle.raw(), &mut pid)
@@ -533,8 +525,8 @@ impl PipeConnection {
         unsafe { ResetEvent(self.state.read_event.raw()) };
         let mut overlapped = overlapped_with_event(self.state.read_event.raw());
         let mut read = 0u32;
-        // SAFETY: our pipe handle, a caller buffer, and a zeroed OVERLAPPED
-        // with our event; the instance was created with FILE_FLAG_OVERLAPPED.
+        // SAFETY: the owned pipe handle, caller buffer, and zeroed OVERLAPPED use
+        // the owned event; the instance has FILE_FLAG_OVERLAPPED.
         let rc = unsafe {
             ReadFile(
                 self.handle.raw(),
@@ -553,13 +545,13 @@ impl PipeConnection {
         }
         let wait = self.wait_io(&overlapped, timeout)?;
         if wait == WAIT_OBJECT_0 + 1 {
-            // SAFETY: cancel and settle our own pending read before return.
+            // SAFETY: cancel and settle the owned pending read before return.
             unsafe { CancelIoEx(self.handle.raw(), &overlapped) };
             unsafe { WaitForSingleObject(overlapped.hEvent, INFINITE) };
             return Ok(0);
         }
         if wait == WAIT_TIMEOUT {
-            // SAFETY: cancel and settle our own pending read before return.
+            // SAFETY: cancel and settle the owned pending read before return.
             unsafe { CancelIoEx(self.handle.raw(), &overlapped) };
             unsafe { WaitForSingleObject(overlapped.hEvent, INFINITE) };
             return Err(io::Error::new(
@@ -597,7 +589,7 @@ impl PipeConnection {
         unsafe { ResetEvent(self.state.write_event.raw()) };
         let mut overlapped = overlapped_with_event(self.state.write_event.raw());
         let mut written = 0u32;
-        // SAFETY: our pipe handle, a caller buffer, and a zeroed OVERLAPPED.
+        // SAFETY: the pipe handle is owned; the buffer is caller-owned and OVERLAPPED is zeroed.
         let rc = unsafe {
             WriteFile(
                 self.handle.raw(),
@@ -616,7 +608,7 @@ impl PipeConnection {
         }
         let wait = self.wait_io(&overlapped, timeout)?;
         if wait == WAIT_OBJECT_0 + 1 {
-            // SAFETY: cancel and settle our own pending write before return.
+            // SAFETY: cancel and settle the owned pending write before return.
             unsafe { CancelIoEx(self.handle.raw(), &overlapped) };
             unsafe { WaitForSingleObject(overlapped.hEvent, INFINITE) };
             return Err(io::Error::new(
@@ -625,7 +617,7 @@ impl PipeConnection {
             ));
         }
         if wait == WAIT_TIMEOUT {
-            // SAFETY: cancel and settle our own pending write before return.
+            // SAFETY: cancel and settle the owned pending write before return.
             unsafe { CancelIoEx(self.handle.raw(), &overlapped) };
             unsafe { WaitForSingleObject(overlapped.hEvent, INFINITE) };
             return Err(io::Error::new(
@@ -654,7 +646,7 @@ impl PipeConnection {
     fn wait_io(&self, overlapped: &OVERLAPPED, timeout: Option<Duration>) -> io::Result<u32> {
         let handles = [overlapped.hEvent, self.state.cancel.raw()];
         let ms = timeout.map_or(INFINITE, |t| t.as_millis().min(u32::MAX as u128) as u32);
-        // SAFETY: both handles are our own events; array is exactly two items.
+        // SAFETY: both handles are owned events and the array has exactly two items.
         let wait = unsafe { WaitForMultipleObjects(2, handles.as_ptr(), 0, ms) };
         if wait == WAIT_FAILED {
             Err(io::Error::last_os_error())

@@ -1,4 +1,4 @@
-//! Writable edge protocol (P5.3): validate and append publisher batches to the wal.
+//! Validates and appends writable edge publisher batches to the WAL.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -17,7 +17,7 @@ use super::manifest::Manifest;
 use super::query::encode_edge_with_meta;
 use super::refs::{Fragment, GzRef};
 
-pub const SCHEMA: &str = "publish/v1";
+pub const PUBLISH_SCHEMA_VERSION: &str = "publish/v1";
 pub const MAX_EDGES: usize = 10_000;
 pub const MAX_BATCH_BYTES: usize = 4 * 1024 * 1024;
 
@@ -61,7 +61,7 @@ pub struct Edge {
     source: Option<String>,
 }
 
-/// Map external publish kinds to CSR kind bytes (FR-006).
+/// Map external publish kinds to CSR kind bytes.
 pub fn map_publish_kind(kind: &str) -> Option<u8> {
     use super::csr::EdgeKind;
     match kind {
@@ -92,12 +92,9 @@ pub fn confidence_to_u8(conf: f64) -> Result<u8, PublishError> {
     Ok(confidence_to_u8_clamped(conf))
 }
 
-/// Single clamped quantization core shared with the extractor indexer.
-///
-/// Trusted extractor confidence may arrive out of range or NaN: finite values
-/// clamp to `[0.0, 1.0]` before `*255` rounding, and NaN maps to `0` through
-/// the float-to-`u8` cast. External publishes must use the checked
-/// [`confidence_to_u8`], which rejects NaN and out-of-range inputs.
+/// Single clamped quantization core shared with the extractor indexer. Trusted extractor confidence
+/// may arrive out of range or NaN: finite values clamp to `[0.0, 1.0]` before `*255` rounding, and
+/// NaN maps to `0` through the float-to-`u8` cast.
 pub(crate) fn confidence_to_u8_clamped(conf: f64) -> u8 {
     (conf.clamp(0.0, 1.0) * 255.0).round() as u8
 }
@@ -191,9 +188,18 @@ fn validate_edge(i: usize, e: &Edge, default_publisher: &str) -> Result<(), Publ
         err.field = Some(format!("edges[{i}].confidence"));
         err
     })?;
+    if !e.evidence_ref.starts_with("z://blob/") {
+        return Err(PublishError {
+            code: "E_SCHEMA",
+            message:
+                "evidence_ref must be z://blob/<sha>#B<start>-<end>; retired gz:// fails closed"
+                    .into(),
+            field: Some(format!("edges[{i}].evidence_ref")),
+        });
+    }
     GzRef::parse(&e.evidence_ref).map_err(|_| PublishError {
         code: "E_SCHEMA",
-        message: "evidence_ref must be gz://blob/<sha>#B<start>-<end>".into(),
+        message: "evidence_ref must be z://blob/<sha>#B<start>-<end>".into(),
         field: Some(format!("edges[{i}].evidence_ref")),
     })?;
     Ok(())
@@ -223,7 +229,7 @@ fn evidence_error(message: impl Into<String>) -> PublishError {
 
 fn parse_blob_span(gz: &GzRef) -> Result<(&str, u32, u32), PublishError> {
     let GzRef::Blob { hash, fragment } = gz else {
-        return Err(evidence_error("evidence_ref must be gz://blob/..."));
+        return Err(evidence_error("evidence_ref must be z://blob/..."));
     };
     let Fragment::Bytes { start, end } = fragment else {
         return Err(evidence_error("evidence_ref requires byte span fragment"));
@@ -485,6 +491,6 @@ pub fn wal_edge_count(wal_dir: &Path) -> Result<usize> {
     Ok(n)
 }
 
-pub fn schema_v1_json() -> &'static str {
-    include_str!("../../schemas/publish-v1.schema.json")
+pub fn publish_schema_json() -> &'static str {
+    include_str!("../../schemas/publish.schema.json")
 }

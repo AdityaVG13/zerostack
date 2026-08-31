@@ -1,8 +1,6 @@
 //! Representation resource vectors and exact model-facing decision surfaces.
-//!
-//! Selection preserves semantic and tokenizer identity. Pareto pruning,
-//! segmentation, overfetch accounting, and rendering never claim provider
-//! routing or semantic authority.
+//! Selection preserves semantic and tokenizer identity. Pareto pruning, segmentation,
+//! overfetch accounting, and rendering never claim provider routing or semantic authority.
 
 use std::collections::{BTreeMap, BTreeSet};
 

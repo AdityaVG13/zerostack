@@ -1,8 +1,5 @@
-//! GraphZero P0.2 Tier-A Extraction — tree-sitter pipeline.
-//!
-//! Extracts symbol nodes and confidence-marked edges with byte-exact
-//! evidence refs from Rust, TypeScript, and Python source blobs.
-//! Embarrassingly parallel, zero cross-blob state, deterministic.
+//! Tree-sitter extraction for Rust, TypeScript, and Python source blobs.
+//! Produces symbol nodes and confidence-marked edges with byte-exact evidence refs.
 
 pub mod confidence_band;
 pub mod detect;
@@ -43,7 +40,7 @@ impl fmt::Display for EdgeKind {
     }
 }
 
-/// Symbol node kinds (FR-004).
+/// Symbol node kinds.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum NodeKind {
     Function,
@@ -120,7 +117,7 @@ impl fmt::Display for EvidenceRefError {
 
 impl std::error::Error for EvidenceRefError {}
 
-/// Byte-span evidence reference (INV-001: every edge must have one).
+/// Byte-span evidence reference (every edge must have one).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct EvidenceRef {
     pub blob_hash: ContentHash,
@@ -145,10 +142,10 @@ impl EvidenceRef {
         }
     }
 
-    /// Render as gz://blob/HASH#BSTART-END (ref-contract.md section 4).
+    /// Render as z://blob/HASH#BSTART-END (ref-contract.md section 4).
     pub fn to_gz_ref(&self) -> String {
         format!(
-            "gz://blob/{}#B{}-{}",
+            "z://blob/{}#B{}-{}",
             self.blob_hash.to_hex(),
             self.start,
             self.end
@@ -161,7 +158,7 @@ impl EvidenceRef {
     }
 }
 
-/// A symbol node extracted from a definition (FR-004).
+/// A symbol node extracted from a definition.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SymbolNode {
     /// Unique index within this BlobFacts (0-based).
@@ -176,7 +173,7 @@ pub struct SymbolNode {
     pub block_end: u32,
 }
 
-/// Lightweight path node for import edges (ADR-006).
+/// Lightweight path node for import edges.
 /// Not a full SymbolNode because import targets have no content hash.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PathNode {
@@ -249,7 +246,7 @@ fn supersede_structural_edge(
     (superseded, source)
 }
 
-/// An extracted edge (FR-005 through FR-009, FR-010, FR-011).
+/// An extracted edge.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Edge {
     pub src: u32,
@@ -271,7 +268,7 @@ pub struct BlobFacts {
     pub edges: Vec<Edge>,
 }
 
-/// Supported languages for Tier-A extraction (FR-002, A-001).
+/// Supported languages for Tier-A extraction.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Language {
     Rust,

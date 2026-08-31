@@ -1,6 +1,5 @@
-//! Query paths: cold (spawn + mmap + lazy freshness check, FR-009) and warm
-//! (snapshot held open in-process, FR-008). Readers never lock; they mmap
-//! the published snapshot named by the manifest (FR-012).
+//! Cold queries spawn, map the published snapshot, and check freshness lazily.
+//! Warm queries keep that snapshot open in-process. Readers never lock.
 
 mod budget;
 mod capsule_json;

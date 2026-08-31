@@ -12,8 +12,7 @@ use zero_store::{
 };
 
 use crate::{
-    AppliedGcEvidence, GcProducerEpoch, GcReport, PROGRAM_ASSEMBLY_SCHEMA_VERSION,
-    ProgramDigest,
+    AppliedGcEvidence, GcProducerEpoch, GcReport, PROGRAM_ASSEMBLY_SCHEMA_VERSION, ProgramDigest,
 };
 
 const PRODUCERS: [(EngineIdentity, &str); 3] = [
@@ -134,21 +133,22 @@ fn verify_freed_bytes(
     deleted: &[String],
     planned_bytes: &BTreeMap<String, u64>,
 ) -> Result<u64, RealGcError> {
-    let verified_freed_bytes = deleted.iter().try_fold(0u64, |total, hash| {
-        let bytes = planned_bytes.get(hash).copied().ok_or_else(|| {
-            RealGcError::FreedBytesMismatch {
-                expected: 0,
-                observed: total,
+    let verified_freed_bytes =
+        deleted.iter().try_fold(0u64, |total, hash| {
+            let bytes = planned_bytes.get(hash).copied().ok_or_else(|| {
+                RealGcError::FreedBytesMismatch {
+                    expected: 0,
+                    observed: total,
+                }
+            })?;
+            if cas.contains(hash) {
+                return Err(RealGcError::FreedBytesMismatch {
+                    expected: bytes,
+                    observed: 0,
+                });
             }
+            Ok(total.saturating_add(bytes))
         })?;
-        if cas.contains(hash) {
-            return Err(RealGcError::FreedBytesMismatch {
-                expected: bytes,
-                observed: 0,
-            });
-        }
-        Ok(total.saturating_add(bytes))
-    })?;
     let expected_freed_bytes = planned_bytes
         .iter()
         .filter(|(hash, _)| deleted.iter().any(|gone| gone == *hash))
@@ -205,8 +205,7 @@ pub fn apply_real_reachability_gc(config: &RealGcConfig) -> Result<RealGcOutcome
     };
     let run_receipt = run_gc(&store_root, &apply_config)
         .map_err(|error| RealGcError::Store(format!("apply reachability GC: {error}")))?;
-    let verified_freed_bytes =
-        verify_freed_bytes(&cas, &run_receipt.deleted, &planned_bytes)?;
+    let verified_freed_bytes = verify_freed_bytes(&cas, &run_receipt.deleted, &planned_bytes)?;
 
     let applied = AppliedGcEvidence::new(
         run_receipt.clone(),

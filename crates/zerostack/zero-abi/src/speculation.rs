@@ -1,10 +1,6 @@
-//! Rooted contracts for zero-miss speculative execution.
-//!
-//! Zero never predicts whether a partially generated call will happen. It may
-//! prelaunch work only after the finalized source has compiled to an exact
-//! execution DAG proving that the call is unconditional. Admission chooses
-//! either ordinary execution or one speculative execution. After speculative
-//! admission, a missing claim is an invariant failure and is never retried.
+//! Rooted contracts for zero-miss speculative execution. Zero never predicts whether a partially
+//! generated call will happen. It may prelaunch work only after the finalized source has compiled
+//! to an exact execution DAG proving that the call is unconditional.
 
 use std::collections::BTreeSet;
 
@@ -13,7 +9,7 @@ use serde_json::Value;
 
 use crate::{ExecDag, ExecNode, ExecNodeKind, canonical_json, sha256_hex};
 
-pub const SPECULATION_CONTRACT: &str = "zerostack.speculation.claim.v1";
+pub const SPECULATION_CONTRACT: &str = "zerostack.speculation.claim";
 pub const DEFAULT_SPECULATION_LIMIT: u32 = 16;
 
 fn valid_root(root: &str) -> bool {

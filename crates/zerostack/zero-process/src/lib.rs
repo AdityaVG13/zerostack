@@ -1,7 +1,5 @@
-//! Hub-owned process identity and exact child-tree lifecycle primitives.
-//!
-//! Engines may expose thin compatibility adapters over this crate. They must
-//! not fork these process-lifecycle implementations locally.
+//! Hub-owned process identity, resource limits, and exact child-tree lifecycle.
+//! Domain engines do not own or duplicate these primitives.
 
 mod child;
 mod identity;

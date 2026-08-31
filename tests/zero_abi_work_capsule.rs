@@ -183,7 +183,7 @@ fn interrupt_scheduler_never_spends_native_reserve() {
                     || schedule.reserved_native_budget == reserve,
                 "must preserve reserve"
             );
-            // If we claim native escape, reserve should stay intact
+            // Native escape preserves the reserved native budget.
             if schedule.action == ScheduleAction::NativeEscape {
                 assert_eq!(schedule.reserved_native_budget, reserve);
             }

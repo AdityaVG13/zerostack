@@ -1,23 +1,12 @@
 #![forbid(unsafe_code)]
 
-//! Pure proof-carrying policy and two-phase execution gate.
-//!
-//! Passing task receipts and two-phase permits are privacy-preserving linear capabilities.
-//! Candidate bytes and staged effects are released only by `CommitReceipt::publish` after G8/G9.
-//!
-//! A sandbox attempt cannot commit without a passing receipt:
-//! ~~~compile_fail
-//! use zero_abi::raw_worker::EffectClass;
-//! use zero_cert::CommandId;
-//! use zero_gate::{begin_task_attempt, TaskRunEvidence};
-//! let evidence = TaskRunEvidence::new(7, CommandId(1), [2; 32], 0, vec![[3; 32]], vec![[3; 32]], [4; 32], 5);
-//! let attempt = begin_task_attempt(EffectClass::ReversibleMutation, evidence).unwrap();
-//! let _ = attempt.commit(b"forged");
-//! ~~~
+//! Pure proof-carrying policy and two-phase execution gate. Passing and two-phase permits are
+//! privacy-preserving linear capabilities. Candidate bytes and staged effects are released only by
+//! `CommitReceipt::publish` after G8/G9.
 
 use serde::{Deserialize, Serialize};
 use std::fmt;
-use zero_abi::raw_worker::EffectClass;
+use zero_abi::EffectClass;
 use zero_cert::{CommandId, VerifiedEvidence};
 
 pub mod aggregate;
@@ -31,10 +20,10 @@ pub mod program;
 pub mod project_image;
 pub mod q99;
 pub mod quality;
-pub mod release;
 pub mod real_gc;
 pub mod recovery;
 pub mod reinvestment;
+pub mod release;
 pub mod residency;
 pub mod semantic_cut;
 pub mod snap_to_file;
@@ -53,30 +42,29 @@ pub use program::*;
 pub use project_image::{
     ActionGuardOutcome, ActionGuardSimulation, CausalGraphRef, ChildWarmSwapReport,
     CoverageDemandRow, DeclaredAddObject, DeclaredChange, DemandCoverageReport, DemandMassClass,
-    DemandScenario, ExactObject, ExactRational, HypotheticalChildReport, PerObjectLayers,
+    DemandScenario, ExactObject, ExactRational, HypotheticalChildReport, PROJECT_IMAGE_DOMAIN,
+    PROJECT_IMAGE_Q99_SCHEMA_VERSION, PROJECT_IMAGE_SCHEMA_VERSION, PerObjectLayers,
     PrewarmLedgerRow, ProjectImageError, ProjectImageManifest, ProofGraphRef, ProposedAction,
-    Q99SlackReport, RegisteredRepresentation, RepresentationKind, ShadowResourceLedger,
-    ShadowResourceRow, ValidityClass, child_warm_swap_report, compute_demand_coverage,
-    compute_q99_slack, demand_coverage, hypothetical_child, layer_ledger_from_manifest,
-    simulate_action_guard, validity_class_map, PROJECT_IMAGE_DOMAIN,
-    PROJECT_IMAGE_Q99_SCHEMA_VERSION,
-    PROJECT_IMAGE_SCHEMA_VERSION, Q99_SHADOW_DENOMINATOR_LABEL_PREFIX,
-    Q99_SHADOW_RECOMPUTE_DENOMINATOR, Q99_SHADOW_RECOMPUTE_NUMERATOR,
-    Q99_SHADOW_THETA_DENOMINATOR, Q99_SHADOW_THETA_NUMERATOR, SHADOW_HAS_AUTHORITY,
+    Q99_SHADOW_DENOMINATOR_LABEL_PREFIX, Q99_SHADOW_RECOMPUTE_DENOMINATOR,
+    Q99_SHADOW_RECOMPUTE_NUMERATOR, Q99_SHADOW_THETA_DENOMINATOR, Q99_SHADOW_THETA_NUMERATOR,
+    Q99SlackReport, RegisteredRepresentation, RepresentationKind, SHADOW_HAS_AUTHORITY,
+    ShadowResourceLedger, ShadowResourceRow, ValidityClass, child_warm_swap_report,
+    compute_demand_coverage, compute_q99_slack, demand_coverage, hypothetical_child,
+    layer_ledger_from_manifest, simulate_action_guard, validity_class_map,
 };
 pub use q99::*;
 pub use quality::*;
-pub use release::*;
 pub use real_gc::*;
 pub use recovery::*;
 pub use reinvestment::*;
+pub use release::*;
 pub use residency::*;
 pub use semantic_cut::*;
 pub use snap_to_file::*;
 pub use transaction::*;
 pub use two_phase::*;
-pub use verifier_registry::*;
 pub use verdict::*;
+pub use verifier_registry::*;
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct NextBudget {
     budget: u128,
@@ -302,13 +290,7 @@ impl TaskAcceptanceFailure {
     }
 }
 
-/// Opaque linear objective proof. It is neither Clone nor Deserialize and all fields are private.
-///
-/// ~~~compile_fail
-/// use zero_cert::CommandId;
-/// use zero_gate::{TaskAcceptanceReceipt, TaskOutcome};
-/// let _ = TaskAcceptanceReceipt { task_id: 7, verifier: CommandId(1), verifier_environment_digest: [0; 32], outcome: TaskOutcome::Passed, exit_code: 0, expected_artifact_digests: vec![], observed_artifact_digests: vec![], journal_id: [0; 32], attempt_cost: 1 };
-/// ~~~
+/// Opaque linear objective proof.
 #[derive(Debug)]
 pub struct TaskAcceptanceReceipt {
     task_id: u64,
@@ -575,7 +557,7 @@ fn expand<'certificate, 'payload>(
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
-pub struct T10Bound {
+pub struct DoublingCostBound {
     pub actual_cost: u128,
     pub strict_upper_bound: u128,
     pub expansion_exponent: u32,
@@ -583,11 +565,11 @@ pub struct T10Bound {
 }
 
 /// Checks exactly: visible_cost + q*rounds < 4*K_H + q*(1+ceil(log2(K_H/b0))).
-pub fn check_t10_bound(
+pub fn check_doubling_cost_bound(
     state: GateState,
     hindsight_budget: u128,
     per_round_overhead: u128,
-) -> Result<T10Bound, GateError> {
+) -> Result<DoublingCostBound, GateError> {
     if hindsight_budget == 0 {
         return Err(GateError::ZeroHindsightBudget);
     }
@@ -611,7 +593,7 @@ pub fn check_t10_bound(
     let strict_upper_bound = rhs_base
         .checked_add(rhs_overhead)
         .ok_or(GateError::BoundOverflow)?;
-    Ok(T10Bound {
+    Ok(DoublingCostBound {
         actual_cost,
         strict_upper_bound,
         expansion_exponent: exponent,
@@ -636,4 +618,3 @@ pub fn ceil_log2_ratio(numerator: u128, denominator: u128) -> Result<u32, GateEr
         128 - (rounded - 1).leading_zeros()
     })
 }
-

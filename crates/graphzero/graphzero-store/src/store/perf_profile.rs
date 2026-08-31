@@ -1,15 +1,5 @@
-//! Structured `perf.profile.*` log contract (graphzero-jjvkx).
-//!
-//! Schema: `graphzero.perf.profile.v1`
-//! Events (skill INSTRUMENTATION names):
-//! - `perf.profile.run_start`
-//! - `perf.profile.sample_collected`
-//! - `perf.profile.span_summary`
-//! - `perf.profile.hypothesis_evaluated`
-//! - `perf.profile.run_complete`
-//!
-//! Default off. Enable with `GRAPHZERO_PERF_PROFILE=1` (or any non-empty value).
-//! Lines are eprinted as single-line JSON for skill tooling to ingest.
+//! Structured performance-profile event log, disabled by default.
+//! Events cover run boundaries, samples, span summaries, and evaluated hypotheses.
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -21,7 +11,7 @@ use serde_json::{Value, json};
 pub const PERF_PROFILE_ENV: &str = "GRAPHZERO_PERF_PROFILE";
 
 /// Schema id stamped on every event line.
-pub const PERF_PROFILE_SCHEMA: &str = "graphzero.perf.profile.v1";
+pub const PERF_PROFILE_SCHEMA: &str = "graphzero.perf.profile";
 
 static RUN_ID: AtomicU64 = AtomicU64::new(0);
 static RUN_ACTIVE: AtomicBool = AtomicBool::new(false);
@@ -61,7 +51,6 @@ fn emit(event: &str, fields: Value) {
 }
 
 /// Begin a profiled run. Emits `perf.profile.run_start`.
-///
 /// Idempotent while a run is already active (no second run_start).
 pub fn perf_profile_run_start(label: &str, meta: Value) {
     if !perf_profile_enabled() {

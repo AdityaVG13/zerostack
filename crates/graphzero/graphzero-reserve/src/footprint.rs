@@ -1,4 +1,4 @@
-//! P4.1-derived contract footprint for reservation overlap.
+//! Contract footprints used to detect reservation overlap.
 
 use std::collections::{HashMap, HashSet, VecDeque};
 
@@ -68,10 +68,7 @@ fn best_evidence_for_node(
 ) -> String {
     let mut best_ref = node_ref.to_string();
     for &(_src, edge_idx) in rev.callers(node_id) {
-        let ev: SpanEntry = evidence
-            .get(edge_idx as usize)
-            .copied()
-            .unwrap_or_default();
+        let ev: SpanEntry = evidence.get(edge_idx as usize).copied().unwrap_or_default();
         let hash_hex = blob_hash_hex(blob_hashes, ev.blob_idx);
         let span = blob_span_ref(&hash_hex, ev.start, ev.end);
         if !span.is_empty() {
@@ -96,7 +93,7 @@ fn contract_nodes_and_evidence(
         if sym.is_empty() {
             continue;
         }
-        let node_ref = format!("gz://node/{sym}");
+        let node_ref = format!("node/{sym}");
         contract_nodes.push(node_ref.clone());
         let best_ref = best_evidence_for_node(rev, evidence, blob_hashes, *id, &node_ref);
         if *hop > 0 || *id == target_id {
@@ -164,7 +161,7 @@ pub fn contract_footprint(snapshot: &Snapshot, intent: &str) -> Result<Footprint
             let (contract_nodes, evidence_refs) =
                 contract_nodes_and_evidence(&depth, table, rev, evidence, blob_hashes, target_id);
             Ok(FootprintSnapshot {
-                footprint_ref: format!("gz://footprint/{target}"),
+                footprint_ref: format!("footprint/{target}"),
                 target_symbol: target.clone(),
                 contract_nodes,
                 evidence_refs,
@@ -231,7 +228,7 @@ pub fn footprint_from_intent_ops(
         );
     }
     if footprint_ref.is_empty() {
-        footprint_ref = "gz://footprint/unknown".into();
+        footprint_ref = "footprint/unknown".into();
     }
     let mut contract_nodes: Vec<_> = nodes.into_iter().collect();
     contract_nodes.sort();

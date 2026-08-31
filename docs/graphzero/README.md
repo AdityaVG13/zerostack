@@ -1,16 +1,16 @@
 # GraphZero documentation
 
-GraphZero is the structure authority for the Zero family. Canonical documents describe syntax-aware search, graph relationships, freshness, coverage, impact, and evidence recovery.
+GraphZero is ZeroStack's structure domain library. It owns syntax-aware search, symbols, relationships, freshness, coverage, impact, and structural evidence. ZeroKernel exposes this authority through `z.find`.
+
+GraphZero is not a separate product and does not expose a model-facing tool catalog.
 
 | Document | Purpose |
 | --- | --- |
-| [Architecture](architecture.md) | Crate layers, snapshots, query routing, freshness, and evidence |
-| [Installation](install.md) | Build the standalone CLI and compose through ZeroKernel |
+| [Architecture](architecture.md) | Domain layers, snapshots, query routing, freshness, and evidence |
+| [Contributor setup](install.md) | Build GraphZero as part of ZeroStack |
 | [Benchmarks](benchmarks.md) | Current claim-eligible evidence and reproduction |
-| [Operation ABI](operation_abi.md) | Typed request, result, coverage, and error boundary |
-| [API errors](api_errors.md) | Stable public error classes |
+| [Query contract](query-contract.md) | Typed domain requests, results, coverage, and errors |
+| [API errors](api_errors.md) | Stable error classes |
 | [Threat model](threat_model.md) | Trust and no-claim boundaries |
 
-Contracts for GraphZero live in `contracts/` at the repository root, including `SurfaceMatrix.toml` and the ZeroRef fixtures. Release gates enforce the pinned digest in `contracts/approved_operation_abi_digest.txt`.
-
-Historical implementation campaigns remain in Git history. Public docs do not direct users to removed query packages, engine-local planners, or retired MCP catalogs.
+Normative contracts live under `contracts/`, including `SurfaceMatrix.toml` and the ZeroRef fixtures.

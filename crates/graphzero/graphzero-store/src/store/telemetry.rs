@@ -1,11 +1,5 @@
-//! Shareable usage-telemetry permission (default off) and local token counters.
-//!
-//! Local operational counters (CodeMode `telemetry_ref`, query `accounting`,
-//! daemon metrics, and `telemetry/local_counters.json`) remain local and are
-//! not shareable usage telemetry. When opted in, durable usage records live in
-//! [`super::usage_telemetry`] as closed `{execution_path, raw_tokens,
-//! spent_tokens}` JSONL only. GraphZero has no telemetry exporter: opting in
-//! or inspecting never uploads.
+//! Opt-in shareable usage telemetry and local token counters. Local operational counters and
+//! `telemetry/local_counters.json` never enter shareable telemetry.
 
 use std::fs;
 use std::io;
@@ -17,10 +11,10 @@ use serde::{Deserialize, Serialize};
 pub const TELEMETRY_ENV: &str = "GRAPHZERO_TELEMETRY";
 
 /// Closed schema id for the shareable dry-run payload.
-pub const TELEMETRY_SCHEMA: &str = "graphzero.telemetry.v1";
+pub const TELEMETRY_SCHEMA: &str = "graphzero.telemetry";
 
 /// Local-only counter file schema (never exported as shareable telemetry).
-pub const LOCAL_COUNTERS_SCHEMA: &str = "graphzero.local_counters.v1";
+pub const LOCAL_COUNTERS_SCHEMA: &str = "graphzero.local_counters";
 
 /// Status string proving no exporter / upload path exists.
 pub const TELEMETRY_EXPORTER: &str = "none";
@@ -60,7 +54,6 @@ pub fn resolve_telemetry(
 }
 
 /// Read `telemetry` from a GraphZero config JSON object (`.graphzero/config.json`).
-///
 /// Missing file, missing key, or non-boolean values yield `None` (defer to env).
 pub fn telemetry_from_config_value(value: &serde_json::Value) -> Option<bool> {
     match value.get(TELEMETRY_CONFIG_KEY) {
@@ -95,8 +88,8 @@ impl LocalTokenCounters {
     }
 }
 
-/// Legacy aggregate payload view (local counters only; not the durable usage
-/// JSONL schema). Kept for local dry-run helpers that still surface aggregates.
+/// Aggregate view of local counters for dry-run reports.
+/// This is distinct from the durable usage JSONL schema.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct TelemetryPayload {
     pub schema: &'static str,
@@ -184,9 +177,8 @@ pub fn inspect_telemetry(store_root: &Path, enabled: bool) -> io::Result<Telemet
 }
 
 /// Truthful exporter API: GraphZero has no shareable telemetry exporter.
-///
-/// Always returns `None`. Exists so callers and tests can assert that enabling
-/// permission never produces an outbound payload or network send.
+/// Always returns `None`. Exists so callers and tests can assert that
+/// enabling permission never produces an outbound payload or network send.
 pub fn export_shareable_telemetry(_inspection: &TelemetryInspection) -> Option<TelemetryPayload> {
     None
 }

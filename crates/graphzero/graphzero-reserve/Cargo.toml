@@ -3,6 +3,8 @@ name = "graphzero-reserve"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+publish = false
+description = "Intent reservation and conflict detection for GraphZero"
 autotests = false
 
 [dependencies]
@@ -13,11 +15,10 @@ sha2 = { workspace = true }
 graphzero-store = { workspace = true }
 
 [dev-dependencies]
-graphzero-test-support = { workspace = true }
+zerostack-test-support = { workspace = true, features = ["graph"] }
 criterion = { workspace = true }
 proptest = { workspace = true }
 tempfile = { workspace = true }
-graphzero-store = { workspace = true }
 
 [[bench]]
 name = "reserve_check"
@@ -28,14 +29,14 @@ workspace = true
 
 [[test]]
 name = "reserve_crash_boundary_reserve"
-path = "../../../tests/graphzero/reserve/crash_boundary_reserve.rs"
+path = "../../../tests/graphzero/reserve_crash_boundary_reserve.rs"
 
 [[test]]
 name = "reserve_reserve_contract"
-path = "../../../tests/graphzero/reserve/reserve_contract.rs"
+path = "../../../tests/graphzero/reserve_reserve_contract.rs"
 
 [[test]]
 name = "reserve_reserve_proptest"
-path = "../../../tests/graphzero/reserve/reserve_proptest.rs"
+path = "../../../tests/graphzero/reserve_reserve_proptest.rs"
 
 

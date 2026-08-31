@@ -1,14 +1,4 @@
-//! Minimal perfect hash via CHD (compress-hash-displace).
-//!
-//! ADR-002 supersession note: the PRD bound symbol lookup to the `mph`
-//! crate; that crates.io name is an unrelated emacs tool, which fires the
-//! ADR-002 reversal trigger. This in-crate CHD construction is deterministic,
-//! dependency-free, and serializes to two flat u32 arrays (`seeds`,
-//! `values`) that mmap zero-copy — a strictly better fit for GZSH v1.
-//!
-//! Lookup: `bucket = h(key, 0) % m`, `slot = h(key, seeds[bucket]) % n`,
-//! `id = values[slot]`. Caller verifies the key against the stored name to
-//! reject unknown keys (CHD maps unknown keys to arbitrary slots).
+//! Minimal perfect hash via deterministic CHD (compress-hash-displace).
 
 /// 64-bit FNV-1a with seed mixing; deterministic across platforms.
 #[inline]

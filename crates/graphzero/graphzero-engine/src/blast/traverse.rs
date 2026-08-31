@@ -101,7 +101,7 @@ pub fn blast_radius_with_depth(
     let target_ref = parsed
         .target_ref
         .clone()
-        .unwrap_or_else(|| format!("gz://node/{target}"));
+        .unwrap_or_else(|| format!("node/{target}"));
     let _ = graphzero_store::link_emitted_symbol_view(
         graphzero_store::EntityViewKind::Blast,
         &target,
@@ -151,8 +151,8 @@ pub fn blast_radius_with_depth(
             .then_with(|| a.symbol.cmp(&b.symbol))
             .then_with(|| a.hop.cmp(&b.hop))
     });
-    // Snap-to-file targets (bead 5htnw): every blast hit carries the canonical
-    // path target, intent metadata, and an inlined window for the top hits.
+    // Snap-to-file targets: every blast hit carries the canonical path
+    // target, intent metadata, and an inlined window for the top hits.
     for (rank, site) in break_sites.iter_mut().enumerate() {
         let Some(hit) = graphzero_store::file_target_for_evidence(
             snapshot,
@@ -265,7 +265,7 @@ fn enumerate_break_sites(
             let hash_hex = hex_blob(blob_hashes, ev.blob_idx)?;
             blob_span_ref(&hash_hex, ev.start, ev.end)
         } else {
-            format!("gz://node/{sym}")
+            format!("node/{sym}")
         };
         // Score is path-min along BFS provenance, not best incoming at this node.
         // `best_conf` / `best_edge_idx` only choose which evidence_ref to display.
@@ -792,7 +792,7 @@ fn collect_covering_tests(
             if path_hit || text_hit {
                 Some(CoveringTest {
                     path_hint: path.to_string(),
-                    evidence_ref: format!("gz://blob/{hash_hex}#B0-0"),
+                    evidence_ref: format!("z://blob/{hash_hex}#B0-0"),
                 })
             } else {
                 None

@@ -1,4 +1,4 @@
-//! Per-line content-hash anchors for stale edit rejection (fszero-08x9).
+//! Per-line content-hash anchors for stale edit rejection.
 
 use sha2::{Digest, Sha256};
 

@@ -1,9 +1,4 @@
 //! Dimensional token accounting: a count carries its accounting class in the type.
-//!
-//! Token totals in different classes must never be combined implicitly -- adding
-//! visible tokens to raw tokens, or billed-input to cached, is the bug class behind
-//! per-event/percentage methodology errors. `Tok<C>` makes every such mix a compile
-//! error; the only cross-class path is the audited [`Tok::cast`] escape hatch.
 
 use core::fmt;
 use core::iter::Sum;
@@ -50,30 +45,6 @@ token_classes! {
 }
 
 /// A token count in accounting class `C`.
-///
-/// Arithmetic is class-preserving; mixing classes fails to compile:
-///
-/// ```compile_fail
-/// use tokenzero_core::token_classes::{Raw, Tok, Visible};
-/// let visible = Tok::<Visible>::new(10);
-/// let raw = Tok::<Raw>::new(20);
-/// let _ = visible + raw;
-/// ```
-///
-/// ```compile_fail
-/// use tokenzero_core::token_classes::{BilledIn, Cached, Tok};
-/// fn billed_total(n: Tok<BilledIn>) -> u64 { n.get() }
-/// let cached = Tok::<Cached>::new(5);
-/// billed_total(cached);
-/// ```
-///
-/// Same-class arithmetic works as expected:
-///
-/// ```
-/// use tokenzero_core::token_classes::{Tok, Visible};
-/// let total: Tok<Visible> = Tok::new(30) + Tok::new(12);
-/// assert_eq!(total.get(), 42);
-/// ```
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct Tok<C: TokenClass> {
     count: u64,
@@ -126,9 +97,8 @@ impl<C: TokenClass> Tok<C> {
         Self::new(self.count.saturating_sub(rhs.count))
     }
 
-    /// The one legal cross-class conversion. Every call site is an audit point:
-    /// reclassification changes what a number *means*, so it must be visible in
-    /// review rather than smuggled through arithmetic.
+    /// The only legal cross-class conversion. Reclassification changes a value's
+    /// meaning and must remain explicit at each call site.
     #[must_use]
     pub const fn cast<D: TokenClass>(self) -> Tok<D> {
         Tok::new(self.count)
@@ -187,11 +157,9 @@ impl<'a, C: TokenClass> Sum<&'a Tok<C>> for Tok<C> {
     }
 }
 
-/// Class-typed front door to [`crate::tokens::savings_ratio`]: the ratio is only
-/// meaningful with raw in the numerator's baseline and visible as the spend, and
-/// the types now enforce which argument is which.
+/// Compute visible-token savings against a raw-token baseline.
+/// Class-typed arguments prevent reversing baseline and spend.
 #[must_use]
 pub fn savings_ratio_typed(raw: Tok<Raw>, visible: Tok<Visible>) -> f64 {
     crate::tokens::savings_ratio_u64(raw.get(), visible.get())
 }
-

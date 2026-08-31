@@ -1,25 +1,5 @@
-//! Periodic integrity scrub pass over CAS blobs (ZS-STORE-007).
-//!
-//! A scrub pass re-hashes every (idle) object and compares the digest against
-//! the identity recorded in its path. Verification is on-access only
-//! ([`crate::SharedCas::get_verified`]); this pass closes the gap for blobs
-//! that are never read again: corruption is found before reuse.
-//!
-//! Fail-loud law: a corrupt object is **quarantined** (moved to
-//! `<store_root>/gc/quarantine/`, never silently repaired and never deleted)
-//! and reported in the receipt with its identity. The receipt is persisted
-//! under `<store_root>/gc/scrubs/<producer>/<operation_id>.json` and its
-//! digest binds the findings.
-//!
-//! Residency model (L2/L3 design hook): quarantine keeps the body recoverable,
-//! so a scrub finding is an **L3 physical-residency loss with the L2 logical
-//! record retained** -- the causal identity is never re-derived. The hub
-//! composition layer (zsx-core) is where this receipt is wired into
-//! `LayerValidityLedger` (mark L3 loss / complete refetch); engines do not
-//! import each other, so zero-store itself carries no ledger dependency.
-//!
-//! Scheduling is the host's job (daemonless law): a session invokes
-//! [`run_scrub`] with an idle-age filter for background passes.
+//! Periodic integrity scrub pass over CAS blobs. A scrub pass re-hashes every (idle)
+//! object and compares the digest against the identity recorded in its path.
 
 use std::fs;
 use std::path::Path;
@@ -317,11 +297,9 @@ pub fn run_scrub(
     Ok(receipt)
 }
 
-/// Read a persisted scrub receipt back with canonical and structural
-/// validation, so a torn, non-canonical, or inconsistent receipt fails loudly
-/// instead of being trusted. (Authenticity anchoring beyond structure -- for
-/// example a registry of receipt digests -- is the caller's ledger, as with
-/// every other receipt in this crate.)
+/// Read a persisted scrub receipt with canonical and structural validation.
+/// Torn, non-canonical, or inconsistent receipts fail closed. Authenticity
+/// beyond structure remains the caller's responsibility.
 pub fn read_scrub_receipt(
     store_root: &Path,
     producer_id: &str,
@@ -350,6 +328,6 @@ pub fn read_scrub_receipt(
 fn now_unix_ns() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_nanos() as u64)
+        .map(|duration| u64::try_from(duration.as_nanos()).unwrap_or(u64::MAX))
         .unwrap_or(0)
 }

@@ -1,10 +1,4 @@
-//! SafeExpandHandle issuance and live revalidation acceptance tests
-//! (zerostack-qg2a).
-//!
-//! Every acceptance criterion maps to a fixture test here:
-//! forgery, cross-project, cross-tenant, stale epoch/index, altered
-//! scope/projection, renderer mismatch, missing/Unknown evidence, hidden
-//! retry after issue, trusted-route-only issuance, and read-only permit.
+//! SafeExpandHandle issuance and live revalidation acceptance tests.
 
 use serde_json::{Value, json};
 use zero_abi::{
@@ -13,9 +7,7 @@ use zero_abi::{
     Sha256Digest, sha256,
 };
 
-// ---------------------------------------------------------------------------
 // Fixture helpers
-// ---------------------------------------------------------------------------
 
 /// Deterministic nonzero digest distinct per seed.
 fn digest(seed: u8) -> Sha256Digest {
@@ -43,7 +35,7 @@ fn request() -> SafeExpandIssueRequest {
         protected_scope_root: digest(0x03),
         demand_plan_root: digest(0x04),
         index_root: digest(0x05),
-        index_version: "index-v7".to_owned(),
+        index_version: "index-current".to_owned(),
         renderer_contract: digest(0x06),
         tenant: "tenant-a".to_owned(),
         epoch: 7,
@@ -130,9 +122,7 @@ fn assert_unknown(outcome: &ExpandOutcome, reasons: &[&str]) {
     );
 }
 
-// ---------------------------------------------------------------------------
 // Trusted route: issuance and valid revalidation
-// ---------------------------------------------------------------------------
 
 #[test]
 fn canonical_valid_fixture_issues_only_through_trusted_route() {
@@ -217,9 +207,7 @@ fn handle_wire_round_trip_is_canonical_and_self_verifying() {
     }
 }
 
-// ---------------------------------------------------------------------------
 // Forgery and tampering
-// ---------------------------------------------------------------------------
 
 #[test]
 fn forged_handle_bound_field_tamper_fails() {
@@ -279,7 +267,7 @@ fn arbitrary_wire_blob_cannot_gain_authority() {
         "protected_scope_root": digest(0x03).to_hex(),
         "demand_plan_root": digest(0x04).to_hex(),
         "index_root": digest(0x05).to_hex(),
-        "index_version": "index-v7",
+        "index_version": "index-current",
         "renderer_contract": digest(0x06).to_hex(),
         "tenant": "tenant-a",
         "epoch": 7,
@@ -330,9 +318,7 @@ fn wrong_abi_version_is_typed_unsafe() {
     assert_unsafe(&issuer.revalidate(&wrong, &live()), &["wrong_abi_version"]);
 }
 
-// ---------------------------------------------------------------------------
 // Live revalidation: every binding is checked at use time
-// ---------------------------------------------------------------------------
 
 #[test]
 fn cross_project_handle_fails() {
@@ -414,9 +400,7 @@ fn request_and_demand_plan_mismatch_fail() {
     );
 }
 
-// ---------------------------------------------------------------------------
 // Completeness evidence: stale, mismatched, missing, or Unknown
-// ---------------------------------------------------------------------------
 
 #[test]
 fn missing_evidence_is_unknown_never_safe() {
@@ -515,9 +499,7 @@ fn unsafe_dominates_unknown() {
     assert_unsafe(&issuer.revalidate(&handle, &live), &["project_mismatch"]);
 }
 
-// ---------------------------------------------------------------------------
 // Hidden retry: pre-issue refusal and post-issue revocation
-// ---------------------------------------------------------------------------
 
 #[test]
 fn hidden_retry_after_issue_revokes_handle() {
@@ -552,9 +534,7 @@ fn issuance_refuses_hidden_retry_evidence() {
     );
 }
 
-// ---------------------------------------------------------------------------
 // Issuance fails closed on evidence and bindings
-// ---------------------------------------------------------------------------
 
 #[test]
 fn issuance_refuses_unsafe_evidence() {
@@ -642,9 +622,7 @@ fn issuance_refuses_invalid_bindings() {
     );
 }
 
-// ---------------------------------------------------------------------------
 // Read-only authority: no write or commit capability is encoded
-// ---------------------------------------------------------------------------
 
 #[test]
 fn permit_encodes_read_only_authority_only() {
@@ -668,7 +646,7 @@ fn permit_encodes_read_only_authority_only() {
     assert_eq!(permit.protected_scope_root(), digest(0x03));
     assert_eq!(permit.demand_plan_root(), digest(0x04));
     assert_eq!(permit.index_root(), digest(0x05));
-    assert_eq!(permit.index_version(), "index-v7");
+    assert_eq!(permit.index_version(), "index-current");
     assert_eq!(permit.renderer_contract(), digest(0x06));
     assert_eq!(permit.tenant(), "tenant-a");
     assert_eq!(permit.epoch(), 7);
@@ -706,7 +684,7 @@ fn permit_encodes_read_only_authority_only() {
     assert_eq!(object["protected_scope_root"], json!(digest(0x03).to_hex()));
     assert_eq!(object["demand_plan_root"], json!(digest(0x04).to_hex()));
     assert_eq!(object["index_root"], json!(digest(0x05).to_hex()));
-    assert_eq!(object["index_version"], json!("index-v7"));
+    assert_eq!(object["index_version"], json!("index-current"));
     assert_eq!(object["renderer_contract"], json!(digest(0x06).to_hex()));
     assert_eq!(object["tenant"], json!("tenant-a"));
     assert_eq!(object["epoch"], json!(7u64));

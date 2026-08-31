@@ -192,17 +192,7 @@ fn unknown_check_response(fp: &FootprintSnapshot) -> ReservationCheckResponse {
 }
 
 fn should_return_unknown(fp: &FootprintSnapshot) -> bool {
-    test_force_unknown_enabled() || fp.tier_a_percent < 100.0
-}
-
-#[cfg(test)]
-fn test_force_unknown_enabled() -> bool {
-    TEST_FORCE_UNKNOWN.load(std::sync::atomic::Ordering::SeqCst)
-}
-
-#[cfg(not(test))]
-fn test_force_unknown_enabled() -> bool {
-    false
+    fp.tier_a_percent < 100.0
 }
 
 fn evidence_ref_for_overlap(
@@ -511,10 +501,6 @@ pub fn list_active_reservations(
 ) -> Result<ReservationQueryResponse, ReserveError> {
     ReserveService::new(store_root, repo_root).query_active()
 }
-
-#[cfg(test)]
-pub(crate) static TEST_FORCE_UNKNOWN: std::sync::atomic::AtomicBool =
-    std::sync::atomic::AtomicBool::new(false);
 
 static NOTIFY_HOOK_FIRED: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 

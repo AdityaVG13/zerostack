@@ -3,9 +3,8 @@
 use std::path::Path;
 
 use super::super::delta_log::DeltaEntry;
-use serde_json; // for ExportArtifact meta (skeleton)
 
-/// P1.1 snap query route (ADR-011).
+/// Snapshot query route.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SnapRoute {
     Symbol,
@@ -32,7 +31,7 @@ pub struct RouteDiagnostics {
     pub symbol_route: Option<&'static str>,
     pub degraded_tiers: Vec<&'static str>,
     pub notes: Vec<String>,
-    /// Destinations dropped because the session already returned them (FR-007).
+    /// Destinations dropped because the session already returned them.
     pub removed_count: usize,
     /// Subset of removals that were identical-byte hits.
     pub byte_deduped: usize,
@@ -46,8 +45,7 @@ pub struct DestinationRef {
     pub evidence_ref: String,
     pub label: String,
     pub path: Option<String>,
-    /// Canonical snap-to-file target `<path>#L<start>-L<end>` (bead 5htnw),
-    /// same grammar as FSZero `docs/design/target-ref-grammar.md`.
+    /// Canonical FSZero target `<path>#L<start>-L<end>`.
     pub target: Option<String>,
     /// Intent metadata: which query produced this hit (`def`/`ref`/`blast`).
     pub kind: Option<String>,
@@ -62,7 +60,7 @@ pub struct CoverageCertificate {
     pub tier_a: f64,
     pub tier_b: f64,
     pub tier_c: f64,
-    /// P5.1 semantic index coverage percent (sidecar presence walking skeleton).
+    /// Semantic index coverage derived from sidecar presence.
     pub semantic_tier_percent: f64,
     pub freshness_verified: bool,
 }
@@ -101,7 +99,7 @@ pub struct PathRecord {
     pub path: String,
 }
 
-/// Local freshness telemetry for cold queries (P2.1 FR-007).
+/// Local freshness telemetry for cold queries.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct FreshnessDiagnostics {
     pub check_freshness: bool,
@@ -243,12 +241,12 @@ impl ExportFormat {
     }
 }
 
-/// Result of atomic export (path + meta for stdout/MCP; tiny overhead).
+/// Result of an atomic export.
 #[derive(Clone, Debug)]
 pub struct ExportArtifact {
     pub path: std::path::PathBuf,
     pub size_bytes: u64,
-    pub ref_str: String, // e.g. q:xxxx or gz://query/...
+    pub ref_str: String, // e.g. q:xxxx or query/xxxx
     pub format: ExportFormat,
 }
 

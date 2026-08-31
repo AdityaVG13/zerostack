@@ -1,8 +1,9 @@
 [package]
 autobenches = false
+autobins = false
 autotests = false
 name = "zero-gate"
-version = "0.1.0"
+version.workspace = true
 edition.workspace = true
 license.workspace = true
 description = "Proof-carrying deterministic decision gate for ZeroStack"
@@ -11,14 +12,11 @@ description = "Proof-carrying deterministic decision gate for ZeroStack"
 sha2 = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-zero-abi = { path = "../zero-abi" }
-zero-cert = { path = "../zero-cert" }
-zero-ledger = { path = "../zero-ledger" }
-zero-store = { path = "../zero-store" }
+zero-abi = { workspace = true }
+zero-cert = { workspace = true }
+zero-ledger = { workspace = true }
+zero-store = { workspace = true }
 
-[[bin]]
-name = "zerostack-program-evidence"
-path = "src/bin/program-evidence.rs"
 
 [[test]]
 name = "project_image_q99"

@@ -2,10 +2,10 @@ use std::path::PathBuf;
 
 use serde_json::json;
 use zero_abi::{
-    CapsuleEventRoots, CapsulePublication, EngineError, EngineErrorKind, KernelBudget,
-    KernelContext, KernelLedger, PARALLEL_TASK_LIMIT, StateEvidence, ZERO_KERNEL_PROTOCOL,
-    ZeroHandle, ZeroKernelEvent, ZeroKernelOutcome, ZeroKernelRequest, ZeroKernelResponse,
-    ZeroOperationStatus, ZeroOperationTrace,
+    AsgrepOptions, CapsuleEventRoots, CapsulePublication, EngineError, EngineErrorKind,
+    FileMetadata, KernelBudget, KernelContext, KernelLedger, PARALLEL_TASK_LIMIT, SharedCapability,
+    StateEvidence, ZERO_KERNEL_PROTOCOL, ZeroHandle, ZeroKernelEvent, ZeroKernelOutcome,
+    ZeroKernelRequest, ZeroKernelResponse, ZeroOperationStatus, ZeroOperationTrace,
 };
 
 fn budget() -> KernelBudget {
@@ -74,7 +74,7 @@ fn sample_event() -> ZeroKernelEvent {
         ledger: KernelLedger::default(),
         model_visible_digest: "visible".into(),
         turn: None,
-        capsule: None,
+        capsule: Some(sample_capsule_roots()),
     }
 }
 
@@ -122,7 +122,7 @@ fn handle_requires_canonical_blake3_shape() {
     assert_eq!(valid.digest(), "a".repeat(64));
 
     for invalid in [
-        "tz://blob/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "fz://blob/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         "z://blob/ABCDEF",
         "z://blob/short",
     ] {
@@ -244,16 +244,14 @@ fn capsule_event_roots_validate_every_coordinate() {
 }
 
 #[test]
-fn event_validates_optional_capsule_tuple() {
-    // Legacy events without capsule roots still validate and replay.
-    sample_event().validate().expect("legacy event valid");
+fn event_requires_and_validates_capsule_tuple() {
+    sample_event().validate().expect("event valid");
 
-    let mut with_capsule = sample_event();
-    with_capsule.capsule = Some(sample_capsule_roots());
-    with_capsule.validate().expect("new event valid");
+    let mut missing = serde_json::to_value(sample_event()).unwrap();
+    missing.as_object_mut().unwrap().remove("capsule");
+    assert!(serde_json::from_value::<ZeroKernelEvent>(missing).is_err());
 
     let mut broken = sample_event();
-    broken.capsule = Some(sample_capsule_roots());
     broken.capsule.as_mut().unwrap().occurrence_root = "x".repeat(63);
     assert!(broken.validate().is_err());
 }
@@ -286,4 +284,84 @@ fn response_requires_strictly_increasing_occurrence() {
 
     let decreasing = completed_response(vec![trace(1, 2, &root('a')), trace(2, 1, &root('a'))]);
     assert!(decreasing.validate().is_err());
+}
+
+#[test]
+fn file_metadata_timestamp_is_json_safe_and_exact() {
+    let modified_unix_ns = 1_780_000_000_000_000_123u128;
+    let metadata = FileMetadata {
+        mode: 0o644,
+        modified_unix_ns,
+        symlink_target: None,
+        symlink_target_is_dir: false,
+    };
+    let encoded = serde_json::to_value(&metadata).unwrap();
+    assert_eq!(
+        encoded["modifiedUnixNs"],
+        json!(modified_unix_ns.to_string())
+    );
+    let decoded: FileMetadata = serde_json::from_value(encoded).unwrap();
+    assert_eq!(decoded.modified_unix_ns, modified_unix_ns);
+}
+
+#[test]
+fn find_mode_wire_rejects_noncanonical_aliases() {
+    for mode in ["defs", "call-path"] {
+        let options: AsgrepOptions = serde_json::from_value(json!({"mode": mode})).unwrap();
+        assert_eq!(serde_json::to_value(options).unwrap()["mode"], json!(mode));
+    }
+    for alias in ["definition", "call_path"] {
+        assert!(
+            serde_json::from_value::<AsgrepOptions>(json!({"mode": alias})).is_err(),
+            "accepted retired mode alias: {alias}"
+        );
+    }
+}
+
+#[test]
+fn shared_capability_rejects_retired_field_aliases() {
+    let canonical = json!({
+        "schema": "zeroref-capability",
+        "hash": {"algorithm": "sha256"},
+        "shared_cas": {
+            "layout": "blobs/sha256/<hh>/<hash>",
+            "layout_version": 1
+        },
+        "fragments": {
+            "byte": "strict",
+            "line_start": "strict",
+            "line_end": "clamp_end"
+        }
+    });
+    serde_json::from_value::<SharedCapability>(canonical).expect("canonical capability");
+
+    let retired_hash = json!({
+        "schema": "zeroref-capability",
+        "hash": {"algo": "sha256"},
+        "shared_cas": {
+            "layout": "blobs/sha256/<hh>/<hash>",
+            "layout_version": 1
+        },
+        "fragments": {
+            "byte": "strict",
+            "line_start": "strict",
+            "line_end": "clamp_end"
+        }
+    });
+    assert!(serde_json::from_value::<SharedCapability>(retired_hash).is_err());
+
+    let retired_layout = json!({
+        "schema": "zeroref-capability",
+        "hash": {"algorithm": "sha256"},
+        "shared_cas": {
+            "layout": "blobs/sha256/<hh>/<hash>",
+            "version": 1
+        },
+        "fragments": {
+            "byte": "strict",
+            "line_start": "strict",
+            "line_end": "clamp_end"
+        }
+    });
+    assert!(serde_json::from_value::<SharedCapability>(retired_layout).is_err());
 }

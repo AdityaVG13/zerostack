@@ -6,7 +6,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
 
-use graphzero_test_support::git::git_commit_all;
+use zerostack_test_support::git_commit_all;
 
 pub struct Fixture {
     pub repo_root: PathBuf,
@@ -14,8 +14,8 @@ pub struct Fixture {
     pub _dir: tempfile::TempDir,
 }
 
-/// Documented multi-size sweep for skill scaling curves (graphzero-ijf2c /
-/// graphzero-hkexf). Criterion groups should `BenchmarkId::new("files", n)`.
+/// Multi-size sweep for scaling curves.
+/// Criterion groups use `BenchmarkId::new("files", n)`.
 pub const BENCH_FILE_SWEEP: &[usize] = &[1, 10, 50, 100, 500, 1000];
 
 /// Number of generated source files; override with GRAPHZERO_BENCH_FILES.

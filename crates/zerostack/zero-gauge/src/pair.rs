@@ -1,10 +1,6 @@
-//! Paired comparable observations for Wave 16 savings measurement.
-//!
-//! Measurement-only, off the authority path. A `PairedObservations` binds one
-//! native baseline observation and one model-visible Zero observation that
-//! share the same task identity and machine fingerprint. Only a comparable
-//! pair may enter savings computation. Incomparable pairs are rejected with a
-//! typed error; they never yield a savings report.
+//! Paired comparable observations for savings measurement. Measurement-only, off the authority
+//! path. A `PairedObservations` binds one native baseline observation and one model-visible Zero
+//! observation that share the same and machine fingerprint.
 
 #![forbid(unsafe_code)]
 
@@ -22,15 +18,6 @@ pub struct PairedObservations {
 
 impl PairedObservations {
     /// Bind a native baseline and a Zero observation into a comparable pair.
-    ///
-    /// Fails closed if:
-    /// - either observation fails validation;
-    /// - `native.kind` is not `NativeBaseline` or `zero.kind` is not `ZeroDirect`;
-    /// - task identity differs;
-    /// - machine fingerprint differs;
-    ///
-    /// The caller must supply observations that are already validated; this
-    /// method re-validates defensively so an invalid pair never yields a claim.
     pub fn new(native: Observation, zero: Observation) -> Result<Self, PairError> {
         native.validate().map_err(PairError::InvalidObservation)?;
         zero.validate().map_err(PairError::InvalidObservation)?;

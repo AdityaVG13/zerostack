@@ -1,9 +1,6 @@
-//! Provider-locked tokenizer identities and exact model-facing artifacts.
-//!
-//! TokenZero owns byte/token correspondence, token pages, and model capsules.
-//! The hub remains the authority for the provider lock (`zero-gauge`) and the
-//! ledger tokenizer gauge (`zero-ledger`). Every derived digest below includes
-//! the exact provider/model/tokenizer-revision identity.
+//! Provider-locked tokenizer identities and exact model-facing artifacts. TokenZero owns byte/token
+//! correspondence, token pages, and model capsules. The hub remains the authority for the provider
+//! lock (`zero-gauge`) and the ledger tokenizer gauge (`zero-ledger`).
 
 use serde::de::{self, Deserializer};
 use serde::{Deserialize, Serialize, Serializer};
@@ -115,12 +112,9 @@ impl fmt::Display for ModelArtifactError {
 
 impl Error for ModelArtifactError {}
 
-/// Exact provider/model/tokenizer-revision identity.
-///
-/// [`ExactTokenizerIdentity::new`] checks the supplied revision manifest bytes
-/// against the lowercase SHA-256 digest in the canonical zero-gauge lock. The
-/// identity digest also binds provider and model, so equal revision files under
-/// different model locks do not alias.
+/// Exact provider/model/tokenizer-revision identity. [`ExactTokenizerIdentity::new`] checks the
+/// supplied revision manifest bytes against the lowercase SHA-256 digest in the canonical
+/// zero-gauge lock.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ExactTokenizerIdentity {
     provider_lock: ProviderLock,
@@ -228,11 +222,8 @@ impl TokenPiece {
     }
 }
 
-/// Runtime authority for one exact provider-locked tokenizer revision.
-///
-/// `encode` supplies the provider token ids. `token_bytes` independently maps
-/// each id back to its canonical bytes. [`ExactTokenMap::tokenize`] refuses the
-/// result unless those bytes reconstruct the complete input exactly.
+/// Runtime authority for one exact provider-locked tokenizer revision. `encode` supplies the
+/// provider token ids. `token_bytes` independently maps each id back to its canonical bytes.
 pub trait ExactTokenizerAdapter {
     fn identity(&self) -> &ExactTokenizerIdentity;
     fn encode(&self, source: &[u8]) -> Result<Vec<u32>, String>;
@@ -240,9 +231,8 @@ pub trait ExactTokenizerAdapter {
 }
 
 /// Complete exact byte-to-token and token-to-byte correspondence.
-///
-/// Construction compares every decoded token byte against the original byte
-/// stream. No estimate or token-count-only adapter can construct this type.
+/// Construction compares every decoded token byte against the original
+/// byte stream. No estimate or token-count-only adapter can construct this type.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct ExactTokenMap {
     tokenizer_identity_digest: Sha256Digest,
@@ -541,9 +531,8 @@ impl TokenPage {
 /// versioning; the hub remains the authority for the receipt grammar).
 pub const MODEL_CAPSULE_RECEIPT_VERSION: u16 = 1;
 
-/// Logical slot a model capsule was formed for. Two capsules with the same
-/// causal key and different payload digests are a rewrite, never a silent
-/// replacement (append-never-rewrite, ZS-VIEW-002 acceptance).
+/// Logical slot for a model capsule. Two capsules with the same causal key and
+/// different payload digests are an invalid rewrite, never a silent replacement.
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct CapsuleCausalKey(String);
@@ -561,7 +550,7 @@ impl CapsuleCausalKey {
 
     /// Content-addressed slot: identical bytes always map to the same key.
     pub fn from_source_root(source_root: Sha256Digest) -> Self {
-        Self(format!("tz://blob/{}", source_root.to_hex()))
+        Self(format!("z://blob/{}", source_root.to_hex()))
     }
 
     pub fn as_str(&self) -> &str {
@@ -571,16 +560,15 @@ impl CapsuleCausalKey {
     /// Contract root binding this key: any key change produces a different
     /// root, so a receipt can never be relabeled across slots.
     pub fn contract_root(&self) -> Result<Sha256Digest, ModelArtifactError> {
-        let mut bytes = b"TOKENZERO-CAPSULE-CONTRACT-V1".to_vec();
+        let mut bytes = b"TOKENZERO-CAPSULE-CONTRACT".to_vec();
         put_string(&mut bytes, &self.0)?;
         Ok(digest(&bytes))
     }
 }
 
-/// Formation receipt binding a model capsule to its constructor, contract
-/// root, dependency roots, payload root, and epoch. Local mirror of the hub
-/// `PayloadFormationReceipt` vocabulary; the hub remains the grammar
-/// authority (ZS-VIEW-002: "hub only for receipt grammar").
+/// Formation receipt binding a model capsule to its constructor, contract root, dependency
+/// roots, payload root, and epoch. Local mirror of the hub `PayloadFormationReceipt`
+/// vocabulary; the hub remains the grammar authority ("hub only for receipt grammar").
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ModelCapsuleFormationReceipt {
@@ -645,10 +633,9 @@ impl ModelCapsuleFormationReceipt {
     }
 }
 
-/// Append-only policy for formed capsules (append-never-rewrite). Recording
-/// a capsule under a causal key already holding a different payload digest
-/// fails loud instead of silently replacing the earlier formation. Recording
-/// the identical capsule twice is idempotent.
+/// Append-only policy for formed capsules (append-never-rewrite). Recording a capsule
+/// under a causal key already holding a different payload digest fails loud instead of
+/// silently replacing the earlier formation. Recording the identical capsule twice is idempotent.
 #[derive(Clone, Debug, Default)]
 pub struct AppendOnlyCapsuleSlots {
     formed: Vec<(CapsuleCausalKey, Sha256Digest)>,
@@ -766,24 +753,20 @@ impl ModelCapsule {
                 limit: MAX_CAPSULE_RENDER_BYTES,
             });
         }
-        // Formation binding (ZS-VIEW-002): this core constructor forms a
-        // content-addressed slot and a receipt binding constructor identity,
-        // contract root (model profile + tokenizer + source), dependency
-        // roots (evidence refs and exact-map digests), payload root, and
-        // epoch. Epoch 0 is truthful here: each slot has exactly one
-        // formation, and any re-formation under the same key is rejected by
-        // the append-never-rewrite policy.
+        // Formation binding: this core constructor forms a content-addressed slot and a
+        // receipt binding constructor identity, contract root (model profile + tokenizer + source),
+        // dependency roots (evidence refs and exact-map digests), payload root, and epoch.
         let causal_key = CapsuleCausalKey::from_source_root(source_root_digest);
         let mut dependency_roots: Vec<String> = evidence_refs.clone();
         dependency_roots.extend(
             token_page_digests
                 .iter()
-                .map(|page| format!("tz://capsule-page/{}", page.to_hex())),
+                .map(|page| format!("capsule-page/{}", page.to_hex())),
         );
         dependency_roots.push(stable_prefix_map_digest.to_hex());
         dependency_roots.push(dynamic_tail_map_digest.to_hex());
         let receipt = ModelCapsuleFormationReceipt::new(
-            "tokenzero-core.model-capsule.v1",
+            "tokenzero-core.model-capsule",
             capsule_contract_root(source_root_digest, model_profile_digest, tokenizer.digest())?,
             dependency_roots,
             render_payload_digest(&stable_prefix, &dynamic_tail)?,
@@ -820,18 +803,9 @@ impl ModelCapsule {
         })
     }
 
-    /// Form a capsule in a production context without an exact tokenizer
-    /// adapter. The caller supplies the payload bytes and their digest
-    /// bindings (map digests and token counts); the canonical capsule digest
-    /// and the receipt binding are still computed and verified here. The
-    /// receipt must bind the actual payload: a relabeled payload under a
-    /// different receipt fails loud with [`ModelArtifactError::CapsuleReceiptPayloadMismatch`].
-    ///
-    /// Provenance note (ZS-VIEW-008): production engines do not link a
-    /// provider tokenizer yet, so the supplied map digests are byte-identity
-    /// digests and the token counts are approximate. The exact-tokenizer
-    /// binding arrives with provider-tokenizer wiring; this formation path
-    /// never claims one.
+    /// Form a capsule in a production context without an exact tokenizer adapter. The caller supplies
+    /// the payload bytes and their digest bindings (map digests and token counts); the canonical
+    /// capsule digest and the receipt binding are still computed and verified here.
     #[allow(clippy::too_many_arguments)]
     pub fn from_formed(
         causal_key: CapsuleCausalKey,
@@ -934,14 +908,14 @@ impl ModelCapsule {
     /// Canonical "no model profile bound" marker for formations outside a
     /// provider-model context (engine read path).
     pub fn absent_model_profile_digest() -> Sha256Digest {
-        digest(b"TOKENZERO-ABSENT-MODEL-PROFILE-V1")
+        digest(b"TOKENZERO-ABSENT-MODEL-PROFILE")
     }
 
     /// Canonical "no exact tokenizer bound" marker. Exact-tokenizer binding
-    /// arrives with provider-tokenizer wiring (ZS-VIEW-008); formations using
+    /// arrives with provider-tokenizer wiring; formations using
     /// this marker never claim an exact map.
     pub fn absent_tokenizer_digest() -> Sha256Digest {
-        digest(b"TOKENZERO-ABSENT-TOKENIZER-V1")
+        digest(b"TOKENZERO-ABSENT-TOKENIZER")
     }
 
     pub const fn source_root_digest(&self) -> Sha256Digest {
@@ -1050,7 +1024,7 @@ fn put_tokens(out: &mut Vec<u8>, tokens: &[TokenPiece]) -> Result<(), ModelArtif
 }
 
 fn tokenizer_identity_digest(lock: &ProviderLock) -> Result<Sha256Digest, ModelArtifactError> {
-    let mut bytes = b"TOKENZERO-EXACT-TOKENIZER-IDENTITY-V1".to_vec();
+    let mut bytes = b"TOKENZERO-EXACT-TOKENIZER-IDENTITY".to_vec();
     put_string(&mut bytes, &lock.provider)?;
     put_string(&mut bytes, &lock.model)?;
     bytes.extend_from_slice(
@@ -1066,7 +1040,7 @@ fn token_map_digest(
     source: Sha256Digest,
     tokens: &[TokenPiece],
 ) -> Result<Sha256Digest, ModelArtifactError> {
-    let mut bytes = b"TOKENZERO-EXACT-TOKEN-MAP-V1".to_vec();
+    let mut bytes = b"TOKENZERO-EXACT-TOKEN-MAP".to_vec();
     bytes.extend_from_slice(tokenizer.as_bytes());
     bytes.extend_from_slice(source.as_bytes());
     put_tokens(&mut bytes, tokens)?;
@@ -1084,7 +1058,7 @@ fn token_page_digest(
     byte_end: u64,
     tokens: &[TokenPiece],
 ) -> Result<Sha256Digest, ModelArtifactError> {
-    let mut bytes = b"TOKENZERO-TOKEN-PAGE-V1".to_vec();
+    let mut bytes = b"TOKENZERO-TOKEN-PAGE".to_vec();
     bytes.extend_from_slice(tokenizer.as_bytes());
     bytes.extend_from_slice(map.as_bytes());
     put_string(&mut bytes, source_anchor)?;
@@ -1112,7 +1086,7 @@ fn model_capsule_digest(
     causal_key: &CapsuleCausalKey,
     receipt: &ModelCapsuleFormationReceipt,
 ) -> Result<Sha256Digest, ModelArtifactError> {
-    let mut bytes = b"TOKENZERO-MODEL-CAPSULE-V1".to_vec();
+    let mut bytes = b"TOKENZERO-MODEL-CAPSULE".to_vec();
     bytes.extend_from_slice(source_root.as_bytes());
     bytes.extend_from_slice(model_profile.as_bytes());
     bytes.extend_from_slice(tokenizer.as_bytes());
@@ -1160,7 +1134,7 @@ fn capsule_contract_root(
     model_profile: Sha256Digest,
     tokenizer: Sha256Digest,
 ) -> Result<Sha256Digest, ModelArtifactError> {
-    let mut bytes = b"TOKENZERO-MODEL-CAPSULE-CONTRACT-V1".to_vec();
+    let mut bytes = b"TOKENZERO-MODEL-CAPSULE-CONTRACT".to_vec();
     bytes.extend_from_slice(source_root.as_bytes());
     bytes.extend_from_slice(model_profile.as_bytes());
     bytes.extend_from_slice(tokenizer.as_bytes());
@@ -1171,7 +1145,7 @@ fn capsule_contract_root(
 fn formation_receipt_digest(
     receipt: &ModelCapsuleFormationReceipt,
 ) -> Result<Sha256Digest, ModelArtifactError> {
-    let mut bytes = b"TOKENZERO-MODEL-CAPSULE-FORMATION-RECEIPT-V1".to_vec();
+    let mut bytes = b"TOKENZERO-MODEL-CAPSULE-FORMATION-RECEIPT".to_vec();
     bytes.extend_from_slice(&receipt.receipt_version.to_be_bytes());
     put_string(&mut bytes, &receipt.constructor_identity)?;
     bytes.extend_from_slice(receipt.contract_root.as_bytes());
@@ -1187,4 +1161,3 @@ fn formation_receipt_digest(
     bytes.extend_from_slice(&receipt.epoch.to_be_bytes());
     Ok(digest(&bytes))
 }
-

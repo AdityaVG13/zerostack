@@ -1,13 +1,7 @@
 'use strict';
 
-// ZeroKernel loader.
-//
-// Selects the native addon from, in order:
-//   1. an explicit ZERO_KERNEL_NATIVE_ADDON path, or
-//   2. a platform prebuild under bindings/node/prebuilds/<platform>-<arch>/zero_kernel_product.node
-//
-// It never spawns a process, never downloads, and never builds at runtime:
-// a missing binary fails with one precise install/build error.
+// Loads an explicit native addon or the matching local platform prebuild.
+// Missing binaries report build steps; runtime never builds or downloads.
 
 const fs = require('fs');
 const path = require('path');
@@ -41,7 +35,7 @@ function missingAddonError(candidate, dir) {
   const prebuildPath = path.join('bindings/node/prebuilds', dir, 'zero_kernel_product.node');
   return new Error(
     'ZeroKernel: native addon not found at ' + candidate + '.\n' +
-    'Install a prebuild, or build it yourself:\n' +
+    'Build and stage the addon from this source tree:\n' +
     '  cd <ZeroStack repo> && cargo build --profile release-node -p zero-kernel-node\n' +
     '  cp target/release-node/' + builtLibraryName() + ' ' + prebuildPath + '\n' +
     'or set ZERO_KERNEL_NATIVE_ADDON=/absolute/path/to/zero_kernel_product.node'

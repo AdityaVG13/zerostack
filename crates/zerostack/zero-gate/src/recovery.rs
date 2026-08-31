@@ -1,11 +1,5 @@
-//! Exact finite Dominance-Complete Recovery (DCR) controller.
-//!
-//! A recoverable object is not enough: before any irreversible effect, the hub
-//! computes `Complete`, `Conflict`, or `Unknown`. Only an opaque `Complete`
-//! certificate identifies a model-accessible effect that is baseline-dominant
-//! in every world of an exact or sound-overapproximated fiber. `Conflict`
-//! selects a sound evidence query using exact rational dynamic programming.
-//! `Unknown` requires the frozen raw-baseline route.
+//! Exact finite Dominance-Complete Recovery (DCR) controller. A recoverable object is not enough:
+//! before any irreversible effect, the hub computes `Complete`, `Conflict`, or `Unknown`.
 
 use std::{
     cmp::Ordering,
@@ -19,7 +13,7 @@ use serde_json::{Value, json};
 use zero_abi::{
     Sha256Digest, canonical_json,
     robust_snap::{
-        ProtectedEffectSet, ProtectedEffect, ROBUST_SNAP_MAX_ASSUMPTION_BYTES,
+        ProtectedEffect, ProtectedEffectSet, ROBUST_SNAP_MAX_ASSUMPTION_BYTES,
         ROBUST_SNAP_MAX_ASSUMPTIONS, ROBUST_SNAP_MAX_EFFECTS, ROBUST_SNAP_MAX_WORLDS,
         ROBUST_SNAP_MODEL_VERSION, WorldFiberDescriptor,
     },
@@ -165,7 +159,7 @@ impl DominanceRecoveryProblem {
         if self.schema_version != DCR_PROBLEM_SCHEMA_VERSION {
             return Err(dcr_error(
                 DcrFailureCode::SchemaVersionMismatch,
-                "DCR problem schema version is not v1",
+                "DCR problem schema is unsupported",
             ));
         }
         require_nonzero(
@@ -371,10 +365,7 @@ impl DominanceRecoveryProblem {
     }
 
     pub fn world_fiber_digest(&self) -> Result<Sha256Digest, DcrError> {
-        Ok(domain_digest(
-            FIBER_DOMAIN,
-            &canonical_bytes(&self.fiber)?,
-        ))
+        Ok(domain_digest(FIBER_DOMAIN, &canonical_bytes(&self.fiber)?))
     }
 
     pub fn accessible_effect_surface_digest(&self) -> Result<Sha256Digest, DcrError> {
@@ -521,7 +512,7 @@ impl ConflictHyperedge {
     }
 }
 
-/// External v1 certificate claim. This exactly matches the published schema;
+/// External certificate claim. This exactly matches the published schema;
 /// deserializing it does not create execution authority.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -592,7 +583,7 @@ impl DominanceCompleteRecoveryClaim {
         if self.schema_version != DCR_SCHEMA_VERSION {
             return Err(dcr_error(
                 DcrFailureCode::SchemaVersionMismatch,
-                "DCR certificate claim schema version is not v1",
+                "DCR certificate claim schema is unsupported",
             ));
         }
         if !matches!(
@@ -709,7 +700,7 @@ impl DominanceCompleteRecoveryCertificate {
         if self.contract_version != DCR_CONTRACT_VERSION {
             return Err(dcr_error(
                 DcrFailureCode::SchemaVersionMismatch,
-                "DCR certificate contract version is not v1",
+                "DCR certificate contract is unsupported",
             ));
         }
         self.problem.validate()?;
@@ -1625,4 +1616,3 @@ fn dcr_error(code: DcrFailureCode, detail: impl Into<String>) -> DcrError {
 fn json_error(detail: String) -> DcrError {
     dcr_error(DcrFailureCode::Json, detail)
 }
-

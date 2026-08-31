@@ -1,32 +1,5 @@
-//! Evidence-grade upgrade/revocation ledger (RACC row ZS-GRAPH-003).
-//!
-//! Grades are fixed at construction ([`GradeLedger::declare_grade`] is
-//! one-shot per artifact; [`crate::truth::TruthClass::may_upgrade_to_exact`]
-//! remains always false -- no proximity-driven promotion). A grade may only
-//! move upward through an explicit, evidence-carrying
-//! [`GradeUpgradeRecord`]; it may only move downward when the evidence that
-//! justified an upgrade is invalidated ([`GradeLedger::revoke_evidence`]) or
-//! when an upgrade record itself is revoked ([`GradeLedger::revoke_upgrade`]).
-//!
-//! Revocation is fail-closed and cascades:
-//! - every record whose evidence was invalidated is revoked, and the
-//!   artifact's grade rests at the pre-upgrade grade (`from`) -- never at the
-//!   upgraded grade;
-//! - dependents are found two ways: explicit
-//!   [`GradeEvidence::PriorUpgrade`] citations, and an implicit sound
-//!   over-approximation -- any later same-artifact record whose `from` is the
-//!   revoked record's `to` (invalidation may revoke too much, never too
-//!   little). Unrelated artifacts and evidence are never touched.
-//!
-//! All records are append-only: revoked records stay in the ledger with
-//! their revocation notes, and [`GradeLedger::history`] returns the full
-//! ordered event sequence per artifact.
-//!
-//! The wire types at the bottom of this module ([`GradeName`],
-//! [`HubGradeName`], [`hub_equivalent`], [`from`]) implement the
-//! composition-boundary mapping documented in ZeroStack
-//! `racc/v6/research/GRADE_NAME_MAPPING.md`. The mapping is enforced only
-//! here, at the boundary -- never inside either authority.
+//! Evidence-grade declaration and revocation ledger.
+//! Each artifact's grade is declared once; proximity never promotes it.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -34,22 +7,18 @@ use serde::{Deserialize, Serialize};
 
 use crate::graph::CoverageClass;
 
-/// GraphZero-side grade vocabulary at the composition boundary.
-///
-/// Matches the GraphZero column of `GRADE_NAME_MAPPING.md` (Complete,
-/// SoundOverapproximation, ObservedOnly, Unknown). `Unknown` is
-/// terminal-epistemic: nothing upgrades it.
+/// Evidence grade at GraphZero's hub composition boundary.
+/// `Unknown` is terminal in the evidence lattice.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum GradeName {
-    /// Full proof of the property (maps to V6 `Proved`).
+    /// Complete proof of the property.
     Complete,
-    /// Complete within a declared bound (maps to V6 `BoundedComplete` for
-    /// positive claims only -- never certifies absence).
+    /// Complete within a declared bound; never certifies absence.
     SoundOverapproximation,
-    /// Observed on the current state, no bound (maps to V6 `Observed`).
+    /// Observed in the current state without a completeness bound.
     ObservedOnly,
-    /// No usable evidence; terminal-epistemic (maps to V6 `Unknown`).
+    /// No usable evidence; terminal in the evidence lattice.
     Unknown,
 }
 
@@ -64,12 +33,9 @@ impl GradeName {
         }
     }
 
-    /// Whether an upgrade from `self` to `to` is a lattice-valid,
-    /// evidence-eligible edge.
-    ///
-    /// `Unknown` is terminal (never upgrades), `Complete` is top, and grades
-    /// never move downward through this API. Upgrading always still requires
-    /// evidence -- the lattice check alone never authorizes.
+    /// Whether an upgrade from `self` to `to` is a lattice-valid, evidence-eligible edge. `Unknown`
+    /// is terminal (never upgrades), `Complete` is top, and grades never move downward through this
+    /// API. Upgrading always still requires evidence -- the lattice check alone never authorizes.
     #[must_use]
     pub const fn may_upgrade_to(self, to: Self) -> bool {
         matches!(
@@ -252,11 +218,9 @@ pub enum GradeError {
     AlreadyRevoked(u64),
 }
 
-/// Append-only evidence-grade ledger for artifacts/claims.
-///
-/// Baseline grades are fixed at construction; upgrades and revocations are
-/// appended as ordered records and never deleted. History per artifact is
-/// queryable in ordinal order.
+/// Append-only evidence-grade ledger for artifacts/claims. Baseline grades are
+/// fixed at construction; upgrades and revocations are appended as ordered
+/// records and never deleted. History per artifact is queryable in ordinal order.
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct GradeLedger {
     baseline: BTreeMap<String, GradeName>,
@@ -297,10 +261,9 @@ impl GradeLedger {
         Some(effective)
     }
 
-    /// Upgrade an artifact's grade with evidence. The `from` grade is always
-    /// the artifact's current effective grade -- a caller can never claim a
-    /// false starting point. Rejected when evidence is empty, the lattice
-    /// edge is invalid, or a cited prior record is missing/revoked.
+    /// Upgrade an artifact's grade with evidence. The `from` grade is always the artifact's
+    /// current effective grade -- a caller can never claim a false starting point. Rejected when
+    /// evidence is empty, the lattice edge is invalid, or a cited prior record is missing/revoked.
     pub fn upgrade(
         &mut self,
         artifact: &str,
@@ -342,12 +305,6 @@ impl GradeLedger {
     }
 
     /// Revoke one upgrade record and everything whose grade depended on it.
-    ///
-    /// The cascade covers explicit [`GradeEvidence::PriorUpgrade`]
-    /// dependents (any artifact) and, fail-closed, any later same-artifact
-    /// record whose `from` was the revoked record's `to` (sound
-    /// over-approximation: revoke too much, never too little). Returns the
-    /// number of records revoked (the target plus dependents).
     pub fn revoke_upgrade(
         &mut self,
         record: u64,
@@ -409,10 +366,9 @@ impl GradeLedger {
         Ok(to_revoke.len() as u64)
     }
 
-    /// Revoke every non-revoked record whose evidence carries
-    /// `evidence_id` (e.g. the digest of a verification receipt whose cert
-    /// was invalidated by the invalidation machinery), cascading to
-    /// dependents. Returns the total number of records revoked.
+    /// Revoke every non-revoked record whose evidence carries `evidence_id` (e.g. the
+    /// digest of a verification receipt whose cert was invalidated by the invalidation
+    /// machinery), cascading to dependents. Returns the total number of records revoked.
     pub fn revoke_evidence(&mut self, evidence_id: &str, reason: &str, actor: &str) -> u64 {
         let targets: Vec<u64> = self
             .records
@@ -464,14 +420,7 @@ impl GradeLedger {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Cross-repo grade conformance wire (GRADE_NAME_MAPPING.md)
-// ---------------------------------------------------------------------------
-
-/// Hub-side V6 grade vocabulary (`CoverageGrade` in zero-abi identity.rs):
-/// `proved`, `bounded_complete`, `observed`, `unknown`. Defined here as the
-/// wire mirror so the shared conformance fixture can be validated from the
-/// GraphZero side.
+/// Wire mirror of the hub coverage-grade vocabulary for composition checks.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum HubGradeName {
@@ -509,7 +458,7 @@ pub struct GradeConformanceVector {
     pub id: String,
     /// GraphZero vocabulary.
     pub grade: GradeName,
-    /// Hub (V6) vocabulary.
+    /// Hub coverage grade.
     pub hub_grade: HubGradeName,
     pub claim_kind: ClaimKind,
     /// Whether the decision record declares the two grades equivalent for
@@ -517,23 +466,16 @@ pub struct GradeConformanceVector {
     pub equivalent: bool,
 }
 
-/// The shared conformance document (`grades-cross-repo/v1`): the same JSON
-/// shape the hub fixture in ZeroStack `conformance/models/` will carry.
+/// Serialized grade-conformance vectors shared with the hub.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct GradeConformanceFixture {
     pub schema: String,
     pub vectors: Vec<GradeConformanceVector>,
 }
 
-pub const GRADES_CROSS_REPO_SCHEMA: &str = "grades-cross-repo/v1";
+pub const GRADES_CROSS_REPO_SCHEMA: &str = "grades-cross-repo";
 
-/// GraphZero -> V6 mapping at the composition boundary (positive claims).
-///
-/// Lossless rows: `Complete -> Proved`, `ObservedOnly -> Observed`,
-/// `Unknown -> Unknown`. The documented divergence:
-/// `SoundOverapproximation` maps to `BoundedComplete` for POSITIVE claims
-/// only -- a sound over-approximation may over-report, so it never certifies
-/// absence (`None`).
+/// Maps GraphZero grades to equivalent hub grades for positive claims.
 #[must_use]
 pub fn hub_equivalent(grade: GradeName, claim_kind: ClaimKind) -> Option<HubGradeName> {
     match (grade, claim_kind) {
@@ -547,11 +489,7 @@ pub fn hub_equivalent(grade: GradeName, claim_kind: ClaimKind) -> Option<HubGrad
     }
 }
 
-/// V6 -> GraphZero mapping at the composition boundary. Fail-closed in both
-/// divergence directions: V6 `Observed` never promotes (only
-/// `ObservedOnly`), V6 `Unknown` is terminal, and a `BoundedComplete`
-/// absence certification is never fed back as `SoundOverapproximation`-
-/// certified (`None`).
+/// Maps hub coverage grades into GraphZero's evidence lattice.
 #[must_use]
 pub fn grade_from_hub(grade: HubGradeName, claim_kind: ClaimKind) -> Option<GradeName> {
     match (grade, claim_kind) {
@@ -564,7 +502,3 @@ pub fn grade_from_hub(grade: HubGradeName, claim_kind: ClaimKind) -> Option<Grad
         (HubGradeName::Unknown, _) => Some(GradeName::Unknown),
     }
 }
-
-#[cfg(test)]
-#[path = "../../../../tests/graphzero/unit/graphzero-core/grades_tests.rs"]
-mod tests;

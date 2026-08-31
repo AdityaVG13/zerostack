@@ -1,4 +1,4 @@
-//! FR-008 / NFR-001: warm query path benchmark. Budget: p99 < 1ms.
+//! Warm query-path latency benchmark.
 
 mod common;
 

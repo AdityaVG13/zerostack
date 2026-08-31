@@ -1,8 +1,6 @@
-//! GraphZero structural truth authority (RACC-R adoption).
-//!
-//! Owns source-anchored truth-classed claims, coverage/negative knowledge,
-//! and certified incremental invalidation. Composition with other engines is
-//! the ZeroStack hub's job -- this crate never imports peer engines.
+//! GraphZero structural truth authority (RACC-R adoption). Owns source-anchored truth-classed
+//! claims, coverage/negative knowledge, and certified incremental invalidation. Composition with
+//! other engines is the ZeroStack hub's job -- this crate never imports peer engines.
 #![forbid(unsafe_code)]
 
 pub mod adapters;

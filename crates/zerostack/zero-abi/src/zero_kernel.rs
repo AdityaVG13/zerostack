@@ -1,8 +1,6 @@
-//! Canonical, versionless ZeroKernel contracts.
-//!
-//! ZeroKernel is the only model-facing execution surface. Domain engines
-//! implement the typed traits in this module; models never select an engine,
-//! transport, operation registry, or ref owner.
+//! Canonical, versionless ZeroKernel contracts. ZeroKernel is the only
+//! model-facing execution surface. Domain engines implement the typed traits in
+//! this module; models never select an engine, transport, operation registry, or ref owner.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -36,8 +34,29 @@ fn is_false(value: &bool) -> bool {
     !*value
 }
 
-/// Authoritative JSON Schema for the one model-facing tool response. Harnesses
-/// publish this schema directly instead of learning result shapes from values.
+mod decimal_u128 {
+    use serde::de::Error as _;
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    pub fn serialize<S>(value: &u128, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(&value.to_string())
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<u128, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        String::deserialize(deserializer)?
+            .parse::<u128>()
+            .map_err(D::Error::custom)
+    }
+}
+
+/// Authoritative JSON Schema for the one model-facing tool response. Embedding
+/// carriers publish this schema directly instead of inferring shapes from values.
 pub fn zero_kernel_response_schema() -> Value {
     serde_json::json!({
         "type": "object",
@@ -390,11 +409,9 @@ pub struct ZeroKernelResponse {
     pub ledger: KernelLedger,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub turn: Option<TurnRecord>,
-    /// Exact committed effect receipts bound to the same transaction as `state`.
-    /// Present only on the atomic host effect path; when present it must agree
-    /// with `state.after` and the event's effect_root, and no placeholder is
-    /// allowed. Validation/cancellation failures leave `state` unchanged and
-    /// `effects` empty.
+    /// Exact committed effect receipts bound to the same transaction as `state`. Present only on the
+    /// atomic host effect path; when present it must agree with `state.after` and the event's
+    /// effect_root, and no placeholder is allowed.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub effects: Vec<FileEffectReceipt>,
 }
@@ -480,9 +497,7 @@ impl ZeroKernelResponse {
     }
 }
 
-/// Capsule coordinates published with every new kernel event. Optional on the
-/// wire only so legacy persisted events replay unchanged; new event writes
-/// always carry them.
+/// Capsule coordinates published with every kernel event.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct CapsuleEventRoots {
@@ -543,8 +558,18 @@ pub struct ZeroKernelEvent {
     pub model_visible_digest: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub turn: Option<TurnRecord>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        deserialize_with = "deserialize_capsule",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub capsule: Option<CapsuleEventRoots>,
+}
+
+fn deserialize_capsule<'de, D>(deserializer: D) -> Result<Option<CapsuleEventRoots>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    CapsuleEventRoots::deserialize(deserializer).map(Some)
 }
 
 impl ZeroKernelEvent {
@@ -569,9 +594,11 @@ impl ZeroKernelEvent {
         if let Some(turn) = &self.turn {
             turn.validate().map_err(ZeroKernelError::InvalidEvent)?;
         }
-        if let Some(capsule) = &self.capsule {
-            capsule.validate().map_err(ZeroKernelError::InvalidEvent)?;
-        }
+        let capsule = self
+            .capsule
+            .as_ref()
+            .ok_or_else(|| ZeroKernelError::InvalidEvent("capsule roots must be present".into()))?;
+        capsule.validate().map_err(ZeroKernelError::InvalidEvent)?;
         Ok(())
     }
 }
@@ -684,8 +711,15 @@ pub struct FileSnapshot {
     pub path: PathBuf,
     pub content: ZeroHandle,
     pub byte_len: u64,
+    #[serde(with = "decimal_u128")]
     pub modified_unix_ns: u128,
     pub mode: u32,
+    /// Original unfollowed directory entry when `path` names a symlink.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub symlink_target: Option<PathBuf>,
+    /// Needed to recreate Windows directory symlinks during rollback.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub symlink_target_is_dir: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub inline_utf8: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -696,7 +730,12 @@ pub struct FileSnapshot {
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct FileMetadata {
     pub mode: u32,
+    #[serde(with = "decimal_u128")]
     pub modified_unix_ns: u128,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub symlink_target: Option<PathBuf>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub symlink_target_is_dir: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -845,12 +884,12 @@ pub enum AsgrepMode {
     Regex,
     Imports,
     Symbols,
-    #[serde(alias = "defs")]
+    #[serde(rename = "defs")]
     Definition,
     References,
     Callers,
     Callees,
-    #[serde(alias = "call-path")]
+    #[serde(rename = "call-path")]
     CallPath,
     Semantic,
 }
@@ -954,13 +993,9 @@ pub trait StructuralEngine: Send + Sync {
         invocation: &EngineInvocation,
         query: StructuralQuery,
     ) -> Result<StructuralResult, EngineError>;
-    /// Task-lens inspection over a rooted capsule/snapshot (Wave16 hub ABI).
-    ///
-    /// The default is fail-closed: engines that have not implemented lens
-    /// support return [`EngineErrorKind::Unsupported`], which hosts must map
-    /// to an `Unknown` verdict — never `Safe`. Implementing engines return a
-    /// [`TaskLensResult`] whose verdict is governed by the task-lens Safe
-    /// laws and whose `reasons` are normalized.
+    /// lens inspection over a rooted capsule or snapshot. The default is fail-closed: engines that have
+    /// not implemented lens support return [`EngineErrorKind::Unsupported`], which hosts must map to an
+    /// `Unknown` verdict — never `Safe`.
     fn task_lens(
         &self,
         _invocation: &EngineInvocation,
@@ -1114,7 +1149,7 @@ pub trait TokenEngine: Send + Sync {
     ) -> Result<Vec<u8>, EngineError>;
 }
 /// Stable schema identifier for provider-neutral usage observations.
-pub const PROVIDER_USAGE_SCHEMA: &str = "zerostack.provider_usage.v1";
+pub const PROVIDER_USAGE_SCHEMA: &str = "zerostack.provider_usage";
 
 /// How a provider usage coordinate was obtained.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]

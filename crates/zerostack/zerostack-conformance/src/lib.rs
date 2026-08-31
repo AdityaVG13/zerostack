@@ -1,20 +1,14 @@
-//! Shared conformance suite for ZeroStack-family engines.
-//!
-//! Each module contains contract tests written against a zero-abi trait.
-//! Engines prove conformance by calling the `run_all` function with their
-//! concrete implementation. A failure here means the engine violates the
-//! shared contract — not an implementation detail.
-//!
-//! Adding a new engine = writing one thin runner per trait it implements.
-//! Finding a contract bug = one fix here, all engines get it.
+//! Shared conformance suite for ZeroStack-family engines. Each module contains contract tests
+//! written against a zero-abi trait. Engines prove conformance by calling the `run_all` function
+//! with their concrete implementation.
 
 #![forbid(unsafe_code)]
 
 pub mod file_engine;
 pub mod token_engine;
 
-use zero_abi::{CancellationProbe, EngineCallContext, EngineInvocation, KernelBudget};
 use std::path::{Path, PathBuf};
+use zero_abi::{CancellationProbe, EngineCallContext, EngineInvocation, KernelBudget};
 
 /// Noop cancellation probe shared by all conformance runners.
 #[derive(Debug)]
@@ -89,8 +83,7 @@ impl SuiteResult {
     pub fn is_clean(&self) -> bool {
         self.failed.is_empty()
     }
-    /// Panic with a detailed report if any checks failed.
-    /// This is the "fail red" moment: it names every violated contract.
+    /// Panic with a report naming every violated contract.
     pub fn require_clean(&self, suite_name: &str) {
         if !self.failed.is_empty() {
             let details: Vec<String> = self
@@ -98,11 +91,7 @@ impl SuiteResult {
                 .iter()
                 .map(|(name, detail)| format!("  FAILED {}: {}", name, detail))
                 .collect();
-            panic!(
-                "{} suite violations:\n{}",
-                suite_name,
-                details.join("\n")
-            );
+            panic!("{} suite violations:\n{}", suite_name, details.join("\n"));
         }
     }
 }

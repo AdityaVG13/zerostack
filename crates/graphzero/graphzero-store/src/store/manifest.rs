@@ -1,13 +1,5 @@
-//! Snapshot manifest with atomic publish: write `.manifest.tmp`, fdatasync,
-//! rename to `.manifest`, fsync the directory (FR-013, FR-014, FR-015).
-//!
-//! Layout (little-endian):
-//! ```text
-//! magic "GZMF" (4) | version u8 | snapshot_count u32 | entries | crc u32
-//! ```
-//! SnapshotEntry: snapshot_id u64, timestamp i64, global_hash u64,
-//! shard_count u32, shard hashes u64 each, segment_count u32, segment ids
-//! u64 each, entry_crc u32.
+//! Snapshot manifest with atomic publish: write `.manifest.tmp`, fdatasync, rename to `.manifest`,
+//! fsync the directory.
 
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
@@ -174,10 +166,9 @@ impl Manifest {
         Ok(Self { snapshots })
     }
 
-    /// Load the manifest, recovering from interrupted publishes (FR-015):
-    /// a leftover `.manifest.tmp` is ignored (readers never mutate; the
-    /// next writer truncates it); a corrupt `.manifest` falls back to
-    /// `.manifest.prev`.
+    /// Load the manifest after interrupted publication.
+    /// Readers ignore `.manifest.tmp`, and writers truncate it.
+    /// A corrupt `.manifest` falls back to `.manifest.prev`.
     pub fn load(store_root: &Path) -> Result<Self> {
         let path = manifest_path(store_root);
         match fs::read(&path) {

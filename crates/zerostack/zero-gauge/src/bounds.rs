@@ -1,23 +1,4 @@
-//! ZS-CACHE-009: exact zero-failure Q99 statistical certification bounds.
-//!
-//! Implements Proposition 11.1 (Zero-Failure Q99 Sample Bound): with `q` the
-//! certified success rate and `alpha` the one-sided error, `n` zero-failure
-//! independent trials certify the bound exactly when `q^n <= alpha`
-//! (equivalently `n >= ln(alpha) / ln(q)`). Known constants: `q = 99/100`,
-//! `alpha = 1/20` requires 299 trials; `q = 999/1000` requires 2995.
-//!
-//! Exactness. The decision `q^n <= alpha` is made with fixed-point integer
-//! arithmetic at 64 fractional bits, powered by binary exponentiation over
-//! interval bounds widened to u256 via the shared `solver::widen_mul`:
-//! no floats, no rounding, no guessed splits. When the lower and upper
-//! interval bounds straddle the target, the checker refuses with
-//! `AmbiguousBound` (fail closed) instead of guessing.
-//!
-//! Refusals. The bound applies only to zero-failure independent cold traces:
-//! any observed failure, a warm/dependent trace (temporal dependence,
-//! project clustering, sliding-window reuse), or a cluster design effect
-//! that leaves no effective trials is a typed refusal -- the checker never
-//! extrapolates.
+//! Exact zero-failure Q99 statistical certification bounds.
 
 use std::cmp::Ordering;
 use std::error::Error;
@@ -28,7 +9,7 @@ use crate::solver::{Rational, widen_mul};
 /// Fixed-point scale `2^64`: values in `[0, 1]` are stored as `value * SCALE`.
 const SCALE: u128 = 1 << 64;
 
-/// CACHE-009 checker input.
+/// Input for a zero-failure success-rate bound.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ZeroFailureBoundInput {
     /// Observed independent trials `n`.
@@ -47,7 +28,7 @@ pub struct ZeroFailureBoundInput {
     pub design_effect: Option<Rational>,
 }
 
-/// CACHE-009 certification: the zero-failure success-rate bound holds at the
+/// Certifies that the zero-failure success-rate bound holds at the
 /// requested confidence.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ZeroFailureBoundCertification {
@@ -123,12 +104,9 @@ impl fmt::Display for BoundsError {
 
 impl Error for BoundsError {}
 
-/// Certifies the zero-failure bound for the measured trial count.
-///
-/// Refuses (never extrapolates) when: `n == 0`, failures were observed,
-/// `q` or `alpha` lies outside `(0, 1)`, the trace is dependent (warm), the
-/// design effect is `< 1`, the effective trial count is zero, or
-/// `q^effective_n > alpha`.
+/// Certifies the zero-failure bound for the measured trial count. Refuses (never extrapolates) when:
+/// `n == 0`, failures were observed, `q` or `alpha` lies outside `(0, 1)`, the trace is dependent
+/// (warm), the design effect is `< 1`, the effective trial count is zero, or `q^effective_n > alpha`.
 pub fn zero_failure_bound_certifies(
     input: &ZeroFailureBoundInput,
 ) -> Result<ZeroFailureBoundCertification, BoundsError> {
@@ -170,12 +148,9 @@ pub fn zero_failure_bound_certifies(
     })
 }
 
-/// The smallest `n >= 1` with `q^n <= alpha`: the exact sample-size
-/// precondition of Proposition 11.1 (`299` for `q = 99/100`, `alpha = 1/20`;
-/// `2995` for `q = 999/1000`).
-///
-/// Deterministic binary search over the monotone power sequence. Refuses
-/// with [`BoundsError::AmbiguousBound`] if any step cannot be decided.
+/// The smallest `n >= 1` with `q^n <= alpha`: the exact sample-size precondition of Proposition
+/// 11.1 (`299` for `q = 99/100`, `alpha = 1/20`; `2995` for `q = 999/1000`). Deterministic binary
+/// search over the monotone power sequence.
 pub fn min_zero_failure_trials(q: Rational, alpha: Rational) -> Result<u64, BoundsError> {
     validate_unit_open(q, "success_target")?;
     validate_unit_open(alpha, "alpha")?;
@@ -202,13 +177,7 @@ pub fn min_zero_failure_trials(q: Rational, alpha: Rational) -> Result<u64, Boun
     Ok(hi)
 }
 
-/// Exact fixed-point decision of `q^n <= alpha` for rationals `q, alpha` in
-/// `(0, 1)` and `n >= 1`.
-///
-/// Sound interval arithmetic: `[lo, hi]` always brackets `q^n * SCALE`.
-/// `Ok(true)` when the upper bound is still at or below the target, `Ok(false)`
-/// when the lower bound is already above the target, and
-/// `Err(AmbiguousBound)` when the bounds straddle the target.
+/// Exact fixed-point decision of `q^n <= alpha` for rationals `q, alpha` in `(0, 1)` and `n >= 1`.
 fn power_le(q: Rational, n: u64, alpha: Rational) -> Result<bool, BoundsError> {
     if n == 0 {
         // q^0 = 1 > alpha (alpha < 1): the claim is certainly false.

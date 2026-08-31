@@ -1,31 +1,6 @@
-//! Live rust-analyzer LSP subprocess resolver.
-//!
-//! This is the concrete TypedResolver behind the typed-fusion install point: it
-//! spawns a real rust-analyzer process, opens the blob as a text document, and
-//! asks textDocument/definition for every referenced identifier. Each definition
-//! that lands on a symbol becomes a call-accurate resolution, which is how
-//! higher-order arguments, trait-qualified calls, and cross-module references --
-//! all invisible to a call_expression-only structural pass -- reach the graph.
-//!
-//! Everything is best effort: a missing binary, a slow index, or a malformed
-//! reply yields fewer resolutions, never an error in the extraction path.
-//!
-//! # Concurrency contract (graphzero-bw60k)
-//!
-//! One [`RustAnalyzerLspResolver`] owns **one** rust-analyzer child process
-//! behind a [`std::sync::Mutex`]. `resolve` holds that mutex for the whole blob
-//! (open_document + up to [`MAX_DEFINITION_REQUESTS`] definition RPCs).
-//!
-//! The store index path runs extract under rayon (`par_iter` over file chunks).
-//! When this resolver is installed process-wide, every parallel blob serializes
-//! on the same mutex: rayon fan-out collapses to single-threaded LSP I/O. That
-//! is intentional while typed fusion is opt-in / test-only.
-//!
-//! **Do not** promote typed fusion to default index without one of:
-//! 1. a multi-client LSP pool (N children, shard by path hash), or
-//! 2. disabling rayon extract when a serial resolver is installed.
-//!
-//! Structural-only extract (no installed resolver) stays fully parallel.
+//! Live rust-analyzer LSP subprocess resolver. This is the concrete TypedResolver behind the
+//! typed-fusion install point: it spawns a real rust-analyzer process, opens the blob as a text
+//! document, and asks textDocument/definition for every referenced identifier.
 
 use std::collections::BTreeSet;
 use std::io::{BufRead, BufReader, Write};
@@ -62,7 +37,6 @@ pub struct RustAnalyzerLspResolver {
 
 impl RustAnalyzerLspResolver {
     /// Spawn rust-analyzer over the project root and complete the LSP handshake.
-    ///
     /// GRAPHZERO_RUST_ANALYZER_BIN overrides the executable.
     pub fn spawn(root: impl AsRef<Path>) -> Result<Self, String> {
         let root = root
@@ -171,9 +145,7 @@ impl Drop for RustAnalyzerLspResolver {
     }
 }
 
-// ---------------------------------------------------------------------------
 // Identifier scanning
-// ---------------------------------------------------------------------------
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct IdentifierRef {
@@ -182,10 +154,6 @@ struct IdentifierRef {
 }
 
 /// Byte spans of identifiers that could name a symbol defined elsewhere.
-///
-/// Line comments, block comments, string literals, attributes, keywords, and the
-/// names in definition positions (fn NAME, struct NAME, ...) are all skipped:
-/// asking rust-analyzer to resolve those spends a round trip to learn nothing.
 fn identifier_references(text: &str) -> Vec<IdentifierRef> {
     let bytes = text.as_bytes();
     let mut refs = Vec::new();
@@ -259,9 +227,7 @@ fn identifier_references(text: &str) -> Vec<IdentifierRef> {
     refs
 }
 
-// ---------------------------------------------------------------------------
 // Position mapping
-// ---------------------------------------------------------------------------
 
 struct LineIndex<'a> {
     text: &'a str,
@@ -328,9 +294,7 @@ fn uri_to_path(uri: &str) -> Option<PathBuf> {
     Some(PathBuf::from(String::from_utf8(decoded).ok()?))
 }
 
-// ---------------------------------------------------------------------------
 // Definition responses
-// ---------------------------------------------------------------------------
 
 #[derive(Debug, PartialEq, Eq)]
 struct DefinitionTarget {
@@ -409,9 +373,7 @@ fn symbol_name_at(target: &DefinitionTarget) -> Option<String> {
     (end > start).then(|| text[start..end].to_string())
 }
 
-// ---------------------------------------------------------------------------
 // Minimal LSP client over stdio
-// ---------------------------------------------------------------------------
 
 /// Owner session and worker generation bound to every rust-analyzer child.
 /// Every spawn captures these exact values and every teardown signal must
@@ -578,10 +540,9 @@ impl LspClient {
     fn shutdown(&mut self) {
         let _ = self.request("shutdown", Value::Null, Duration::from_secs(5));
         let _ = self.send(&json!({"jsonrpc": "2.0", "method": "exit"}));
-        // Verified teardown through the owned, unreaped child handle: the
-        // owner/generation binding and start identity are checked inside the
-        // signal action itself; the handle pins the pid until reap, so no
-        // unrelated replacement process can be signaled.
+        // Verified teardown through the owned, unreaped child handle: the owner/generation
+        // binding and start identity are checked inside the signal action itself; the
+        // handle pins the pid until reap, so no unrelated replacement process can be signaled.
         let _ = self.child.signal_graceful_for(
             RA_OWNER_SESSION,
             RA_WORKER_GENERATION,

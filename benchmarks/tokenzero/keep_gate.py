@@ -1,32 +1,27 @@
 #!/usr/bin/env python3
-# cargo bench invocation (keep-gate path):
-#   rch exec -- env CARGO_TARGET_DIR=/tmp/rch_target_tokenzero cargo bench -p tokenzero-core --bench hotpaths --profile release-perf
-"""TokenZero performance keep-gate: quarantine, MT8 attribution, same-minute window."""
+"""TokenZero performance keep gate with quarantine, self-time, and run-window checks."""
 
 from __future__ import annotations
 
 import argparse
 import json
 import math
-import os
-import shutil
 import statistics
-import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-SCHEMA = "tokenzero.bench-history/v1"
+SCHEMA = "tokenzero.bench-history"
 
-# Single source for persist + keep compare bands (CC2-R5 / F-010).
-KEEP_GATE_GEOMEAN_PCT = 3.0  # also persist-gate; stricter than skill geomean 5% (KNOWN, do not widen)
+# Comparison thresholds for current and historical measurements.
+KEEP_GATE_GEOMEAN_PCT = 3.0
 KEEP_GATE_PASS_PCT = 5.0
 CV_PCT_QUARANTINE = 5.0
 ALLOWED_LABELS = frozenset({"fixture-seed", "live"})
-# Pattern 160: a keep names a frame ≥0.1% exclusive self-time. Below is the micro-lever trap.
-MT8_MIN_SELF_PCT = 0.1
-# KEEP-GATE-RULES rule 2: focused + broad share git SHA, machine, same minute.
+# Minimum exclusive self-time for a named keep candidate.
+MIN_SELF_TIME_PCT = 0.1
+# Focused and broad runs must share the Git SHA, machine, and minute.
 SAME_RUN_WINDOW_SECONDS = 60
 
 _NOT_SELF_TIME_KINDS = frozenset(
@@ -50,19 +45,10 @@ _SHA_KEYS = ("git_sha", "commit", "git_commit", "sha")
 _MACHINE_KEYS = ("machine", "hostname", "host", "host_id")
 _TS_KEYS = ("timestamp", "recorded_at", "generated_at", "generated_at_utc", "ts")
 
-ELF_MAGIC = b"\x7fELF"
-MACHO_MAGICS = {
-    b"\xfe\xed\xfa\xce",  # MH_MAGIC
-    b"\xfe\xed\xfa\xcf",  # MH_MAGIC_64
-    b"\xce\xfa\xed\xfe",  # MH_CIGAM
-    b"\xcf\xfa\xed\xfe",  # MH_CIGAM_64
-    b"\xca\xfe\xba\xbe",  # FAT_MAGIC / CAFEBABE
-    b"\xbe\xba\xfe\xca",  # FAT_CIGAM
-}
 
 
 class KeepGateError(ValueError):
-    """Fail-closed keep-gate / persist / resolve error."""
+    """Fail-closed keep-gate and persist error."""
 
 
 def cv_pct(samples: list[float]) -> float:
@@ -221,12 +207,12 @@ def extract_self_time_frames(
     document: dict[str, Any], *, role: str = "current"
 ) -> list[dict[str, Any]]:
     """Parse named exclusive self-time frames. Fail-closed; never invent flamegraphs."""
-    raw = document.get("attribution", document.get("mt8"))
+    raw = document.get("attribution")
     frames_raw = document.get("profile_frames")
 
     if raw is None and frames_raw is None:
         raise KeepGateError(
-            f"refuse: {role} keep requires a named frame ≥{MT8_MIN_SELF_PCT}% "
+            f"refuse: {role} keep requires a named frame ≥{MIN_SELF_TIME_PCT}% "
             "self-time; attribution missing (micro-lever trap; do not invent flamegraphs)"
         )
 
@@ -313,20 +299,20 @@ def extract_self_time_frames(
     return frames
 
 
-def qualifying_mt8_frame(frames: list[dict[str, Any]]) -> dict[str, Any] | None:
+def qualifying_attribution_frame(frames: list[dict[str, Any]]) -> dict[str, Any] | None:
     """Highest named frame at or above the 0.1% self-time keep floor, or None."""
-    eligible = [frame for frame in frames if frame["self_pct"] >= MT8_MIN_SELF_PCT]
+    eligible = [frame for frame in frames if frame["self_pct"] >= MIN_SELF_TIME_PCT]
     if not eligible:
         return None
     return max(eligible, key=lambda frame: (float(frame["self_pct"]), str(frame["name"])))
 
 
-def require_mt8_keep_attribution(
+def require_keep_attribution(
     document: dict[str, Any], *, role: str = "current"
 ) -> tuple[bool, list[str]]:
     """Keep requires a named frame ≥0.1% self-time. Missing attribution refuses."""
     frames = extract_self_time_frames(document, role=role)
-    frame = qualifying_mt8_frame(frames)
+    frame = qualifying_attribution_frame(frames)
     if frame is None:
         max_pct = max(float(item["self_pct"]) for item in frames)
         listed = ", ".join(
@@ -334,11 +320,11 @@ def require_mt8_keep_attribution(
         )
         return False, [
             f"FAIL keep ineligible: micro-lever trap; no named frame "
-            f"≥{MT8_MIN_SELF_PCT}% self-time (max={max_pct}%); {listed}"
+            f"≥{MIN_SELF_TIME_PCT}% self-time (max={max_pct}%); {listed}"
         ]
     return True, [
-        f"PASS mt8 attribution: {frame['name']} {frame['self_pct']}% "
-        f"self-time (≥{MT8_MIN_SELF_PCT}%)"
+        f"PASS self-time attribution: {frame['name']} {frame['self_pct']}% "
+        f"self-time (≥{MIN_SELF_TIME_PCT}%)"
     ]
 
 
@@ -467,12 +453,7 @@ def compare_to_history(
     pass_band_pct: float = KEEP_GATE_PASS_PCT,
     peer: dict[str, Any] | None = None,
 ) -> tuple[bool, list[str]]:
-    """Keep-gate: quarantine, then geomean / per-pass bands. Lower latency wins.
-
-    label=live is a keep candidate: it needs a named ≥0.1% self-time frame and a
-    focused+broad peer in the same run window. fixture-seed is a ratchet seed,
-    not a keep, so MT8 / window are not invented for it.
-    """
+    """Compare a candidate against history, self-time evidence, and a same-run peer."""
     messages: list[str] = []
     passed = True
     current_groups = current.get("groups")
@@ -509,7 +490,7 @@ def compare_to_history(
         )
 
     if current_label == "live":
-        att_ok, att_msgs = require_mt8_keep_attribution(current, role="current")
+        att_ok, att_msgs = require_keep_attribution(current, role="current")
         messages.extend(att_msgs)
         if not att_ok:
             passed = False
@@ -591,12 +572,7 @@ def persist_gate(
     geomean_band_pct: float = KEEP_GATE_GEOMEAN_PCT,
     peer: dict[str, Any] | None = None,
 ) -> tuple[bool, list[str]]:
-    """Persist uses the same 3% geomean constant as keep-gate (not 25%).
-
-    cv_pct > 5 is ineligible for persist (fail closed). A noisy group is not
-    dropped so the remaining geomean can green a keep. Live persist is a keep
-    and needs MT8 attribution plus a same-minute peer gate.
-    """
+    """Apply the keep gate with the persistence geomean band."""
     return compare_to_history(
         current,
         history,
@@ -615,7 +591,7 @@ def evaluate_keep(
 ) -> tuple[bool, list[str]]:
     """Keep candidate: named ≥0.1% self-time frame + both gates same run window."""
     messages: list[str] = []
-    att_ok, att_msgs = require_mt8_keep_attribution(focused, role="focused")
+    att_ok, att_msgs = require_keep_attribution(focused, role="focused")
     messages.extend(att_msgs)
     win_ok, win_msgs = require_same_run_window(focused, broad)
     messages.extend(win_msgs)
@@ -635,83 +611,6 @@ def evaluate_keep(
     return passed, messages
 
 
-def detect_binary_os(path: Path) -> str:
-    """Return 'linux' or 'darwin' from magic bytes (not file(1) alone)."""
-    try:
-        with path.open("rb") as handle:
-            magic = handle.read(4)
-    except OSError as error:
-        raise KeepGateError(f"cannot read binary {path}: {error}") from error
-    if len(magic) < 4:
-        raise KeepGateError(f"{path}: file too short to detect binary OS")
-    if magic == ELF_MAGIC:
-        return "linux"
-    if magic in MACHO_MAGICS:
-        return "darwin"
-    raise KeepGateError(
-        f"{path}: unrecognized binary magic {magic.hex()} "
-        "(expected ELF or Mach-O)"
-    )
-
-
-def host_os() -> str:
-    """Host OS from rustc -vV host when available, else sys.platform."""
-    try:
-        completed = subprocess.run(
-            ["rustc", "-vV"],
-            check=False,
-            capture_output=True,
-            text=True,
-        )
-    except OSError:
-        completed = None
-    if completed is not None and completed.returncode == 0:
-        for line in completed.stdout.splitlines():
-            if line.startswith("host:"):
-                triple = line.split(":", 1)[1].strip()
-                if "apple-darwin" in triple or triple.endswith("-darwin"):
-                    return "darwin"
-                if "linux" in triple:
-                    return "linux"
-                break
-    platform = sys.platform
-    if platform == "darwin":
-        return "darwin"
-    if platform.startswith("linux"):
-        return "linux"
-    raise KeepGateError(f"unsupported host platform {platform!r}")
-
-
-def resolve_tokenzero_bin() -> Path:
-    """TOKENZERO_BIN wins; otherwise host install / PATH. Refuse OS mismatch."""
-    env = os.environ.get("TOKENZERO_BIN")
-    if env:
-        path = Path(env).expanduser()
-    else:
-        candidates = [
-            Path.home() / ".tokenzero" / "bin" / "tokenzero",
-        ]
-        which = shutil.which("tokenzero")
-        if which:
-            candidates.append(Path(which))
-        path = next((c for c in candidates if c.is_file()), None)
-        if path is None:
-            raise KeepGateError(
-                "TOKENZERO_BIN unset and no host tokenzero binary found "
-                "(tried ~/.tokenzero/bin/tokenzero and PATH)"
-            )
-
-    if not path.is_file():
-        raise KeepGateError(f"tokenzero binary not found: {path}")
-
-    binary = detect_binary_os(path)
-    host = host_os()
-    if binary != host:
-        raise KeepGateError(
-            f"refuse: host OS is {host} but binary {path} is {binary} "
-            "(ELF vs Mach-O mixup; set TOKENZERO_BIN to a host-native binary)"
-        )
-    return path
 
 
 def _optional_history(path: Path | None) -> dict[str, Any] | None:
@@ -761,10 +660,6 @@ def _cmd_keep(args: argparse.Namespace) -> int:
     return 0 if passed else 1
 
 
-def _cmd_resolve_bin(_args: argparse.Namespace) -> int:
-    path = resolve_tokenzero_bin()
-    print(path)
-    return 0
 
 
 def _cmd_dry_run(_args: argparse.Namespace) -> int:
@@ -773,7 +668,7 @@ def _cmd_dry_run(_args: argparse.Namespace) -> int:
     print(f"KEEP_GATE_GEOMEAN_PCT={KEEP_GATE_GEOMEAN_PCT}")
     print(f"KEEP_GATE_PASS_PCT={KEEP_GATE_PASS_PCT}")
     print(f"CV_PCT_QUARANTINE={CV_PCT_QUARANTINE}")
-    print(f"MT8_MIN_SELF_PCT={MT8_MIN_SELF_PCT}")
+    print(f"MIN_SELF_TIME_PCT={MIN_SELF_TIME_PCT}")
     print(f"SAME_RUN_WINDOW_SECONDS={SAME_RUN_WINDOW_SECONDS}")
     print(f"ALLOWED_LABELS={sorted(ALLOWED_LABELS)}")
     print(
@@ -787,9 +682,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="keep_gate.py",
         description=(
-            "TokenZero keep-gate: cv_pct quarantine, MT8 ≥0.1% self-time, "
-            "focused+broad same-minute window, .bench-history ratchet, "
-            "host-native binary resolve."
+            "TokenZero keep gate: cv_pct quarantine, ≥0.1% self-time, "
+            "focused+broad same-minute window, .bench-history ratchet, and "
+            "host-native binary resolution."
         ),
     )
     parser.add_argument(
@@ -843,11 +738,6 @@ def build_parser() -> argparse.ArgumentParser:
     keep.add_argument("--history-broad", type=Path, default=None)
     keep.set_defaults(func=_cmd_keep)
 
-    resolve = sub.add_parser(
-        "resolve-bin",
-        help="print host-native TOKENZERO_BIN path or refuse OS mismatch",
-    )
-    resolve.set_defaults(func=_cmd_resolve_bin)
 
     return parser
 

@@ -22,7 +22,7 @@ pub fn kind_name(kind: u8) -> &'static str {
     }
 }
 
-pub fn query_capsule_to_json(capsule: &QueryCapsule, store_root: Option<&Path>) -> String {
+pub(crate) fn full_query_capsule_json(capsule: &QueryCapsule) -> String {
     let coverage_capsule = Capsule {
         query: capsule.query.clone(),
         snapshot_id: capsule.snapshot_id,
@@ -36,7 +36,7 @@ pub fn query_capsule_to_json(capsule: &QueryCapsule, store_root: Option<&Path>) 
             ..Default::default()
         },
     };
-    let full = render_query_capsule_json(
+    render_query_capsule_json(
         &capsule.query,
         capsule.budget,
         capsule.route,
@@ -47,7 +47,11 @@ pub fn query_capsule_to_json(capsule: &QueryCapsule, store_root: Option<&Path>) 
         0,
         None,
         capsule.coverage.semantic_tier_percent,
-    );
+    )
+}
+
+pub fn query_capsule_to_json(capsule: &QueryCapsule, store_root: Option<&Path>) -> String {
+    let full = full_query_capsule_json(capsule);
     apply_query_capsule_budget(capsule, &full, store_root)
 }
 
@@ -65,7 +69,7 @@ fn apply_query_capsule_budget(
     }
     let id = spill_id_for_json(store_root, full_json);
     if capsule.budget <= 5 {
-        let query_ref = format!("gz://query/{id}");
+        let query_ref = format!("query/{id}");
         let reference = if capsule.budget > 1 && capsule.destinations.len() == 1 {
             &capsule.destinations[0].destination_ref
         } else {
@@ -100,7 +104,7 @@ fn apply_query_capsule_budget(
         &capsule.diagnostics,
         true,
         omitted,
-        Some(format!("gz://query/{id}")),
+        Some(format!("query/{id}")),
         capsule.coverage.semantic_tier_percent,
     );
     let visible_tokens = tokens_for_str(&out);
@@ -127,7 +131,7 @@ pub fn render_query_capsule_json(
             dests.push(',');
         }
         let path_json = serde_json::to_string(&d.path).unwrap_or_else(|_| "null".into());
-        // Snap-to-file target fields (bead 5htnw): canonical path#Lx-Ly plus
+        // Snap-to-file target fields: canonical path#Lx-Ly plus
         // intent metadata and, for top hits, the inlined content window.
         let mut extra = String::new();
         if let Some(target) = &d.target {
@@ -324,7 +328,7 @@ pub fn capsule_to_json(capsule: &Capsule, store_root: Option<&Path>) -> String {
         );
     }
     let tail = format!(
-        ",\"truncated\":{{\"omitted_matches\":{omitted_matches},\"full_ref\":\"gz://query/{id}\"}}}}"
+        ",\"truncated\":{{\"omitted_matches\":{omitted_matches},\"full_ref\":\"query/{id}\"}}}}"
     );
     out.truncate(out.len() - 1);
     out.push_str(&tail);
@@ -338,44 +342,4 @@ pub fn capsule_to_json(capsule: &Capsule, store_root: Option<&Path>) -> String {
         &id,
     );
     out
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::store::query::FreshnessDiagnostics;
-
-    #[test]
-    fn query_capsule_ledger_never_reports_used_over_requested() {
-        let coverage = Capsule {
-            query: "very long query that exceeds a tiny budget".into(),
-            snapshot_id: 7,
-            matches: Vec::new(),
-            tier_a: 1.0,
-            tier_b: 0.0,
-            tier_c: 0.0,
-            budget: 1,
-            freshness: FreshnessDiagnostics {
-                check_freshness: true,
-                ..Default::default()
-            },
-        };
-        let rendered = render_query_capsule_json(
-            &coverage.query,
-            1,
-            SnapRoute::Symbol,
-            &[],
-            &coverage,
-            &RouteDiagnostics::default(),
-            true,
-            0,
-            None,
-            0.0,
-        );
-        let value: serde_json::Value = serde_json::from_str(&rendered).unwrap();
-        let ledger = &value["ledger"];
-        assert!(ledger["used_budget"].as_u64() <= ledger["requested_budget"].as_u64());
-        assert_eq!(ledger["budget_exceeded"], true);
-        assert!(ledger["actual_used_budget"].as_u64() > ledger["requested_budget"].as_u64());
-    }
 }

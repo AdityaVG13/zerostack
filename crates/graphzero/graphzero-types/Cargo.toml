@@ -3,6 +3,8 @@ name = "graphzero-types"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+publish = false
+description = "Stable structural fact and evidence types for GraphZero"
 autotests = false
 
 [dependencies]
@@ -12,11 +14,11 @@ zero-process.workspace = true
 
 [dev-dependencies]
 serde_json = { workspace = true }
-libc = "0.2"
+libc = { workspace = true }
 
 [lints]
 workspace = true
 
 [[test]]
 name = "types_wire_compatibility"
-path = "../../../tests/graphzero/types/wire_compatibility.rs"
+path = "../../../tests/graphzero/types_wire_compatibility.rs"

@@ -45,10 +45,8 @@ impl LiveBytesProvider for FsProvider {
     }
 }
 
-/// Check whether live bytes match the stored content hash.
-///
-/// Returns `Ok(true)` when fresh, `Ok(false)` when stale, `Err` when the
-/// check could not be performed.
+/// Check whether live bytes match the stored content hash. Returns `Ok(true)`
+/// when fresh, `Ok(false)` when stale, `Err` when the check could not be performed.
 pub fn freshness_check(
     stored: Option<&ContentHash>,
     live_bytes: &[u8],

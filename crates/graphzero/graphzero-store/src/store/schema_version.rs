@@ -1,8 +1,6 @@
-//! GraphZero store segment schema stamps (CacheZero / ZeroStack contract).
-//!
-//! Types and skew rules live in `graphzero_types::schema_version`. This module
-//! writes/reads the durable snapshot companion stamp under a store root and
-//! re-exports the shared contract for store callers.
+//! GraphZero store segment schema stamps (CacheZero / ZeroStack contract). Types and skew
+//! rules live in `graphzero_types::schema_version`. This module writes/reads the durable
+//! snapshot companion stamp under a store root and re-exports the shared contract for store callers.
 
 use std::fs;
 use std::path::Path;
@@ -46,10 +44,8 @@ pub fn write_snapshot_schema_stamp(store_root: &Path, snapshot_id: u64) -> Resul
     Ok(())
 }
 
-/// Load and admit the snapshot schema stamp.
-///
-/// Missing stamp (legacy stores) is treated as same-major older content and
-/// admitted with degrade. Newer major refuses loudly.
+/// Load and admit the snapshot schema stamp. Missing stamp (legacy stores) is treated
+/// as same-major older content and admitted with degrade. Newer major refuses loudly.
 pub fn admit_snapshot_schema_stamp(store_root: &Path) -> Result<AdmitOutcome> {
     let path = snapshot_schema_path(store_root);
     match fs::read_to_string(&path) {

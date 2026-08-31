@@ -1,26 +1,6 @@
-//! The single store coordination lock.
-//!
-//! There is exactly one lock in this crate, an advisory lock on
-//! `<store_root>/gc/coordinator.lock`. Publishers hold it shared; the garbage
-//! collector holds it exclusive. Because there is only one lock there is no
-//! lock *order* to get wrong and no cycle can exist, so the design is
-//! deadlock-free by construction rather than by convention.
-//!
-//! This closes a critical publish/GC race. Previously every engine published
-//! without taking any lock while the sweeper's pre-unlink recheck inspected
-//! only `gc/**` metadata, so a publisher could republish or newly reference an
-//! object between the sweeper's decision and its `unlink`. The publish
-//! returned `Ok`, and the object was then deleted: silent data loss plus a
-//! dangling reference from a committed root.
-//!
-//! The lock file path is deliberately identical to the one TokenZero's
-//! `GcCoordLock` already uses, and both `fs4` and `std` map to `flock` on
-//! Unix, so a hub-based publisher and a not-yet-migrated TokenZero sweeper
-//! interoperate correctly during the cutover.
-//!
-//! Crash safety needs no stale-lock reclaim: the kernel releases these locks
-//! when the holder's file descriptor closes, including on abnormal
-//! termination.
+//! The single store coordination lock. There is exactly one lock in this crate, an advisory lock on
+//! `<store_root>/gc/coordinator.lock`. Publishers hold it shared; the garbage collector holds it
+//! exclusive.
 
 use std::fs::{self, File, TryLockError};
 use std::io;
@@ -55,12 +35,6 @@ pub enum LockMode {
 }
 
 /// A held coordination lock. Released on drop and on process death.
-///
-/// Never acquire a second `StoreLock` while holding one, even in a different
-/// mode: advisory locks are per file descriptor, so a second descriptor in the
-/// same process blocks against the first exactly as another process would.
-/// Functions that mutate the store under a lock therefore take `&StoreLock`
-/// instead of acquiring their own.
 #[derive(Debug)]
 pub struct StoreLock {
     file: File,
@@ -105,10 +79,8 @@ impl StoreLock {
         self.mode == LockMode::Exclusive
     }
 
-    /// The store root this guard was acquired on, normalized.
-    ///
-    /// A guard excludes only writers of its own store, so mutators compare
-    /// against this instead of assuming the caller passed a matching lock.
+    /// The store root this guard was acquired on, normalized. A guard excludes only writers of its own
+    /// store, so mutators compare against this instead of assuming the caller passed a matching lock.
     pub fn store_root(&self) -> &Path {
         &self.store_root
     }

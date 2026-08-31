@@ -1,13 +1,4 @@
-//! Execution trace surface with equivalence comparison (V6-R15,
-//! ZS-EXEC-002/005).
-//!
-//! An [`ExecTrace`] is the deterministic, mode-independent record of one
-//! settled execution of a plan DAG: nodes in deterministic topological
-//! order, each with its outcome and the protected decision info the model
-//! saw at that node. Same plan digest + same input digest => equivalent
-//! trace; any divergence is reported loudly as a typed
-//! [`TraceDivergence`] naming the first diverging record, field, and
-//! expected/actual values -- never a silent boolean.
+//! Execution trace surface with equivalence comparison.
 
 use serde::{Deserialize, Serialize};
 
@@ -15,11 +6,8 @@ use crate::digest::sha256_hex;
 use crate::exec_dag::ExecNodeKind;
 use crate::schema::canonical_json;
 
-/// The protected decision info a model saw at one node (ZS-EXEC-002: model
-/// sees the same protected decision info as the primitive trace). Field
-/// values are the offered question/choices, the observed value, and the
-/// resolved alternative plus the policy rule that resolved it (None when
-/// uncovered -- which aborts execution before a trace is settled).
+/// The protected decision info a model saw at one node (model sees the same protected
+/// decision info as the primitive trace).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProtectedDecisionView {
     /// The question posed at the decision point.
@@ -90,7 +78,7 @@ pub struct ExecTraceRecord {
     pub protected_decision: Option<ProtectedDecisionView>,
 }
 
-/// Deterministic execution trace of a plan DAG (ZS-EXEC-002/005).
+/// Deterministic execution trace of a plan DAG.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ExecTrace {
     /// Canonical digest of the executed plan (same plan => same digest).
@@ -257,7 +245,7 @@ fn divergence(
     }
 }
 
-/// The first divergence between two traces, pinpointed (ZS-EXEC-005).
+/// The first divergence between two traces, pinpointed.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TraceDivergence {
     /// Index of the first diverging record (0 for root-level divergences).

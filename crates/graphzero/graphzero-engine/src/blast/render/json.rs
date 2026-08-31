@@ -22,9 +22,8 @@ pub fn blast_to_json_budget(
 }
 
 /// Domain `Value` for blast without string→parse when budget > 1.
-///
-/// Budget=1 success envelopes attach additive `next` expand/capsule/export hints.
-/// The spilled capsule bytes (expand exact payload) are unchanged.
+/// Budget=1 success envelopes attach additive `next`
+/// expand/capsule/export hints. The spilled capsule bytes (expand exact payload) are unchanged.
 pub fn blast_to_value_budget(
     capsule: &BlastRadiusCapsule,
     budget: usize,

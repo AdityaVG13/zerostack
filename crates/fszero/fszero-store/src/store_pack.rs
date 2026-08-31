@@ -1,8 +1,6 @@
-//! Warm-store pack export/import (fszero-hink).
-//!
-//! Packs hub-owned content-addressed blobs (`blobs/sha256/...`) into a
-//! portable directory plus a manifest. Engine-local mutation_log / access_log
-//! / ref-index are never packaged (RACC-R authority: hub CAS identity only).
+//! Warm-store pack export/import. Packs hub-owned content-addressed blobs
+//! (`blobs/sha256/...`) into a portable directory plus a manifest. Engine-local
+//! mutation_log / access_log / ref-index are never packaged (RACC-R authority: hub CAS identity only).
 
 use sha2::{Digest, Sha256};
 use std::fs;
@@ -10,8 +8,8 @@ use std::path::Path;
 
 use super::cas::CasStore;
 
-pub const PACK_MANIFEST_NAME: &str = "fszero-store-pack.v1.json";
-pub const PACK_SCHEMA: &str = "fszero.store-pack/v1";
+pub const PACK_MANIFEST_NAME: &str = "fszero-store-pack.json";
+pub const PACK_SCHEMA: &str = "fszero.store-pack";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StorePackError {

@@ -1,4 +1,4 @@
-//! Extraction benchmark suite (NFR-001, NFR-002, G-007).
+//! Extraction benchmark suite.
 
 use criterion::{Criterion, Throughput, criterion_group, criterion_main};
 

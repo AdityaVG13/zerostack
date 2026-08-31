@@ -1,8 +1,5 @@
-//! Env-gated EXPLAIN / query-plan capture for hot RecoveryStore SQL
-//! (fszero-sql-explain-hot-catalog-botu).
-//!
-//! Gate: `FSZERO_SQL_EXPLAIN=1`. Writes plan text under
-//! `tests/artifacts/perf/<run-id>/db/explain_<name>.txt` when a path is
+//! Env-gated EXPLAIN / query-plan capture for hot RecoveryStore SQL. Gate: `FSZERO_SQL_EXPLAIN=1`.
+//! Writes plan text under `tests/artifacts/perf/<run-id>/db/explain_<name>.txt` when a path is
 //! provided, and always returns structured captures for harnesses.
 
 use fsqlite::Connection;
@@ -19,7 +16,7 @@ pub struct HotSqlEntry {
     pub note: &'static str,
 }
 
-/// First-wave plan-sensitive RecoveryStore SQL (see bead catalog).
+/// Plan-sensitive RecoveryStore SQL used by the profiling harness.
 pub fn hot_sql_catalog() -> &'static [HotSqlEntry] {
     &[
         HotSqlEntry {
@@ -31,11 +28,6 @@ pub fn hot_sql_catalog() -> &'static [HotSqlEntry] {
             name: "delete_transient_overflow",
             sql: super::SQL_DELETE_TRANSIENT_OVERFLOW,
             note: "LIKE + LEFT JOIN + ORDER retention sweep",
-        },
-        HotSqlEntry {
-            name: "delete_mutation_log_retention",
-            sql: super::SQL_DELETE_MUTATION_LOG_RETENTION,
-            note: "ts + seq subquery; idx_mutation_log_path only",
         },
         HotSqlEntry {
             name: "delete_memory_paths_by_store_key",
@@ -55,7 +47,7 @@ pub fn hot_sql_catalog() -> &'static [HotSqlEntry] {
         HotSqlEntry {
             name: "count_transient_payloads",
             sql: super::SQL_COUNT_TRANSIENT_PAYLOADS,
-            note: "LIKE fz://seq/% prefix on PK unproven",
+            note: "LIKE seq/% prefix on PK unproven",
         },
         HotSqlEntry {
             name: "select_memory_paths_prefix",
@@ -187,7 +179,7 @@ pub fn write_sql_explain_artifacts(
     fs::write(
         &summary_path,
         serde_json::to_string_pretty(&json!({
-            "schema": "fszero-sql-explain/v1",
+            "schema": "fszero-sql-explain",
             "entries": summary,
         }))
         .map_err(|e| e.to_string())?,
@@ -196,7 +188,7 @@ pub fn write_sql_explain_artifacts(
     Ok(db_dir)
 }
 
-/// Default run-id under tests/artifacts/perf for gated harness dumps.
+/// Default run ID for gated SQL diagnostic dumps.
 pub fn default_explain_artifact_dir() -> PathBuf {
     let millis = SystemTime::now()
         .duration_since(UNIX_EPOCH)

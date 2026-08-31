@@ -1,38 +1,4 @@
-//! V7 Executable Theorem Normal Form (ETNF) shadow ABI (Wave 7, audit/shadow).
-//!
-//! Wave 7 (`docs/internal/zerostack-handoff-2026-08-16.md`) turns a deployable
-//! theorem into a fail-closed runtime decision. This module owns the
-//! ZeroStack data types for that surface, in shadow only:
-//!
-//! ```text
-//! rooted evidence + finite witness
-//!   + total Safe | Unsafe | Unknown verdict
-//!   + certificate (only from Safe)
-//!   + narrow authority transition
-//!   + explicit fallback
-//!   + falsifiers
-//!   + complete resource ledger
-//! ```
-//!
-//! Authority law (W7-T01 Sound Authority, audit `zerostack-vpq2`): only a
-//! live certificate may create authority, and a certificate is issued only
-//! for a `Safe` verdict. `Unsafe` and `Unknown` cannot serialize a
-//! certificate: [`ShadowCertificate::issue`] and [`V7ShadowReport::new`] both
-//! fail closed, and [`V7ShadowReport::from_canonical_bytes`] rejects any
-//! document that carries a certificate under a non-Safe verdict. Nothing in
-//! this module can construct an [`crate::dispatch::ApprovalGrant`],
-//! [`crate::dispatch::PermitGrant`], or any other V6 write/permit gate input:
-//! shadow reports and certificates grant **no production authority** and are
-//! observable, comparable evidence only.
-//!
-//! Trusted-code rule: only Rust/trusted code constructs reports and
-//! certificates and validates canonical bytes
-//! ([`V7ShadowReport::to_canonical_bytes`] /
-//! [`V7ShadowReport::from_canonical_bytes`]). The model, graph builder, cache
-//! planner, and candidate generator remain untrusted proposers: they submit
-//! [`EvidenceItem`]s and witness facts; they never construct a verdict or
-//! certificate. ProofIR stays optional/research; this module implements no
-//! general program equivalence.
+//! Executable Theorem Normal Form ABI for fail-closed runtime decisions.
 
 use std::{error::Error, fmt};
 
@@ -42,9 +8,9 @@ use crate::digest::sha256_hex;
 use crate::schema::canonical_json;
 use crate::verdict::SafetyVerdict;
 
-/// Canonical schema identity of the V7 shadow report document.
-pub const ETNF_SCHEMA_ID: &str = "zerostack/v7-shadow-report/1";
-/// Maximum bytes for an identifier (checker id/version, scope, contract, ...).
+/// Canonical schema identity for an ETNF shadow report.
+pub const ETNF_SCHEMA_ID: &str = "zerostack/etnf-shadow-report/1";
+/// Maximum bytes for an identifier (checker id/version, scope, contract,...).
 pub const ETNF_MAX_ID_BYTES: usize = 128;
 /// Maximum bytes for a free-text field (witness fact, obligation, falsifier description).
 pub const ETNF_MAX_STRING_BYTES: usize = 256;
@@ -130,18 +96,14 @@ impl fmt::Display for EtnfError {
                 formatter,
                 "field `{field}` has {actual} items, maximum {maximum}"
             ),
-            Self::NotSafe => write!(
-                formatter,
-                "only a Safe verdict may carry a certificate (W7-T01)"
-            ),
+            Self::NotSafe => write!(formatter, "only a Safe verdict may carry a certificate"),
             Self::InvalidSchema { actual } => {
                 write!(formatter, "unexpected schema identity `{actual}`")
             }
             Self::ShadowMarkerFalse => write!(formatter, "shadow marker must be true"),
-            Self::CertificateWithoutSafe => write!(
-                formatter,
-                "certificate present under a non-Safe verdict (W7-T01)"
-            ),
+            Self::CertificateWithoutSafe => {
+                write!(formatter, "certificate present under a non-Safe verdict")
+            }
             Self::MissingCertificateForSafe => {
                 write!(formatter, "Safe verdict carries no certificate")
             }
@@ -201,10 +163,9 @@ fn check_hex(value: &str, field: &'static str) -> Result<(), EtnfError> {
     }
 }
 
-/// Identity and version of the trusted checker that produced a verdict.
-///
-/// `version` is part of the certificate root binding, so a checker upgrade
-/// invalidates every previously issued shadow certificate.
+/// Identity and version of the trusted checker that produced a verdict. `version` is part of the
+/// certificate root binding, so a checker upgrade invalidates every previously issued shadow
+/// certificate.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct CheckerIdentity {
@@ -228,11 +189,9 @@ impl CheckerIdentity {
     }
 }
 
-/// One named item of evidence submitted by an untrusted proposer.
-///
-/// `digest` is the lowercase-hex SHA-256 of the evidence bytes the item
-/// claims; the trusted checker is responsible for verifying it against the
-/// actual bytes before it may contribute to a verdict.
+/// One named item of evidence submitted by an untrusted proposer. `digest` is the
+/// lowercase-hex SHA-256 of the evidence bytes the item claims; the trusted checker is
+/// responsible for verifying it against the actual bytes before it may contribute to a verdict.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct EvidenceItem {
@@ -256,12 +215,9 @@ impl EvidenceItem {
     }
 }
 
-/// Rooted evidence: a finite set of evidence items anchored to a root.
-///
-/// The root is **derived**, never declared: `root()` is a pure function of
-/// `anchor` and `items`, so a proposer cannot present evidence whose claimed
-/// root does not bind its own items. The certificate root then binds this
-/// evidence root, which transitively binds every item.
+/// Rooted evidence: a finite set of evidence items anchored to a root. The root is **derived**,
+/// never declared: `root` is a pure function of `anchor` and `items`, so a proposer cannot present
+/// evidence whose claimed root does not bind its own items.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct RootedEvidence {
@@ -310,10 +266,8 @@ impl RootedEvidence {
     }
 }
 
-/// Finite witness: the bounded list of facts a checker consumed.
-///
-/// Finiteness is enforced by construction: at most
-/// [`ETNF_MAX_WITNESS_FACTS`] facts, each at most [`ETNF_MAX_STRING_BYTES`]
+/// Finite witness: the bounded list of facts a checker consumed. Finiteness is enforced by
+/// construction: at most [`ETNF_MAX_WITNESS_FACTS`] facts, each at most [`ETNF_MAX_STRING_BYTES`]
 /// bytes.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -348,27 +302,24 @@ impl FiniteWitness {
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ProposedTransitionKind {
-    /// Reuse a cached protected result (family 3, semantic-boundary cache).
+    /// Reuse a cached result whose semantic boundary remains valid.
     ReuseCachedResult,
-    /// Run tools privately until a preauthorized policy escapes (family 1).
+    /// Run tools privately until a preauthorized policy escapes.
     RunToolsPrivately,
-    /// Skip a model turn for preauthorized observations (family 1).
+    /// Skip a model turn for preauthorized observations.
     SkipModelTurn,
-    /// Auto-select the unique certified maximum candidate (family 2).
+    /// Auto-select the unique certified maximum candidate.
     SelectUniqueMaximum,
-    /// Hide only dominated candidates behind the Pareto frontier (family 2).
+    /// Hide candidates proven dominated by the Pareto frontier.
     HideDominatedCandidate,
-    /// Keep a proof obligation live across bytes (family 3/4).
+    /// Keep a proof obligation live across streamed bytes.
     KeepProofLive,
-    /// Reverify only the descendant proof cone (family 4).
+    /// Reverify only the descendant proof cone.
     ReverifyDescendantCone,
 }
 
-/// Narrow proposed authority transition (ETNF component).
-///
-/// A proposal only: there is no `granted` field, no gate input is produced,
-/// and the type is not accepted by any V6 write/permit gate. `target` names
-/// the protected result/object the transition would touch.
+/// Proposed authority transition. It grants nothing and cannot enter a write or permit gate.
+/// `target` names the protected result or object the transition would touch.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ProposedAuthorityTransition {
@@ -395,9 +346,9 @@ impl ProposedAuthorityTransition {
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FallbackKind {
-    /// V6 law: `Unknown` requires the frozen raw-baseline fallback.
+    /// Unknown verdicts require the frozen raw-baseline fallback.
     FrozenRawBaseline,
-    /// V6-15: the native direct-tool path, `C_Z = min(C_direct, C_kernel)`.
+    /// The native direct-tool path uses `C_Z = min(C_direct, C_kernel)`.
     DirectNativePath,
     /// `Unsafe` fails closed with no recovery.
     Abort,
@@ -427,14 +378,12 @@ impl ExplicitFallback {
     }
 }
 
-/// A named falsifier: a sharp condition that would refute the checked claim.
-///
-/// Falsifiers are declarations for observability; in shadow they never block
-/// or authorize anything.
+/// A named falsifier: a sharp condition that would refute the checked claim. Falsifiers
+/// are declarations for observability; in shadow they never block or authorize anything.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Falsifier {
-    /// Stable falsifier identifier, e.g. `W7-T01-f1`.
+    /// Stable falsifier identifier.
     pub id: String,
     pub description: String,
 }
@@ -455,11 +404,9 @@ impl Falsifier {
     }
 }
 
-/// Complete resource ledger (ETNF component).
-///
-/// `complete` is `true` only when the ledger accounts for every unit the
-/// check consumed; a checker that cannot close its ledger must not report
-/// `Safe` on the strength of that run.
+/// Complete resource ledger (ETNF component). `complete` is `true` only when
+/// the ledger accounts for every unit the check consumed; a checker that
+/// cannot close its ledger must not report `Safe` on the strength of that run.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ResourceLedger {
@@ -493,12 +440,9 @@ impl ResourceLedger {
     }
 }
 
-/// Shadow certificate (W7-T01): issued only for a `Safe` verdict.
-///
-/// The `root` is derived over exactly the five bound identities: evidence
-/// root, scope, contract, checker (id and version), and resource ledger root.
-/// The certificate carries no authority: it is a shadow artifact that no
-/// production write/permit gate accepts.
+/// Shadow certificate: issued only for a `Safe` verdict. The `root` is derived over
+/// exactly the five bound identities: evidence root, scope, contract, checker (id and version), and
+/// resource ledger root.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ShadowCertificate {
@@ -586,17 +530,11 @@ impl ShadowCertificate {
     }
 }
 
-/// Observable, comparable V7 shadow output.
-///
-/// `shadow` is always `true` and enforced on parse, so a shadow document can
-/// never be laundered into a production artifact. `certificate` is present
-/// if and only if the verdict is `Safe`, and its root binds evidence, scope,
-/// contract, checker version, and resource ledger. The report grants no
-/// production authority and is not accepted by any existing write/permit
-/// gate.
+/// Comparable shadow report. Parsing enforces `shadow=true` and requires a certificate exactly for
+/// safe verdicts; the certificate binds evidence, scope, contract, and checker.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct V7ShadowReport {
+pub struct EtnfShadowReport {
     pub schema: String,
     pub shadow: bool,
     pub verdict: SafetyVerdict,
@@ -614,7 +552,7 @@ pub struct V7ShadowReport {
     pub certificate: Option<ShadowCertificate>,
 }
 
-impl V7ShadowReport {
+impl EtnfShadowReport {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         verdict: SafetyVerdict,
@@ -739,7 +677,7 @@ impl V7ShadowReport {
     /// wrong schema/shadow markers, certificates under non-Safe verdicts, and
     /// any root that does not bind its fields.
     pub fn from_canonical_bytes(bytes: &[u8]) -> Result<Self, EtnfError> {
-        let report: V7ShadowReport =
+        let report: EtnfShadowReport =
             serde_json::from_slice(bytes).map_err(|error| EtnfError::BadJson {
                 message: error.to_string(),
             })?;

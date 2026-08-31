@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import inspect
 import json
-import os
 import subprocess
 import sys
 import tempfile
@@ -13,11 +12,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import keep_gate
 
 SCRIPT = Path(__file__).with_name("keep_gate.py")
-HISTORY = (
-    Path(__file__).resolve().parents[1]
-    / ".bench-history"
-    / "tokenzero-core.hotpaths.latest.json"
-)
 
 
 def _doc(groups: list[dict], **extra: object) -> dict:
@@ -35,6 +29,11 @@ def _doc(groups: list[dict], **extra: object) -> dict:
     body.update(extra)
     return body
 
+def _seed_history() -> dict:
+    return _doc(
+        [{"name": "count_tokens/ascii", "samples": [100.0, 100.0, 100.0]}]
+    )
+
 
 def _write(path: Path, document: dict) -> None:
     path.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
@@ -45,12 +44,12 @@ class KeepGateUnitTests(unittest.TestCase):
         self.assertEqual(keep_gate.KEEP_GATE_GEOMEAN_PCT, 3.0)
         self.assertEqual(keep_gate.KEEP_GATE_PASS_PCT, 5.0)
         self.assertEqual(keep_gate.CV_PCT_QUARANTINE, 5.0)
-        self.assertEqual(keep_gate.MT8_MIN_SELF_PCT, 0.1)
+        self.assertEqual(keep_gate.MIN_SELF_TIME_PCT, 0.1)
         self.assertEqual(keep_gate.SAME_RUN_WINDOW_SECONDS, 60)
         self.assertEqual(
             keep_gate.ALLOWED_LABELS, frozenset({"fixture-seed", "live"})
         )
-        # persist + keep share KEEP_GATE_GEOMEAN_PCT (not a leftover 25%).
+        # persist and keep both use KEEP_GATE_GEOMEAN_PCT.
         params = inspect.signature(keep_gate.persist_gate).parameters
         self.assertEqual(
             params["geomean_band_pct"].default, keep_gate.KEEP_GATE_GEOMEAN_PCT
@@ -76,14 +75,17 @@ class KeepGateUnitTests(unittest.TestCase):
         self.assertIn("all primary groups quarantined", str(ctx.exception))
 
     def test_seed_history_compare_passes(self) -> None:
-        history = keep_gate.load_history(HISTORY)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "history.json"
+            _write(path, _seed_history())
+            history = keep_gate.load_history(path)
         self.assertEqual(history.get("label"), "fixture-seed")
         passed, messages = keep_gate.compare_to_history(history, history)
         self.assertTrue(passed, messages)
         self.assertTrue(any(line.startswith("PASS geomean") for line in messages))
 
     def test_plus_ten_percent_fails_compare_and_persist(self) -> None:
-        history = keep_gate.load_history(HISTORY)
+        history = _seed_history()
         worse_groups = []
         for group in history["groups"]:
             samples = [float(v) * 1.10 for v in group["samples"]]
@@ -199,38 +201,6 @@ class KeepGateUnitTests(unittest.TestCase):
             keep_gate.compare_to_history(current, history)
         self.assertIn("benchmark_id mismatch", str(ctx.exception))
 
-    def test_detect_binary_os_magic(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            elf = root / "elf.bin"
-            macho = root / "macho.bin"
-            elf.write_bytes(b"\x7fELF" + b"\x00" * 12)
-            macho.write_bytes(b"\xcf\xfa\xed\xfe" + b"\x00" * 12)
-            self.assertEqual(keep_gate.detect_binary_os(elf), "linux")
-            self.assertEqual(keep_gate.detect_binary_os(macho), "darwin")
-
-    def test_resolve_bin_refuses_os_mismatch(self) -> None:
-        host = keep_gate.host_os()
-        wrong_magic = (
-            b"\x7fELF" + b"\x00" * 12
-            if host == "darwin"
-            else b"\xcf\xfa\xed\xfe" + b"\x00" * 12
-        )
-        with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "tokenzero"
-            path.write_bytes(wrong_magic)
-            env = os.environ.copy()
-            env["TOKENZERO_BIN"] = str(path)
-            result = subprocess.run(
-                [sys.executable, str(SCRIPT), "resolve-bin"],
-                text=True,
-                capture_output=True,
-                check=False,
-                env=env,
-            )
-            self.assertNotEqual(result.returncode, 0, result.stdout)
-            self.assertIn("refuse", result.stderr.lower())
-            self.assertIn("mixup", result.stderr.lower())
 
 
 class KeepGateCliTests(unittest.TestCase):
@@ -245,7 +215,6 @@ class KeepGateCliTests(unittest.TestCase):
         self.assertIn("compare", result.stdout)
         self.assertIn("persist", result.stdout)
         self.assertIn("keep", result.stdout)
-        self.assertIn("resolve-bin", result.stdout)
 
     def test_dry_run(self) -> None:
         result = subprocess.run(
@@ -256,16 +225,18 @@ class KeepGateCliTests(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("KEEP_GATE_GEOMEAN_PCT=3.0", result.stdout)
-        self.assertIn("MT8_MIN_SELF_PCT=0.1", result.stdout)
+        self.assertIn("MIN_SELF_TIME_PCT=0.1", result.stdout)
         self.assertIn("SAME_RUN_WINDOW_SECONDS=60", result.stdout)
         self.assertIn("CARGO_TARGET_DIR=/tmp/rch_target_tokenzero", result.stdout)
 
     def test_cli_compare_seed_pass_and_worse_fail(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            history = keep_gate.load_history(HISTORY)
+            history = _seed_history()
+            history_path = root / "history.json"
             same = root / "same.json"
             worse = root / "worse.json"
+            _write(history_path, history)
             _write(same, history)
             worse_doc = json.loads(json.dumps(history))
             for group in worse_doc["groups"]:
@@ -282,7 +253,7 @@ class KeepGateCliTests(unittest.TestCase):
                     "--current",
                     str(same),
                     "--history",
-                    str(HISTORY),
+                    str(history_path),
                 ],
                 text=True,
                 capture_output=True,
@@ -299,7 +270,7 @@ class KeepGateCliTests(unittest.TestCase):
                     "--current",
                     str(worse),
                     "--history",
-                    str(HISTORY),
+                    str(history_path),
                 ],
                 text=True,
                 capture_output=True,
@@ -316,7 +287,7 @@ class KeepGateCliTests(unittest.TestCase):
                     "--current",
                     str(worse),
                     "--history",
-                    str(HISTORY),
+                    str(history_path),
                 ],
                 text=True,
                 capture_output=True,
@@ -330,10 +301,13 @@ class KeepGateCliTests(unittest.TestCase):
     def test_cli_persist_unlabeled_refuses(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            unlabeled = json.loads(json.dumps(keep_gate.load_history(HISTORY)))
+            history = _seed_history()
+            history_path = root / "history.json"
+            unlabeled = json.loads(json.dumps(history))
             unlabeled.pop("label", None)
             unlabeled.pop("note", None)
             path = root / "unlabeled.json"
+            _write(history_path, history)
             _write(path, unlabeled)
             result = subprocess.run(
                 [
@@ -343,7 +317,7 @@ class KeepGateCliTests(unittest.TestCase):
                     "--current",
                     str(path),
                     "--history",
-                    str(HISTORY),
+                    str(history_path),
                 ],
                 text=True,
                 capture_output=True,
@@ -365,7 +339,7 @@ def _attribution(
     frames = [{"name": name, "self_pct": self_pct}]
     if extra_frames:
         frames.extend(extra_frames)
-    return {"kind": kind, "workload": "MT8", "source": source, "frames": frames}
+    return {"kind": kind, "workload": "self-time-attribution", "source": source, "frames": frames}
 
 
 def _window(
@@ -390,9 +364,16 @@ def _live_doc(groups: list[dict], **extra: object) -> dict:
     return body
 
 
-class KeepGateMt8Tests(unittest.TestCase):
+class KeepGateAttributionTests(unittest.TestCase):
     def setUp(self) -> None:
         self.groups = [{"name": "stable", "samples": [100.0, 100.0, 100.0]}]
+
+    def test_retired_attribution_alias_does_not_supply_evidence(self) -> None:
+        current = _live_doc(self.groups)
+        current["mt8"] = current.pop("attribution")
+        with self.assertRaises(keep_gate.KeepGateError) as ctx:
+            keep_gate.extract_self_time_frames(current)
+        self.assertIn("attribution missing", str(ctx.exception))
 
     def test_missing_attribution_refuses_live_keep(self) -> None:
         current = _live_doc(self.groups)
@@ -412,7 +393,7 @@ class KeepGateMt8Tests(unittest.TestCase):
             attribution={"kind": "self-time", "flamegraph": "artifacts/fake.svg"},
         )
         with self.assertRaises(keep_gate.KeepGateError) as ctx:
-            keep_gate.require_mt8_keep_attribution(current)
+            keep_gate.require_keep_attribution(current)
         self.assertIn("do not invent flamegraphs", str(ctx.exception).lower())
 
     def test_enter_count_is_not_self_time(self) -> None:
@@ -430,7 +411,7 @@ class KeepGateMt8Tests(unittest.TestCase):
             attribution=_attribution(source="invented-flamegraph"),
         )
         with self.assertRaises(keep_gate.KeepGateError) as ctx:
-            keep_gate.require_mt8_keep_attribution(current)
+            keep_gate.require_keep_attribution(current)
         self.assertIn("invented", str(ctx.exception).lower())
 
     def test_inclusive_only_is_not_self_time(self) -> None:
@@ -473,7 +454,7 @@ class KeepGateMt8Tests(unittest.TestCase):
             current, history, peer=peer
         )
         self.assertTrue(passed, messages)
-        self.assertTrue(any(line.startswith("PASS mt8 attribution") for line in messages))
+        self.assertTrue(any(line.startswith("PASS self-time attribution") for line in messages))
 
     def test_live_without_peer_refuses_same_window(self) -> None:
         current = _live_doc(self.groups)
@@ -534,7 +515,7 @@ class KeepGateMt8Tests(unittest.TestCase):
         broad = _live_doc(self.groups)
         passed, messages = keep_gate.evaluate_keep(focused, broad)
         self.assertTrue(passed, messages)
-        self.assertTrue(any("PASS mt8 attribution" in line for line in messages))
+        self.assertTrue(any("PASS self-time attribution" in line for line in messages))
         self.assertTrue(any("PASS run window" in line for line in messages))
 
     def test_evaluate_keep_micro_lever_and_sha_split_fails(self) -> None:
@@ -574,7 +555,7 @@ class KeepGateMt8Tests(unittest.TestCase):
             )
             self.assertEqual(ok.returncode, 0, ok.stderr + ok.stdout)
             self.assertIn("Result: PASS", ok.stdout)
-            self.assertIn("PASS mt8 attribution", ok.stdout)
+            self.assertIn("PASS self-time attribution", ok.stdout)
             self.assertIn("PASS run window", ok.stdout)
 
             missing = json.loads(json.dumps(focused))

@@ -1,26 +1,5 @@
-//! Typed-edge fusion hook for the production extraction path.
-//!
-//! Tree-sitter extraction stays the baseline. When a typed resolver backed by
-//! rust-analyzer or tsserver is installed, its resolutions are fused into the
-//! freshly extracted facts: structural edges at the same call site are
-//! superseded by call-accurate typed edges, and typed edges the structural pass
-//! never saw are added. With no resolver installed the pipeline is
-//! structural-only and produces exactly the same facts as before.
-//!
-//! # Concurrency contract (graphzero-bw60k)
-//!
-//! `install_typed_resolver` stores a process-wide [`Arc<dyn TypedResolver>`].
-//! Index extract may call [`fuse_installed_typed_edges`] from many rayon
-//! workers. Resolvers that wrap a single LSP subprocess (e.g.
-//! [`crate::rust_analyzer_lsp::RustAnalyzerLspResolver`]) must document that
-//! they serialize under an internal mutex: wall time with fusion installed is
-//! closer to sequential blob count × per-blob LSP cost, not structural-only
-//! parallel extract.
-//!
-//! Measure before promoting fusion to default:
-//! - structural-only `extract_ms` on a multi-file chunk (rayon parallel)
-//! - fusion-installed `extract_ms` with the same chunk (expect ~serial LSP)
-//! Prefer multi-client pool or serial extract when fusion is on by default.
+//! Typed-edge fusion hook for the production extraction path. Tree-sitter extraction stays the
+//! baseline.
 
 use std::sync::{Arc, PoisonError, RwLock};
 
@@ -71,7 +50,6 @@ pub fn typed_resolver() -> Option<Arc<dyn TypedResolver>> {
 }
 
 /// Fuse resolutions from the process-wide resolver, if one is installed.
-///
 /// Returns `None` when running structural-only.
 pub fn fuse_installed_typed_edges(
     facts: &mut BlobFacts,

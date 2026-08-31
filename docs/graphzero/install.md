@@ -1,17 +1,9 @@
-# Install and build GraphZero
+# Structure domain (used by ZeroStack)
 
-GraphZero currently builds from source. The repository pins the expected toolchain.
+The structure library is a ZeroStack domain surface, not an installable product.
 
-## Build the standalone CLI
-
-```bash
-git clone https://github.com/AdityaVG13/zerostack
-cd zerostack
-cargo build --release -p graphzero-cli --bin graphzero
-./target/release/graphzero --help
-```
-
-The CLI supports graph diagnostics, indexing, orientation, blast-radius inspection, claims, and store maintenance. It is not a second model-facing planner.
+The public execution surface is ZeroKernel (`z.find`).
+The only installable program is ZeroStack (`zero-kernel`). Indexing happens inside ZeroKernel.
 
 ## Use GraphZero through ZeroKernel
 
@@ -21,7 +13,7 @@ cd zerostack
 cargo build -p zero-kernel
 ```
 
-ZeroKernel loads `graphzero-kernel` as the structure authority behind `z.find`. Do not register removed GraphZero MCP or engine-local CodeMode catalogs beside it.
+ZeroKernel loads `zero-graph` as the structure authority behind `z.find`.
 
 ## Store isolation
 

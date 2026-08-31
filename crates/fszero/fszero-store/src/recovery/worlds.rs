@@ -1,7 +1,5 @@
-//! Speculative world registry (active worlds + edit rows).
-//!
-//! Persist / rehydrate agent-local worlds across process restart. Synchronous
-//! — no daemon; world state lives in the same durable recovery store.
+//! Speculative world registry (active worlds + edit rows). Persist / rehydrate caller-local worlds
+//! across process restart. Synchronous no daemon; world state lives in the same durable recovery store.
 
 use super::{RecoveryStore, meta_i64, sql_int, sql_text, text_col, unix_epoch_secs};
 
@@ -69,9 +67,8 @@ impl RecoveryStore {
             &[sql_text(state), sql_text(wid)],
             "world state update failed",
         )?;
-        // 'committing' is a crash-recovery waypoint, not a terminal state: the
-        // edit rows must survive it so a compensating rollback can re-publish
-        // the world as active and an agent can retry (fszero-k4ur.3).
+        // 'committing' is a crash-recovery waypoint, not a terminal state: the edit rows must
+        // survive it so a compensating rollback can re-publish the world as active and a caller can retry.
         if state == "committed" || state == "dropped" {
             self.delete_world_edits(wid);
         }

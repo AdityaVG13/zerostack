@@ -4,79 +4,30 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use super::pack::*;
-use super::ref_index::*;
 use super::{MAX_TRANSIENT_PAYLOADS, RecoveryStore};
 
 /// Flush batch buffer at this many staged bytes (peak-RSS bound + sorted runs).
 const PENDING_PAYLOAD_FLUSH_BYTES: usize = 32 * 1024 * 1024;
 /// Bound dynamic SQL and parameter vectors while amortizing fsqlite statement setup.
 pub(super) const PENDING_PAYLOAD_SQL_BATCH_ROWS: usize = 128;
-/// Match the bounded execution history scale without retaining every run forever.
-const INDEXED_EXECUTION_BASES_MAX: usize = 256;
 
 type EncodedPendingPayload = (String, Arc<[u8]>, Arc<[u8]>);
 
-/// Keys holding a CodeMode execution's own audit trail: the response bundle,
-/// telemetry, step list, result, and the `fz://codemode/execution/<id>/…`
-/// artifacts (fszero-5u7).
-///
-/// These are readable after a reopen, unlike `fz://seq/…`, so this is a real
-/// (small) narrowing of their guarantee: an OS crash or power loss can lose the
-/// audit trail of the most recent read-only plans. It cannot lose user data.
-/// Any plan that writes something else -- a file mutation records `write-post`,
-/// a CAS blob records `fz://blob/…` -- marks the transaction dirty and keeps
-/// the FULL barrier, so the artifacts of a MUTATING plan are still committed
-/// durably alongside the mutation they describe.
-///
-/// Deliberately a prefix whitelist, not a blacklist: an unrecognized key is
-/// treated as durable and keeps the barrier.
-
-/// Env-gated double-barrier timing for durable packed puts (fszero-atup).
+/// Env-gated double-barrier timing for durable packed puts.
 /// When `FSZERO_DURABLE_PUT_PHASES=1`, emit one JSON line on stderr with
 /// `pack_sync_us`, `commit_us`, `pack_dirty`, `bytes`, and related fields.
 fn durable_put_phases_enabled() -> bool {
-    #[cfg(test)]
-    if TEST_DURABLE_PUT_PHASES.with(|flag| flag.get()) {
-        return true;
-    }
     match std::env::var("FSZERO_DURABLE_PUT_PHASES") {
         Ok(v) => matches!(v.as_str(), "1" | "true" | "TRUE" | "on" | "yes"),
         Err(_) => false,
     }
 }
 
-#[cfg(test)]
-std::thread_local! {
-    pub(super) static TEST_DURABLE_PUT_PHASES: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
-    pub(super) static LAST_DURABLE_PUT_PHASES: std::cell::RefCell<Option<serde_json::Value>> =
-        const { std::cell::RefCell::new(None) };
-}
-
 fn emit_durable_put_phases(fields: serde_json::Value) {
     if !durable_put_phases_enabled() {
         return;
     }
-    #[cfg(test)]
-    LAST_DURABLE_PUT_PHASES.with(|cell| {
-        *cell.borrow_mut() = Some(fields.clone());
-    });
     eprintln!("{fields}");
-}
-
-fn is_execution_scoped_key(key: &str) -> bool {
-    key.starts_with("fz://codemode/execution/")
-        || key == "codemode/batch"
-        || key.starts_with("codemode/batch/")
-        || matches!(
-            key,
-            "codemode/response"
-                | "codemode/result"
-                | "codemode/steps"
-                | "codemode/telemetry"
-                | "codemode/error"
-                | "codemode/execution/latest"
-                | "telemetry/ring"
-        )
 }
 
 impl RecoveryStore {
@@ -110,38 +61,23 @@ impl RecoveryStore {
         self.store_writes
             .set(self.store_writes.get().saturating_add(1));
         let payload: Arc<[u8]> = Arc::from(data.to_vec());
-        let transient = key.starts_with("fz://seq/");
-        // Anything that is not execution-scoped scratch must survive a reopen,
-        // so an enclosing exec txn has to keep its FULL commit barrier
-        // (fszero-5u7). Recorded here, at the single key-classifying entry
-        // point every payload write passes through.
-        let receipt_blob = self.exec_txn_receipt_blob.get() && key.starts_with("fz://blob/");
-        if !transient && !is_execution_scoped_key(key) && !receipt_blob {
+        let transient = key.starts_with("seq/");
+        if !transient {
             self.mark_exec_txn_durable_dirty();
         }
         if self.try_buffer_payload(key, &payload, transient)? {
             return Ok(());
         }
 
-        // Rotation and append use the same SQLite→pack lock order. Packed
-        // writes therefore cannot publish a locator into a generation another
-        // process just retired. Transient bookkeeping is crash-atomic too.
-        //
-        // Transient rows never take the pack: the pack's ordering invariant
-        // costs a second F_FULLFSYNC (bytes sync'd before the locator commits)
-        // on top of the COMMIT that follows, and on macOS each barrier is ~4ms
-        // — the dominant fixed cost of every CodeMode plan (fszero-5u7).
-        // Inline rows are written and committed in that same transaction, so
-        // they are atomic rather than merely ordered, which is strictly
-        // stronger. These rows are LRU-pruned scratch, so the pack's
-        // space-amplification argument does not apply either.
+        // Rotation and append use the same SQLite→pack lock order. Packed writes therefore cannot publish
+        // a locator into a generation another process just retired. Transient bookkeeping is crash-atomic
+        // too.
         let packed = payload.len() >= PACK_MIN_BYTES && !transient && self.pack.is_some();
         let requires_txn =
             (packed || transient || key.starts_with("mem://")) && self.pending_payloads.is_none();
         let began = self.begin_immediate_payload_txn(requires_txn)?;
         let persisted = self.persist_immediate_payload(key, &payload, transient, packed);
         self.finish_immediate_payload_txn(began, persisted, transient)?;
-        self.index_recovery_ref(key, transient);
         Ok(())
     }
 
@@ -172,9 +108,6 @@ impl RecoveryStore {
         if self.pending_bytes > PENDING_PAYLOAD_FLUSH_BYTES {
             self.flush_pending_payloads()?;
         }
-        // Index before flush is safe: store_path is known and end_batch makes
-        // the buffered row visible before another process can expand it.
-        self.index_recovery_ref(key, false);
         Ok(true)
     }
 
@@ -207,26 +140,6 @@ impl RecoveryStore {
         self.put_meta_i64("next_id", self.next_id as i64)
     }
 
-    fn index_recovery_ref(&self, key: &str, transient: bool) {
-        if transient || !ref_indexable(key) || key.starts_with("fz://blob/") {
-            return;
-        }
-        let Some(base) = codemode_execution_base_ref(key) else {
-            self.append_ref_index(key);
-            return;
-        };
-        if self.indexed_execution_bases.borrow().contains(&base) {
-            return;
-        }
-        if self.append_ref_index(&base) {
-            let mut indexed = self.indexed_execution_bases.borrow_mut();
-            if indexed.len() >= INDEXED_EXECUTION_BASES_MAX {
-                indexed.clear();
-            }
-            indexed.insert(base);
-        }
-    }
-
     fn begin_immediate_payload_txn(&mut self, required: bool) -> Result<bool, String> {
         if !required {
             return Ok(false);
@@ -250,22 +163,8 @@ impl RecoveryStore {
             let _ = self.conn.execute("ROLLBACK");
             return Err(error);
         }
-        // A transient-only transaction touches nothing outside the
-        // execution-scoped key class: the `fz://seq/` row itself (always
-        // inline, never packed), its `payload_lru` tick, the retention sweep,
-        // and the `next_id`/`payload_tick` counters that only name future
-        // transient rows. None of it is recoverable across a reopen by
-        // contract -- `expand_with_tiers` refuses every `://seq/` ref -- so
-        // paying `synchronous=FULL` for it buys nothing and costs a full
-        // F_FULLFSYNC (~4ms measured on APFS) on every CodeMode plan
-        // (fszero-5u7).
-        //
-        // NORMAL still appends the WAL frames, so this is invisible to any
-        // reader and survives process kill; only an OS crash or power loss can
-        // drop them, which is exactly the guarantee this key class declines.
-        // Durable commits keep FULL, and because a durable commit fsyncs the
-        // WAL through its own frame, later unsynced transient frames cannot
-        // undo a durable commit that already returned.
+        // A transient transaction only touches inline `seq/` rows, their LRU ticks,
+        // retention state, and counters that name future transient rows.
         let relaxed = transient && self.set_synchronous("NORMAL");
         let t0 = std::time::Instant::now();
         let committed = self.conn.execute("COMMIT").map(|_| ()).map_err(|error| {
@@ -422,13 +321,7 @@ impl RecoveryStore {
         let mut encoded = Vec::with_capacity(pending.len());
         let mut pack_dirty = false;
         for (key, value) in pending {
-            // A relaxed transaction has already failed closed unless every row
-            // is an audited CodeMode receipt or its final envelope blob. Keep
-            // those rows inline: SQLite NORMAL is process-kill durable, while
-            // packing would add a full pack fsync and defeat the receipt class.
-            let relaxed_receipt = self.relaxed_exec_txn_active()
-                && (is_execution_scoped_key(key) || key.starts_with("fz://blob/"));
-            let allow_pack = !key.starts_with("fz://seq/") && !relaxed_receipt;
+            let allow_pack = !key.starts_with("seq/");
             let (row, dirty) = self.encode_payload_row(value, allow_pack)?;
             pack_dirty |= dirty;
             encoded.push((key.clone(), Arc::clone(value), row));
@@ -604,9 +497,8 @@ impl RecoveryStore {
             if let Some(row) = rows.first() {
                 if let Some(SqliteValue::Blob(b)) = row.get(0) {
                     let Some(bytes) = self.decode_payload_row(key, b) else {
-                        // A committed locator whose pack bytes are gone is a
-                        // torn/truncated pack tail: report it (fszero-ku8),
-                        // then treat as a miss so outer tiers can recover.
+                        // A committed locator whose pack bytes are gone is a torn/truncated
+                        // pack tail: report it, then treat as a miss so outer tiers can recover.
                         if let Some(loc) = decode_packed_locator(b) {
                             let pack_len = self.pack.as_ref().map(|p| p.len).unwrap_or(0);
                             self.note_integrity(format!("torn_pack: {key} locator {loc:?} unreadable (pack len {pack_len}); everything before the tear stays readable"));

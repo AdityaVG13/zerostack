@@ -119,8 +119,7 @@ impl VerifierObligationMap {
     /// Obligations that claim completeness without a certified flag are rejected.
     #[must_use]
     pub fn uncertified_completeness_claims(&self) -> Vec<&VerifierObligation> {
-        // API for callers that incorrectly set completeness_certified without a cert:
-        // we expose the flag; tests assert false cannot discharge.
+        // An uncertified completeness flag remains visible but cannot discharge the target.
         self.by_target
             .values()
             .flatten()

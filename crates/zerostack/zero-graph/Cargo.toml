@@ -1,0 +1,38 @@
+[package]
+name = "zero-graph"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Typed GraphZero StructuralEngine implementation for ZeroKernel"
+autotests = false
+publish = false
+
+[dependencies]
+ast-sgrep-core.workspace = true
+blake3.workspace = true
+graphzero-core.workspace = true
+graphzero-engine.workspace = true
+graphzero-store.workspace = true
+graphzero-types.workspace = true
+rayon.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+zero-abi.workspace = true
+zero-store.workspace = true
+
+[dev-dependencies]
+git2.workspace = true
+tempfile.workspace = true
+
+[[test]]
+name = "zero_kernel_scoped"
+path = "../../../tests/graphzero/adapter_zero_kernel_scoped.rs"
+
+[[test]]
+name = "zero_kernel_cpu_bound"
+path = "../../../tests/graphzero/adapter_zero_kernel_cpu_bound.rs"
+
+[[test]]
+name = "zero_kernel_task_lens"
+path = "../../../tests/graphzero/adapter_zero_kernel_task_lens.rs"

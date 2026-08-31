@@ -1,11 +1,6 @@
-//! Typed execution stream events (V6-R15, ZS-ADAPTER-007 open piece:
-//! progress/streaming channel with step receipts).
-//!
-//! Long executions deliver incremental results as a stream of typed events
-//! ending in exactly one terminal event (`Completed` or `Failed`). Each
-//! completed node carries a step receipt (deterministic result digest +
-//! output bytes). The events are harness-independent ABI values; the bounded
-//! sink that delivers them lives in zsx-core (`StreamSink`).
+//! Typed execution stream events (open piece progress/streaming channel with
+//! step receipts). Long executions deliver incremental results as a stream of typed events ending
+//! in exactly one terminal event (`Completed` or `Failed`).
 
 use serde::{Deserialize, Serialize};
 

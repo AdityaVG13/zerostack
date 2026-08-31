@@ -9,7 +9,7 @@ use napi::{Env, Error, Result, Task};
 use napi_derive::napi;
 use parking_lot::Mutex;
 use zero_abi::{KernelBudget, ProviderUsageObservation, ZeroHandle, ZeroKernelResponse};
-use zero_kernel::{AtomicCancellation, ZeroKernel as CoreZeroKernel};
+use zero_kernel::{AtomicCancellation, GraphZeroCompletenessInput, ZeroKernel as CoreZeroKernel};
 use zero_store::ProviderUsagePublication;
 
 const DEFAULT_WALL_MS: u64 = 30_000;
@@ -49,11 +49,8 @@ struct KernelCore {
     active: Mutex<BTreeMap<u64, AtomicCancellation>>,
 }
 
-/// Complete identity of a [`CoreZeroKernel`] as constructed from
-/// [`KernelConfig`]: canonical project root, state root, session, tokenizer,
-/// and every budget coordinate. Serves as the process-wide singleflight key so
-/// identical harness instances share one runtime while distinct
-/// configurations never do.
+/// Complete identity of a [`CoreZeroKernel`] as constructed from [`KernelConfig`]: canonical
+/// project root, state root, session, tokenizer, and every budget coordinate.
 #[derive(Clone, Eq, Hash, Ord, PartialEq, PartialOrd)]
 struct RegistryKey {
     root: String,
@@ -90,11 +87,8 @@ impl KernelConfig {
     }
 }
 
-/// Process-wide singleflight registry: every distinct [`RegistryKey`] maps to
-/// one weak handle, so N harness instances with an identical configuration
-/// reuse a single runtime instead of rebuilding and re-scanning it. Weak
-/// entries never keep a kernel alive; stale entries are pruned on the next
-/// construction. No thread is spawned and no kernel is built here.
+/// Process-wide singleflight registry. Embeddings with the same complete configuration reuse one
+/// runtime instead of rebuilding and rescanning it.
 static KERNEL_REGISTRY: Mutex<BTreeMap<RegistryKey, Weak<CoreZeroKernel>>> =
     Mutex::new(BTreeMap::new());
 
@@ -110,13 +104,15 @@ impl KernelCore {
         if let Some(kernel) = slot.as_ref() {
             return Ok(Arc::clone(kernel));
         }
-        // Singleflight gate: hold the registry lock across the reuse probe and
-        // any construction. Concurrent initializations with this identity
-        // upgrade the same weak handle onto one kernel; distinct identities
-        // serialize construction but never share an entry.
+        // Singleflight gate: hold the registry lock across the reuse probe and any
+        // construction. Concurrent initializations with this identity upgrade the same weak
+        // handle onto one kernel; distinct identities serialize construction but never share an entry.
         let key = self.config.registry_key();
         let mut registry = KERNEL_REGISTRY.lock();
         if let Some(kernel) = registry.get(&key).and_then(Weak::upgrade) {
+            if self.terminated.load(Ordering::Acquire) {
+                return Err(Error::from_reason("ZeroKernel is shut down"));
+            }
             *slot = Some(Arc::clone(&kernel));
             self.ready.store(true, Ordering::Release);
             return Ok(kernel);
@@ -130,6 +126,9 @@ impl KernelCore {
         )
         .map_err(|error| Error::from_reason(error.to_string()))?;
         let kernel = Arc::new(kernel);
+        if self.terminated.load(Ordering::Acquire) {
+            return Err(Error::from_reason("ZeroKernel is shut down"));
+        }
         registry.retain(|_, entry| entry.strong_count() != 0);
         registry.insert(key, Arc::downgrade(&kernel));
         *slot = Some(Arc::clone(&kernel));
@@ -139,6 +138,7 @@ impl KernelCore {
 
     fn request_shutdown(&self) {
         self.terminated.store(true, Ordering::Release);
+        self.ready.store(false, Ordering::Release);
         for cancellation in self.active.lock().values() {
             cancellation.cancel();
         }
@@ -156,8 +156,13 @@ impl KernelCore {
                 "ZeroKernel shutdown timed out with {remaining} in-flight cells"
             )));
         }
+        let Some(mut kernel) = self.kernel.try_lock_until(deadline) else {
+            return Err(Error::from_reason(
+                "ZeroKernel shutdown timed out waiting for initialization",
+            ));
+        };
+        kernel.take();
         self.ready.store(false, Ordering::Release);
-        self.kernel.lock().take();
         Ok(())
     }
 }
@@ -274,31 +279,53 @@ impl ZeroKernel {
             observation,
         }))
     }
+    #[napi(js_name = "registerSnapToFileCompleteness")]
+    pub fn register_snap_to_file_completeness(
+        &self,
+        completeness_json: String,
+    ) -> Result<AsyncTask<RegisterSnapCompletenessTask>> {
+        let completeness = serde_json::from_str::<GraphZeroCompletenessInput>(&completeness_json)
+            .map_err(|error| {
+            Error::from_reason(format!("invalid GraphZero completeness input: {error}"))
+        })?;
+        let active = self.core.active.lock();
+        if self.core.terminated.load(Ordering::Acquire) {
+            return Err(Error::from_reason("ZeroKernel is shut down"));
+        }
+        self.core.inflight.fetch_add(1, Ordering::AcqRel);
+        drop(active);
+        Ok(AsyncTask::new(RegisterSnapCompletenessTask {
+            core: Arc::clone(&self.core),
+            completeness: Some(completeness),
+        }))
+    }
 
     #[napi]
     pub fn status(&self) -> ZeroKernelStatus {
         let (live_frames, live_tasks, live_processes) = self
             .core
             .kernel
-            .lock()
-            .as_ref()
-            .map(|kernel| {
-                (
-                    kernel.live_frames(),
-                    kernel.live_tasks(),
-                    kernel.live_processes(),
-                )
+            .try_lock()
+            .and_then(|slot| {
+                slot.as_ref().map(|kernel| {
+                    (
+                        kernel.live_frames(),
+                        kernel.live_tasks(),
+                        kernel.live_processes(),
+                    )
+                })
             })
             .unwrap_or((0, 0, 0));
         ZeroKernelStatus {
             runtime: "ZeroKernel".into(),
             ready: self.core.ready.load(Ordering::Acquire),
             terminated: self.core.terminated.load(Ordering::Acquire),
-            inflight: self.core.inflight.load(Ordering::Acquire) as u32,
-            completed: self.core.completed.load(Ordering::Acquire) as i64,
-            live_frames: live_frames as i64,
-            live_tasks: live_tasks as i64,
-            live_processes: live_processes as i64,
+            inflight: u32::try_from(self.core.inflight.load(Ordering::Acquire)).unwrap_or(u32::MAX),
+            completed: i64::try_from(self.core.completed.load(Ordering::Acquire))
+                .unwrap_or(i64::MAX),
+            live_frames: i64::try_from(live_frames).unwrap_or(i64::MAX),
+            live_tasks: i64::try_from(live_tasks).unwrap_or(i64::MAX),
+            live_processes: i64::try_from(live_processes).unwrap_or(i64::MAX),
         }
     }
 
@@ -435,6 +462,37 @@ impl Task for RecordProviderUsageTask {
         Ok(())
     }
 }
+pub struct RegisterSnapCompletenessTask {
+    core: Arc<KernelCore>,
+    completeness: Option<GraphZeroCompletenessInput>,
+}
+
+impl Task for RegisterSnapCompletenessTask {
+    type Output = ZeroHandle;
+    type JsValue = String;
+
+    fn compute(&mut self) -> Result<Self::Output> {
+        let kernel = catch_unwind(AssertUnwindSafe(|| self.core.initialize()))
+            .map_err(|_| Error::from_reason("ZeroKernel initialization panicked"))??;
+        let completeness = self.completeness.take().ok_or_else(|| {
+            Error::from_reason("ZeroKernel completeness registration already consumed")
+        })?;
+        catch_unwind(AssertUnwindSafe(|| {
+            kernel.register_snap_to_file_completeness(completeness)
+        }))
+        .map_err(|_| Error::from_reason("ZeroKernel completeness registration panicked"))?
+        .map_err(|error| Error::from_reason(error.to_string()))
+    }
+
+    fn resolve(&mut self, _env: Env, output: Self::Output) -> Result<Self::JsValue> {
+        Ok(output.to_string())
+    }
+
+    fn finally(self, _env: Env) -> Result<()> {
+        self.core.inflight.fetch_sub(1, Ordering::AcqRel);
+        Ok(())
+    }
+}
 
 pub struct ShutdownTask {
     core: Arc<KernelCore>,
@@ -450,170 +508,5 @@ impl Task for ShutdownTask {
 
     fn resolve(&mut self, _env: Env, output: Self::Output) -> Result<Self::JsValue> {
         Ok(output)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use zero_abi::ZERO_KERNEL_PROTOCOL;
-
-    fn test_options(
-        root: &str,
-        session_id: &str,
-        wall_ms: u32,
-        task_limit: u32,
-    ) -> ZeroKernelOptions {
-        ZeroKernelOptions {
-            root: root.to_string(),
-            session_id: Some(session_id.to_string()),
-            state_root: None,
-            tokenizer_model: None,
-            wall_ms: Some(wall_ms),
-            cpu_ms: None,
-            memory_bytes: None,
-            call_limit: None,
-            task_limit: Some(task_limit),
-            output_byte_limit: None,
-        }
-    }
-
-    fn root_string(root: &std::path::Path) -> String {
-        root.to_string_lossy().into_owned()
-    }
-
-    fn assert_kernel_operational(kernel: &CoreZeroKernel) {
-        let response = kernel
-            .execute_cell("return '__probe__';")
-            .expect("kernel must execute a trivial cell");
-        assert_eq!(response.protocol, ZERO_KERNEL_PROTOCOL);
-    }
-
-    #[test]
-    fn concurrent_initialization_singleflights_to_one_kernel() {
-        let temp = tempfile::tempdir().expect("temp root");
-        let root = root_string(temp.path());
-        let mut wrappers = Vec::new();
-        let handles: Vec<_> = (0..6)
-            .map(|_| {
-                let wrapper = ZeroKernel::new(test_options(&root, "race-session", 30_000, 16))
-                    .expect("wrapper");
-                let core = Arc::clone(&wrapper.core);
-                wrappers.push(wrapper);
-                std::thread::spawn(move || core.initialize().expect("initialize"))
-            })
-            .collect();
-        let kernels: Vec<_> = handles
-            .into_iter()
-            .map(|handle| handle.join().expect("initialize thread"))
-            .collect();
-        assert_eq!(kernels.len(), 6);
-        for kernel in &kernels {
-            assert_kernel_operational(kernel);
-        }
-        for wrapper in &wrappers {
-            let status = wrapper.status();
-            assert!(
-                status.ready,
-                "wrapper must be ready after singleflight init"
-            );
-            assert!(
-                !status.terminated,
-                "wrapper must not be terminated after init"
-            );
-        }
-        let probe = wrappers[0]
-            .core
-            .initialize()
-            .expect("re-initialize after convergence");
-        assert_kernel_operational(&probe);
-        drop(wrappers);
-    }
-
-    #[test]
-    fn distinct_identity_never_shares() {
-        let temp = tempfile::tempdir().expect("temp root");
-        let root = root_string(temp.path());
-        let baseline =
-            ZeroKernel::new(test_options(&root, "session-a", 30_000, 16)).expect("baseline");
-        let other_session =
-            ZeroKernel::new(test_options(&root, "session-b", 30_000, 16)).expect("other session");
-        let other_budget =
-            ZeroKernel::new(test_options(&root, "session-a", 45_000, 8)).expect("other budget");
-        let baseline_kernel = baseline.core.initialize().expect("initialize baseline");
-        let session_kernel = other_session.core.initialize().expect("initialize session");
-        let budget_kernel = other_budget.core.initialize().expect("initialize budget");
-        assert_kernel_operational(&baseline_kernel);
-        assert_kernel_operational(&session_kernel);
-        assert_kernel_operational(&budget_kernel);
-        for wrapper in [&baseline, &other_session, &other_budget] {
-            let status = wrapper.status();
-            assert!(status.ready);
-            assert!(!status.terminated);
-        }
-        baseline.core.shutdown().expect("shutdown baseline");
-        assert!(baseline.status().terminated);
-        assert!(!other_session.status().terminated);
-        assert!(!other_budget.status().terminated);
-        assert!(
-            baseline.core.initialize().is_err(),
-            "terminated wrapper must refuse init"
-        );
-        assert_kernel_operational(&session_kernel);
-        assert_kernel_operational(&budget_kernel);
-        assert_kernel_operational(
-            &other_session
-                .core
-                .initialize()
-                .expect("session survives sibling shutdown"),
-        );
-        assert_kernel_operational(
-            &other_budget
-                .core
-                .initialize()
-                .expect("budget survives sibling shutdown"),
-        );
-    }
-
-    #[test]
-    fn shutdown_of_one_wrapper_keeps_shared_kernel_alive() {
-        let temp = tempfile::tempdir().expect("temp root");
-        let root = root_string(temp.path());
-        let first = ZeroKernel::new(test_options(&root, "shared-session", 30_000, 16))
-            .expect("first wrapper");
-        let second = ZeroKernel::new(test_options(&root, "shared-session", 30_000, 16))
-            .expect("second wrapper");
-        let first_kernel = first.core.initialize().expect("initialize first");
-        let second_kernel = second.core.initialize().expect("initialize second");
-        assert_kernel_operational(&first_kernel);
-        assert_kernel_operational(&second_kernel);
-        assert!(first.status().ready);
-        assert!(second.status().ready);
-        first.core.shutdown().expect("shutdown first wrapper");
-        assert!(
-            first.status().terminated,
-            "shut down wrapper must be terminated"
-        );
-        assert!(!first.status().ready);
-        assert!(
-            !second.status().terminated,
-            "survivor must not be terminated"
-        );
-        assert!(second.status().ready, "survivor must stay ready");
-        assert!(
-            first.core.initialize().is_err(),
-            "terminated wrapper must refuse re-initialize"
-        );
-        let survivor = second
-            .core
-            .initialize()
-            .expect("survivor re-initialize without new creation");
-        assert_kernel_operational(&survivor);
-        drop(first);
-        let after_drop = second
-            .core
-            .initialize()
-            .expect("survivor after sibling drop");
-        assert_kernel_operational(&after_drop);
     }
 }

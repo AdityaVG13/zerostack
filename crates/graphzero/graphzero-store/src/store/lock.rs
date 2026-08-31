@@ -1,5 +1,5 @@
 //! Writer exclusion via an OS advisory file lock on `.graphzero/lock`
-//! (FR-012). Readers mmap published snapshots and never take the lock.
+//! . Readers mmap published snapshots and never take the lock.
 //! Uses `std::fs::File::lock` (flock on Unix, LockFileEx on Windows).
 
 use std::fs::{File, OpenOptions};

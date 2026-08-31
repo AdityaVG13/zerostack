@@ -1,18 +1,12 @@
-//! Proof-carrying causal-slack reinvestment.
-//!
-//! A portfolio is admitted only against frozen native resource coordinates,
-//! keeps the raw fallback reserve, and preserves the fixed-model reasoning
-//! contract. Every branch remains isolated, measured, and quality-gated. Only
-//! exact verifier evidence can select a strictly improved dominant branch;
-//! these records do not directly authorize publication.
+//! Proof-carrying causal-slack reinvestment. A portfolio is admitted only against frozen native
+//! resource coordinates, keeps the raw fallback reserve, and preserves the fixed-model reasoning
+//! contract. Every branch remains isolated, measured, and quality-gated.
 
 use std::{error::Error, fmt};
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use zero_abi::{
-    Sha256Digest, StrictReasoningAdmission, canonical_json, reasoning_contract_digest,
-};
+use zero_abi::{Sha256Digest, StrictReasoningAdmission, canonical_json, reasoning_contract_digest};
 use zero_cert::VerifiedEvidence;
 use zero_ledger::{CausalWorkReceipt, ParentCounterIdentity, causal_work_contract_digest};
 
@@ -20,8 +14,7 @@ use crate::{
     q99::{q99_verifier_identity, verified_evidence_digest, verify_exact_successful_payload},
     quality::{QualityAdmission, QualitySelection, quality_envelope_contract_digest},
     transaction::{
-        RestorationScope, TransactionDisposition, TransactionReceipt,
-        transaction_contract_digest,
+        RestorationScope, TransactionDisposition, TransactionReceipt, transaction_contract_digest,
     },
 };
 
@@ -648,7 +641,9 @@ impl ReinvestmentBranchRecord {
         )?;
         if self.measured_work_receipt_digests.is_empty()
             || self.measured_work_receipt_digests.len() != self.measured_work.coordinates.len()
-            || self.measured_work_receipt_digests.contains(&Sha256Digest::ZERO)
+            || self
+                .measured_work_receipt_digests
+                .contains(&Sha256Digest::ZERO)
         {
             return Err(reinvestment_error(
                 ReinvestmentFailureCode::IncompleteMeasuredWork,
@@ -1290,9 +1285,7 @@ fn resource_identity_digest(
     digest_serializable(RESOURCE_IDENTITY_DOMAIN, identity)
 }
 
-fn validate_counter_identity(
-    identity: &ParentCounterIdentity,
-) -> Result<(), ReinvestmentError> {
+fn validate_counter_identity(identity: &ParentCounterIdentity) -> Result<(), ReinvestmentError> {
     if identity.counter_id.is_empty()
         || identity.counter_id.len() > REINVESTMENT_MAX_ID_BYTES
         || identity.boundary_digest == Sha256Digest::ZERO
@@ -1537,4 +1530,3 @@ fn causal_work_error(error: zero_ledger::CausalWorkError) -> ReinvestmentError {
         error.to_string(),
     )
 }
-

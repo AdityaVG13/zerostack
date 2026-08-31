@@ -1,7 +1,6 @@
-//! Shared intent / symbol parsing for blast and reserve footprints.
-//!
-//! Lives in graphzero-store so graphzero-reserve does not depend on
-//! graphzero-engine (breaks the reserve→query cycle for domain dispatch).
+//! Shared intent / symbol parsing for blast and reserve footprints. Lives in graphzero-store so
+//! graphzero-reserve does not depend on graphzero-engine (breaks the reserve→query cycle for domain
+//! dispatch).
 
 use serde::{Deserialize, Serialize};
 
@@ -40,7 +39,7 @@ pub fn parse_intent(intent: &str) -> IntentParse {
         Some(sym) if is_ident(&sym) => IntentParse {
             intent: intent.to_string(),
             target_symbol: Some(sym.clone()),
-            target_ref: Some(format!("gz://node/{sym}")),
+            target_ref: Some(format!("node/{sym}")),
             error: None,
         },
         Some(sym) => IntentParse {

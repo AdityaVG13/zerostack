@@ -200,7 +200,7 @@ fn comments_in_expressions_do_not_become_values() {
 
 #[test]
 fn carriage_return_escape_decodes_to_carriage_return() {
-    // pc_78f6e48133fb: \r previously survived as literal backslash-r bytes.
+    // A carriage-return escape must decode to one carriage-return byte.
     assert_eq!(
         run(r#"
             return "a\rb";
@@ -221,7 +221,7 @@ fn full_standard_escape_battery_decodes() {
 
 #[test]
 fn escaped_backslash_then_n_is_not_a_newline() {
-    // Sequential-replace regression: backslash backslash n must stay backslash n.
+    // The two-character sequence backslash-n must not decode as a newline.
     assert_eq!(
         run(r#"
             const value = "\\n";
@@ -324,6 +324,30 @@ fn common_array_composition_methods_work() {
             return values.reduce((sum, value) => sum + value, 0);
             "#),
         json!(15),
+    );
+}
+
+#[test]
+fn javascript_set_spread_iterates_values() {
+    assert_eq!(
+        run(r#"
+            const values = [...new Set(["a", "a", "b"])];
+            return values;
+            "#),
+        json!(["a", "b"]),
+    );
+}
+
+#[test]
+fn javascript_delete_removes_open_object_property() {
+    assert_eq!(
+        run(r#"
+            const value = { keep: 1, remove: 2 };
+            const removed = delete value.remove;
+            const missing = delete value.missing;
+            return [removed, missing, value];
+            "#),
+        json!([true, true, { "keep": 1 }]),
     );
 }
 

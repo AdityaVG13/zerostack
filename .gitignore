@@ -1,6 +1,4 @@
-# =============================================================================
 # ZeroStack - .gitignore (public hub)
-# =============================================================================
 
 # --- Build / test output ---
 target/
@@ -57,7 +55,7 @@ blobs/
 **/tool-metrics.json
 **/session-memory.json
 
-# --- Agent law (private; live on disk, never remote) ---
+# Local instruction and session files.
 AGENTS.md
 Agents.md
 CLAUDE.md
@@ -68,13 +66,12 @@ CLAUDE.md.*
 .skill-loop-progress.md
 .skill-loop-progress.*
 
-# Local multi-model handoff prompts and execution notes.
+# Internal notes.
 docs/internal/
 
-# Local RACC research-draft staging. Layout is not public yet.
+# Local paper-source staging.
 docs/papers/
 
-.zsx_patch.diff
 *.diff
 *.patch
 bindings/node/prebuilds/
@@ -104,7 +101,6 @@ tests/unit/zero-abi/fuzz_corpus_untrusted_bytes_20260815.rs
 beads_compliance_audit/
 
 # --- Historical / internal (local only) ---
-.v6-distill/
 .mor/
 .skill-loop-progress.*
 MODES_OF_REASONING_REPORT_AND_ANALYSIS_OF_PROJECT.md
@@ -150,3 +146,6 @@ factory.mcp.json
 gemini.mcp.json
 opencode.json
 windsurf.mcp.json
+
+# RCH remote-build integration cache (local only)
+.rch-target-integration/

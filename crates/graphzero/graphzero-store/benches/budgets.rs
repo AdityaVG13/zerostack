@@ -1,8 +1,4 @@
-//! G-004: Criterion distributions for the QueryEngine library surface.
-//! The authoritative 200-file cargo-test-dev budgets are in
-//! `benchmarks/latency/query_latency_gate.json`: warm median <=10 ms / p99 <=50 ms;
-//! cold median <=10 ms / p99 <=20 ms. Criterion reports are diagnostic,
-//! not a second threshold authority. Branch-switch timing is measure-only.
+//! Criterion distributions for warm and cold `QueryEngine` calls.
 
 mod common;
 

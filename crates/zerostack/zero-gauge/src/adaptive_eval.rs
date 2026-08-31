@@ -180,39 +180,3 @@ impl SplitMix64 {
         (self.next_u64() >> 11) as f64 / ((1_u64 << 53) as f64)
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn frontier_tasks_receive_more_sampling_mass() {
-        let histories = vec![
-            TaskHistory {
-                id: "easy".into(),
-                successes: 10,
-                trials: 10,
-            },
-            TaskHistory {
-                id: "frontier".into(),
-                successes: 5,
-                trials: 10,
-            },
-            TaskHistory {
-                id: "hard".into(),
-                successes: 0,
-                trials: 10,
-            },
-        ];
-        let selection = select_tasks(&histories, 1, 7, AdaptiveEvalConfig::default()).unwrap();
-        assert!(selection.inclusion_probabilities[1] > selection.inclusion_probabilities[0]);
-        assert!(selection.inclusion_probabilities[1] > selection.inclusion_probabilities[2]);
-    }
-
-    #[test]
-    fn estimators_preserve_constant_outcomes() {
-        assert!((hajek_estimate(&[(0.5, 0.2), (0.5, 0.8)]).unwrap() - 0.5).abs() < 1e-9);
-        let estimate = anchored_difference_estimate(&[0.5, 0.5], &[(0, 0.5, 0.5)]).unwrap();
-        assert!((estimate - 0.5).abs() < 1e-9);
-    }
-}

@@ -1,20 +1,5 @@
-//! L2/L3 layer validity ledger (ZS-CACHE-012/013 mirror, FSZero store side).
-//!
-//! The store's CAS is physical-only: blob loss historically meant logical
-//! invalidity. This ledger gives the store the hub `LayerValidityLedger`
-//! discipline (ZeroStack `crates/zerostack/zero-gate/src/residency.rs`):
-//!
-//! - A blob evicted by GC/eviction is marked **L3-cold**: the bytes are gone,
-//!   but the logical validity record is retained (L2-valid, needs refetch).
-//!   Eviction never destroys the record and never tombstones it.
-//! - A re-put/refetch of identical bytes restores L3 with the **same
-//!   identity** (the content hash); no rediscovery, no re-derivation.
-//! - Records are serde-defaulted per field; an absent record file reads as
-//!   an absent record, so pre-ledger stores behave exactly as before.
-//!
-//! Records live at `<store_root>/validity/<64-hex-hash>.json`, one small
-//! JSON file per blob. Writes are atomic (hub `atomic_write_file`), so a
-//! reader never observes a torn record.
+//! L2/L3 validity ledger for the FSZero CAS mirror.
+//! Blob residency is tracked separately from logical identity.
 
 use std::fmt;
 use std::path::{Path, PathBuf};
@@ -64,11 +49,9 @@ impl fmt::Display for ValidityError {
 
 impl std::error::Error for ValidityError {}
 
-/// One blob's per-layer validity record.
-///
-/// All fields are serde-defaulted so a record written by a different
-/// (older/newer) schema version still deserializes; absent file == absent
-/// record, which is exactly the pre-ledger store behaviour.
+/// One blob's per-layer validity record. All fields are serde-defaulted so a
+/// record written by a different schema version still
+/// deserializes; absent file == absent record, which is exactly the pre-ledger store behaviour.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ValidityRecord {
@@ -117,9 +100,8 @@ impl ValidityRecord {
         }
     }
 
-    /// Mirror of hub `LayerValidityLedger::validate`: an L3-cold record
-    /// MUST retain L2 validity. A cold record without L2 validity means the
-    /// logical record was destroyed by eviction -- corrupt, fail loud.
+    /// Reject cold records that lost their logical L2 validity.
+    /// Eviction may remove resident bytes but never the validity record.
     pub fn validate(&self) -> Result<(), ValidityError> {
         if self.l3_cold && !self.l2_valid {
             return Err(ValidityError::CorruptLedger {
@@ -189,10 +171,8 @@ impl ValidityLedger {
         })
     }
 
-    /// Publish (or refetch-restore) a blob whose bytes the CAS just verified
-    /// and stored. A put of identical bytes for a cold record is a
-    /// **complete refetch**: L3 restored, same identity, never rediscovered
-    /// (mirror of hub `LayerValidityLedger::complete_refetch`).
+    /// Record verified stored bytes as L3-resident while preserving content identity.
+    /// Publishing an existing cold hash completes its refetch.
     pub fn publish(&self, hash: &str, size: u64) -> Result<(), ValidityError> {
         let mut record = match self.load(hash)? {
             Some(record) => record,
@@ -205,11 +185,9 @@ impl ValidityLedger {
         self.write(&record)
     }
 
-    /// Declare L3 loss (bytes evicted). L2 validity is PRESERVED and the
-    /// record is marked needs-refetch. Idempotent: a repeated mark keeps the
-    /// original `cold_since_unix` so grace windows are not extended. A blob
-    /// with no prior record gets one at eviction time (identity is known --
-    /// the content hash -- so L2 validity is retained, never destroyed).
+    /// Declare L3 loss (bytes evicted). L2 validity is PRESERVED and the record is marked
+    /// needs-refetch. Idempotent: a repeated mark keeps the original `cold_since_unix` so grace windows
+    /// are not extended.
     pub fn mark_l3_cold(&self, hash: &str, size: u64, now_unix: u64) -> Result<(), ValidityError> {
         let Some(mut record) = self.load(hash)? else {
             // Blob with no prior record (pre-ledger store): create the

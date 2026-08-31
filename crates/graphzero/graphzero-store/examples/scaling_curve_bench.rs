@@ -1,14 +1,5 @@
-//! Multi-size latency scaling curve for skill-pass (graphzero-hkexf).
-//!
-//! Builds synthetic repos at N ∈ {1,10,50,100,500,1000}, measures blast wall
-//! times, emits p50/p95 and p95_ratio vs N=1 as JSON.
-//!
-//! Print line: `SCALING_CURVE_RESULT=<json>`
-//!
-//! ```bash
-//! rch exec -- env CARGO_TARGET_DIR=/tmp/rch_target_graphzero \
-//!   cargo run --release -p graphzero-store --example scaling_curve_bench
-//! ```
+//! Multi-size latency scaling curve for skill-pass. Builds synthetic repos at N ∈
+//! {1,10,50,100,500,1000}, measures blast wall times, emits p50/p95 and p95_ratio vs N=1 as JSON.
 
 use std::fs;
 use std::path::PathBuf;
@@ -17,8 +8,8 @@ use std::time::Instant;
 use graphzero_engine::blast::blast_radius;
 use graphzero_store::Snapshot;
 use graphzero_store::store::indexer::index_repo;
-use graphzero_test_support::git::git_commit_all;
 use serde_json::json;
+use zerostack_test_support::git_commit_all;
 
 /// Documented skill sizes (shared with criterion `BENCH_FILE_SWEEP`).
 const SCALE_SIZES: &[usize] = &[1, 10, 50, 100, 500, 1000];

@@ -2,37 +2,38 @@
 
 All notable changes to ZeroStack are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning targets
-[Semantic Versioning](https://semver.org/) once 1.0 is cut. FSZero, GraphZero,
-TokenZero, and ZeroStack release in lockstep because they share the
-`zero-abi` contract.
+[Semantic Versioning](https://semver.org/) once 1.0 is cut. ZeroStack releases
+as one product. FSZero, GraphZero, and TokenZero are its three domain
+subprojects and share the `zero-abi` contract.
 
 ## [Unreleased]
 
 ### Changed
-- ZeroStack, FSZero, GraphZero, and TokenZero now build from one Cargo
-  workspace, with separate crate domains and no engine-to-engine imports.
-- There is no public package. Homebrew, npm, and Pi distribution scaffolds
-  were removed from the tracked tree. The Node binding remains source-only
-  under `bindings/node/`.
+- Retired engine-local product surfaces. ZeroStack exposes one model-facing
+  API: `z.read`, `z.find`, `z.edit`, `z.apply`, `z.run`, and `z.state`. MCP is
+  a one-tool carrier for clients that cannot embed ZeroKernel. It does not
+  expose engine catalogs, aliases, or a second planner.
+- FSZero, GraphZero, and TokenZero now provide file, structure, and token
+  domain logic behind ZeroStack. They remain separate crate domains with no
+  engine-to-engine imports and are not separately installable products.
+- All workspace packages inherit one release identity and dependency policy
+  from the root Cargo workspace.
+- The supported download is the source tree. The canonical executable is
+  `zero-kernel`; the asynchronous Node binding remains under `bindings/node/`.
 - The public README leads with ZeroKernel and recovery-aware context
   compression. RACC documentation is one page at `docs/racc/RACC.md`.
-- The repository now has one demo, one xtask crate, one fuzz workspace, and one
-  flat contracts surface. Archived metadata, obsolete engine-local scripts,
-  duplicate documentation, and the retired root conformance workspace were
-  removed.
-- Engine-domain manifests no longer declare missing test or crate paths.
-  V6 `zero.fs.*` / `zero.graph.*` / `zero.token.*` CodeMode bindings are
-  retired from shipped catalogs; operator CLIs remain installer/re-exec
-  shims, not a second model API.
+- The repository has one demo, one xtask crate, one fuzz workspace, and one
+  flat machine-readable contract surface.
+- Operator diagnostics live on `zero-kernel doctor`.
 - Node `executeCell` abort is a structured `Cancelled` outcome with
   `liveTasks == 0`, not a thrown engine string.
 
 ### Fixed
-- CodeMode string literals now decode every JavaScript escape sequence in a
+- Guest-frame JavaScript string literals now decode every escape sequence in a
   single pass; `\r`, `\uXXXX`, and `\u{...}` can no longer survive as literal
   text, and template-literal escape sequences decode correctly.
-- `z.remove` on a missing path returns a typed `NotFound` instead of poisoning
-  the cell transaction.
+- A removal request through `z.edit` on a missing path returns a typed
+  `NotFound` instead of poisoning the cell transaction.
 - Large-file reads return an unmistakable `[ZeroStack READ OUTLINE]` header
   with the exact-content handle; outline projections can no longer be mistaken
   for file bytes.

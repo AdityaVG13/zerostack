@@ -1,4 +1,4 @@
-//! P5.2 semantic reservations: intent footprints, overlap detection, audit ledger.
+//! Semantic reservations with intent footprints, overlap detection, and an audit ledger.
 
 pub mod footprint;
 pub mod ledger;

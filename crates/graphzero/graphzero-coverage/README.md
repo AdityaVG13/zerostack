@@ -1,6 +1,6 @@
 # graphzero-coverage
 
-GraphZero P0.3 — Coverage Machinery.
+GraphZero coverage certificates and three-answer query semantics.
 
 ## Three-Answer Model
 
@@ -13,10 +13,10 @@ Every query returns one of three mutually exclusive variants, each carrying a
 
 ## Types
 
-- `Bitmap` / `Bitmap` — dense per-blob per-tier bitset (64 categories per tier).
+- `Bitmap`: dense per-blob, per-tier coverage bits.
 - `CoverageCertificate` — per-tier percentage, freshness flag, gap list, timestamp.
 - `QueryResult` — `Present { evidence_ref, certificate }`, `Absent { certificate }`, `Unknown { certificate }`.
-- `CoverageIndex` trait — integration surface with P0.1 snapshot store.
+- `CoverageIndex` trait: storage interface for coverage and content hashes.
 
 ## Freshness
 
@@ -26,20 +26,13 @@ bytes to the stored `ContentHash`. Stale blobs downgrade `ABSENT` to `UNKNOWN`.
 ## Usage
 
 ```rust
-use graphzero_coverage::{QueryResultBuilder, Tier, MockCoverageIndex};
+use graphzero_coverage::{
+    MockCoverageIndex, QueryResultBuilder, Tier, freshness::EmptyProvider,
+};
 
-let mut index = MockCoverageIndex::new();
-// ... populate index ...
-
+let index = MockCoverageIndex::new();
 let result = QueryResultBuilder::new(&index, Tier::A)
-    .found("gz://blob/abc#B10-20".into())
+    .found("z://blob/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa#B10-20".into())
     .build(&EmptyProvider);
 ```
 
-## Tests
-
-```bash
-cargo test -p graphzero-coverage --all-targets
-cargo bench -p graphzero-coverage --bench coverage_bench
-cargo clippy -p graphzero-coverage -- -D warnings
-```

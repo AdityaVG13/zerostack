@@ -1,18 +1,5 @@
-//! Process-start, serialization, and lock-wait detectors.
-//!
-//! Live counters for release gates and contention attribution (fszero-ncib.8 /
-//! .10, fszero-lock-wait-metrics-xwnf). Kill-tests deliberately force increments
-//! and assert detectors report them — hardcoding zeros is forbidden.
-//!
-//! # Attributing multi-process wall time without off-CPU BPF
-//!
-//! Always-on cheap atomics record **wait wall** (and acquire counts) for the
-//! main contention surfaces: index build flock, durable-open busy backoff,
-//! and pack exclusive flock. Operators/profilers:
-//! 1. `lock_wait_snapshot()` / `take_lock_wait_snapshot()` around a trial, or
-//! 2. `FSZERO_INDEX_PHASES` for index phase JSON (includes lock phase when set).
-//! Compare total trial wall to sum of lock-wait_us: residual is CPU + I/O that
-//! is not flock/permit wait. Dual-writer pack wait shows in pack_lock fields.
+//! Process-start, serialization, and lock-wait counters.
+//! Supports release gates and contention attribution.
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, MutexGuard};

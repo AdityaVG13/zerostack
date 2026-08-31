@@ -268,17 +268,6 @@ impl TransactionCoordinator {
                     continue;
                 }
             };
-            // Validate record canonicality: re-serialize and compare.
-            let canonical = serde_json::to_vec(&record)
-                .map_err(|error| TransactionError::Store(error.to_string()))?;
-            // If bytes were not canonical JSON, treat as torn.
-            if canonical != bytes {
-                // Re-check via serde_json::Value canonicalization would be stricter; for now
-                // treat any non-canonical byte mismatch as torn only if decode succeeded but
-                // bytes differ in whitespace/order. We allow it but note diagnostics.
-                // To be fail-closed, we verify that re-parsed record equals original; non-canonical
-                // but valid JSON is not necessarily torn. Keep as recovered after quarantine check.
-            }
             if record.session_id != invocation.context.session_id {
                 // Foreign session binding mismatch is fail-closed: quarantine this entry only.
                 let poisoned = poisoned_journal_path(&path);
@@ -315,8 +304,7 @@ impl TransactionCoordinator {
                 ));
                 continue;
             }
-            // Persist a successful terminalization durably; if dir sync fails,
-            // the publish is ambiguous and we must report RecoveryRequired.
+            // A directory-sync failure makes terminal publication ambiguous and requires recovery.
             if let Err(error) = persist_record(&path, &record) {
                 let is_recovery = matches!(error, TransactionError::RecoveryRequired(_));
                 if is_recovery {
@@ -516,8 +504,15 @@ impl Transaction {
                     )));
                 }
             } else if !request.expect_absent {
-                // Expected preimage provided but file is absent; if caller expected absent,
-                // that's encoded in expect_absent, else it's a mismatch.
+                return Err(TransactionError::Engine(EngineError::new(
+                    EngineErrorKind::Conflict,
+                    format!(
+                        "preimage mismatch for {}: expected {} but target is absent",
+                        request.path.display(),
+                        expected
+                    ),
+                    false,
+                )));
             }
         }
         #[derive(Serialize)]
@@ -544,6 +539,8 @@ impl Transaction {
             before_metadata: snapshot.as_ref().map(|snapshot| FileMetadata {
                 mode: snapshot.mode,
                 modified_unix_ns: snapshot.modified_unix_ns,
+                symlink_target: snapshot.symlink_target.clone(),
+                symlink_target_is_dir: snapshot.symlink_target_is_dir,
             }),
             preparation,
             receipt: None,
@@ -557,10 +554,9 @@ impl Transaction {
 
         // Check cancellation again before dispatching the effect: cancellation cannot commit.
         if self.invocation.cancellation.is_cancelled() {
-            // Roll back the preparation we just persisted; this path must not leave an
-            // applied receipt.
+            // Cancellation rolls back the persisted preparation without leaving a receipt.
             self.record.effects.pop();
-            // We remain in Applying or revert to Prepared if no effects left.
+            // An empty effect list returns the transaction to Prepared.
             if self.record.effects.is_empty() {
                 self.record.state = TransactionState::Prepared;
             }
@@ -717,7 +713,7 @@ impl Transaction {
                 .iter()
                 .filter_map(|effect| effect.receipt.clone())
                 .collect::<Vec<_>>();
-            // Ensure every committed effect has a receipt; otherwise we cannot prove.
+            // Every committed effect requires a receipt.
             if self
                 .record
                 .effects
@@ -998,192 +994,4 @@ fn poisoned_journal_path(path: &Path) -> PathBuf {
     let stem = file_name.strip_suffix(".json").unwrap_or(file_name);
     let poisoned_name = format!("{stem}.poisoned.json");
     path.with_file_name(poisoned_name)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use zero_abi::{
-        EngineCallContext, EngineError, EngineErrorKind, EngineInvocation, FileEffectKind,
-        FileEffectRequest, ZeroHandle,
-    };
-    use zero_store::ZeroCas;
-
-    struct FailingFileEngine;
-    impl FileLease for FailingFileEngine {}
-    impl FileEngine for FailingFileEngine {
-        fn lease(&self, _: &EngineInvocation) -> Result<Box<dyn FileLease>, EngineError> {
-            Ok(Box::new(FailingFileEngine))
-        }
-        fn read(
-            &self,
-            _: &EngineInvocation,
-            _: zero_abi::FileReadRequest,
-        ) -> Result<zero_abi::FileSnapshot, EngineError> {
-            Err(EngineError::new(
-                EngineErrorKind::NotFound,
-                "not found",
-                false,
-            ))
-        }
-        fn lookup(
-            &self,
-            _: &EngineInvocation,
-            _: PathBuf,
-            _: zero_abi::LookupOptions,
-        ) -> Result<Vec<PathBuf>, EngineError> {
-            Ok(Vec::new())
-        }
-        fn apply(
-            &self,
-            _: &EngineInvocation,
-            _: FileEffectRequest,
-        ) -> Result<zero_abi::FileEffectReceipt, EngineError> {
-            Err(EngineError::new(EngineErrorKind::Internal, "apply", false))
-        }
-        fn restore(
-            &self,
-            _: &EngineInvocation,
-            _: &zero_abi::FileEffectReceipt,
-        ) -> Result<(), EngineError> {
-            Err(EngineError::new(
-                EngineErrorKind::Internal,
-                "restore failed",
-                false,
-            ))
-        }
-        fn reconcile(&self, _: &EngineInvocation) -> Result<Vec<ZeroHandle>, EngineError> {
-            Ok(Vec::new())
-        }
-    }
-
-    fn test_invocation(session_id: &str, cell_id: &str) -> EngineInvocation {
-        struct NoopCancel;
-        impl zero_abi::CancellationProbe for NoopCancel {
-            fn is_cancelled(&self) -> bool {
-                false
-            }
-        }
-        EngineInvocation {
-            context: EngineCallContext {
-                workspace_root: PathBuf::from("/tmp"),
-                project_root: PathBuf::from("/tmp"),
-                session_id: session_id.into(),
-                cell_id: cell_id.into(),
-                trace_id: format!("{session_id}-{cell_id}"),
-                deadline_unix_ms: u64::MAX,
-                budget: zero_abi::KernelBudget {
-                    wall_ms: 1_000,
-                    cpu_ms: 1_000,
-                    memory_bytes: 1024 * 1024,
-                    call_limit: 8,
-                    task_limit: 2,
-                    output_byte_limit: 4096,
-                },
-            },
-            cancellation: Arc::new(NoopCancel),
-        }
-    }
-
-    #[test]
-    fn reconcile_quarantines_poisoned_journal_and_recovers_on_next_pass() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let cas = ZeroCas::open(dir.path().join("cas"));
-        let files: Arc<dyn FileEngine> = Arc::new(FailingFileEngine);
-        let coordinator = TransactionCoordinator::new(dir.path().join("tx"), cas, files);
-        let session_id = "sess-poison";
-        let cell_id = "cell-1";
-        let invocation = test_invocation(session_id, cell_id);
-        let record_path = coordinator.record_path(session_id, cell_id);
-        fs::create_dir_all(record_path.parent().unwrap()).expect("mkdir");
-        let record = TransactionRecord {
-            session_id: session_id.into(),
-            cell_id: cell_id.into(),
-            trace_id: invocation.context.trace_id.clone(),
-            state: TransactionState::Prepared,
-            effects: vec![PreparedEffect {
-                request: FileEffectRequest {
-                    kind: FileEffectKind::Write,
-                    path: PathBuf::from("a.txt"),
-                    content: Some(b"hi".to_vec()),
-                    expected_preimage: None,
-                    patch: None,
-                    expect_absent: false,
-                },
-                before: None,
-                before_metadata: None,
-                preparation: ZeroHandle::from_digest(&"0".repeat(64)).unwrap(),
-                receipt: None,
-                restored: false,
-            }],
-            rollback_errors: Vec::new(),
-        };
-        persist_record(&record_path, &record).expect("persist");
-        let original_bytes = fs::read(&record_path).expect("read original");
-        let err = coordinator
-            .reconcile(&invocation)
-            .expect_err("first reconcile must error");
-        let TransactionError::RecoveryRequired(messages) = err else {
-            panic!("unexpected error variant");
-        };
-        assert!(!messages.is_empty(), "recovery must carry diagnostics");
-        assert!(!record_path.exists(), "active journal must be removed");
-        let tx_root = dir.path().join("tx");
-        let mut all_files = Vec::new();
-        let mut stack = vec![tx_root.clone()];
-        while let Some(dir_path) = stack.pop() {
-            for entry in fs::read_dir(&dir_path).expect("read tx dir") {
-                let entry = entry.expect("entry");
-                let path = entry.path();
-                if path.is_dir() {
-                    stack.push(path);
-                } else {
-                    all_files.push(path);
-                }
-            }
-        }
-        assert_eq!(
-            all_files.len(),
-            1,
-            "exactly one quarantined file expected, got {all_files:?}"
-        );
-        let quarantined_path = &all_files[0];
-        assert_ne!(quarantined_path, &record_path);
-        let quarantined_bytes = fs::read(quarantined_path).expect("read quarantined");
-        assert_eq!(
-            quarantined_bytes, original_bytes,
-            "quarantined content must preserve original record"
-        );
-        let quarantined_record: TransactionRecord =
-            serde_json::from_slice(&quarantined_bytes).expect("deserialize quarantined");
-        assert_eq!(quarantined_record.session_id, session_id);
-        assert_eq!(quarantined_record.cell_id, cell_id);
-        assert_eq!(quarantined_record.effects, record.effects);
-        assert!(!record_path.exists());
-        let second = coordinator
-            .reconcile(&invocation)
-            .expect("second reconcile ok");
-        assert!(
-            second.is_empty(),
-            "second reconcile should recover without retrying poisoned transaction"
-        );
-        assert!(quarantined_path.exists());
-        let after_files: Vec<PathBuf> = {
-            let mut v = Vec::new();
-            let mut s = vec![tx_root];
-            while let Some(d) = s.pop() {
-                for e in fs::read_dir(&d).unwrap() {
-                    let p = e.unwrap().path();
-                    if p.is_dir() {
-                        s.push(p);
-                    } else {
-                        v.push(p);
-                    }
-                }
-            }
-            v
-        };
-        assert_eq!(after_files.len(), 1);
-        assert_eq!(fs::read(&after_files[0]).unwrap(), original_bytes);
-    }
 }

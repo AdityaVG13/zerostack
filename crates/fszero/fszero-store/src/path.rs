@@ -9,11 +9,9 @@ pub fn canonicalize_root(root: &Path) -> Result<PathBuf, String> {
     fs::canonicalize(root).map_err(|e| format!("bad root: {e}"))
 }
 
-/// Rejection text for a write/rollback target that resolves outside the
-/// workspace root. Writes are jailed to the session root; the declared
-/// read-only scratch dir (`FSZERO_SCRATCH_DIR`) widens READS only and never
-/// authorizes a write. Must keep the substring `outside root` so
-/// `classify_detail_to_error_class` maps it to the `outside_root` class.
+/// Rejection text for a write/rollback target that resolves outside the workspace root. Writes are
+/// jailed to the session root; the declared read-only scratch dir (`FSZERO_SCRATCH_DIR`) widens
+/// READS only and never authorizes a write.
 pub const ROLLBACK_OUTSIDE_ROOT: &str = "rollback path outside root: writes are jailed to the workspace root; the declared read-only scratch dir (FSZERO_SCRATCH_DIR) widens reads only, never writes; write the file under the session root and return a reference to it instead";
 
 /// Canonicalize an existing path with the standard `not found:` error class.
@@ -118,11 +116,8 @@ pub fn sanitize_relative_arg(arg: &str) -> Result<PathBuf, String> {
     normalize_relative_for_platform(arg, PlatformPathModel::host()).map(PathBuf::from)
 }
 
-/// True when `target` is `root` or a path beneath `root` (component-safe, not string prefix).
-///
-/// Callers that pass non-canonical paths (missing-file rollback) MUST
-/// `lexical_normalize` first — this helper only inspects the strip-prefix rest
-/// and does not re-resolve `..` (fszero-w2g.23 / .48).
+/// True when `target` is `root` or lies beneath it by path components.
+/// Non-canonical callers must run `lexical_normalize`; this helper does not resolve `..`.
 pub fn canonical_path_within_root(root_canon: &Path, target: &Path) -> bool {
     if target == root_canon {
         return true;
@@ -241,7 +236,7 @@ fn canonicalize_existing_tolerant(path: &Path) -> Result<PathBuf, String> {
 }
 
 /// True when `arg` means the session workspace root (not a child path).
-/// Accepts `.`, `./`, empty, and whitespace-only (fszero-n1qc).
+/// Accepts `.`, `./`, empty, and whitespace-only input.
 pub fn is_session_root_arg(arg: &str) -> bool {
     let t = arg.trim();
     t.is_empty() || t == "." || t == "./" || t == ".\\" || t == ".//"
@@ -252,7 +247,7 @@ pub fn resolve_existing_path(root: Option<&Path>, arg: &str) -> Result<PathBuf, 
         if let Some(root) = root {
             return canonicalize_root(root).map_err(|e| {
                 format!(
-                    "{e}; path '.' means the session workspace root — ensure zero_execute root is an existing directory (absolute path preferred)"
+                    "{e}; path '.' means the session workspace root — ensure the configured root is an existing directory (absolute path preferred)"
                 )
             });
         }
@@ -320,12 +315,9 @@ pub fn revalidate_path_under_root_canon(
 /// scratch allowlist does not apply here (see `ROLLBACK_OUTSIDE_ROOT`).
 pub fn validate_rollback_path(root: &Path, path: &Path) -> Result<PathBuf, String> {
     let root_canon = canonicalize_root(root)?;
-    // Always join relative args under `root` first. `path.exists()` follows
-    // links and is CWD-relative for non-absolute inputs, which would both
-    // write-through a tail symlink and jail against the process cwd.
-    // Full lexical normalize BEFORE within-root check so
-    // `nested/../../OUTSIDE` cannot pass via a first-component Normal guard
-    // (fszero-w2g.23 / .48).
+    // Always join relative args under `root` first. `path.exists` follows links and is CWD-relative
+    // for non-absolute inputs, which would both write-through a tail symlink and jail against the
+    // process cwd.
     let joined = if path.is_absolute() {
         lexical_normalize(path)
     } else {
@@ -334,11 +326,8 @@ pub fn validate_rollback_path(root: &Path, path: &Path) -> Result<PathBuf, Strin
     if !canonical_path_within_root(&root_canon, &joined) {
         return Err(ROLLBACK_OUTSIDE_ROOT.to_string());
     }
-    // Mid-path aware (V6-F1 / ZS-SEC-001): a symlink in an ancestor of a
-    // not-yet-existing target is resolved hop-by-hop so a write through
-    // `root/sub/link-out/new.txt` cannot land outside root. A TAIL symlink
-    // (live or dangling) is the write directory entry itself
-    // (filesystem-v1 replace-link-entry) — never followed.
+    // Mid-path aware: a symlink in an ancestor of a not-yet-existing target is
+    // resolved hop-by-hop so a write through `root/sub/link-out/new.txt` cannot land outside root.
     resolve_missing_path(&root_canon, &joined, true)
 }
 
@@ -358,24 +347,16 @@ fn unfollowed_tail_symlink(root_canon: &Path, link: &Path) -> Result<PathBuf, St
     Ok(parent_canon.join(name))
 }
 
-/// Resolve a write/rollback target for a root-jailed mutation.
-///
-/// Mid-path symlink hops that leave `root_canon` are refused (V6-F1 /
-/// ZS-SEC-001). `joined` must already be lexically normalized and pass
-/// `canonical_path_within_root` (the caller's contract). A tail symlink is
-/// returned unfollowed so `atomic_write` rename-replaces the link inode
-/// (filesystem-v1 / contract-v1); it is never write-through.
+/// Resolve a write/rollback target for a root-jailed mutation. Mid-path symlink hops that leave
+/// `root_canon` are refused. `joined` must already be lexically normalized and
+/// pass `canonical_path_within_root` (the caller's contract).
 fn resolve_missing_path(
     root_canon: &Path,
     joined: &Path,
     replace_tail_symlink: bool,
 ) -> Result<PathBuf, String> {
-    // Find the deepest ancestor that is stat-able (exists, or is itself a
-    // possibly dangling symlink). Mid-path directory links resolve THROUGH
-    // (canonicalize / dangling chase, within-root per hop). A tail symlink
-    // on a write target is the directory entry being replaced — do not
-    // follow it. Parent resolution (`guard_write_target_parent`) still
-    // follows so a dir symlink to outside cannot jailbreak.
+    // Find the deepest ancestor that is stat-able (exists, or is itself a possibly dangling symlink).
+    // Mid-path directory links resolve THROUGH (canonicalize / dangling chase, within-root per hop).
     let mut ancestor: &Path = joined;
     loop {
         match ancestor.symlink_metadata() {
@@ -425,13 +406,8 @@ fn resolve_missing_path(
     }
 }
 
-/// Write-time TOCTOU guard (V6-F1 / ZS-SEC-001): re-verify that the write
-/// target's parent still resolves inside `root` immediately before
-/// publication. Between path validation and the atomic write an attacker
-/// could swap a parent directory for a symlink pointing outside the root;
-/// this re-resolves the parent at the last moment (mid-path aware, tolerating
-/// not-yet-created parents) and refuses any target whose parent leaves the
-/// root. One walk + one canonicalize per write — cheap.
+/// Write-time TOCTOU guard: re-verify that the write target's parent still
+/// resolves inside `root` immediately before publication.
 pub fn guard_write_target_parent(root: &Path, target: &Path) -> Result<(), String> {
     let root_canon = canonicalize_root(root)?;
     let Some(parent) = target.parent() else {
@@ -510,11 +486,9 @@ pub fn atomic_write(path: &Path, content: &[u8]) -> Result<(), String> {
     atomic_write_with_outcome(path, content).map_err(|error| error.to_string())
 }
 
-/// Stable kind label for a write target. Missing paths are writable (create).
-/// Regular files and (unfollowed) symlinks are allowed: rename-replace of a
-/// symlink replaces the link entry, which is contract-v1. FIFOs, sockets,
-/// devices, and directories are refused so we never block on a pipe or clobber
-/// a special node with a regular file (fszero-ai-filesystem-excellence-jqf.1.1).
+/// Stable kind label for a write target. Missing paths are writable (create). Regular files and
+/// (unfollowed) symlinks are allowed: rename-replace of a symlink replaces the link entry, which is
+/// filesystem contract.
 fn refuse_unsupported_write_kind(path: &Path) -> Result<(), AtomicWriteError> {
     let Ok(meta) = fs::symlink_metadata(path) else {
         return Ok(());
@@ -531,10 +505,8 @@ fn refuse_unsupported_write_kind(path: &Path) -> Result<(), AtomicWriteError> {
 }
 
 /// Refuse opening a FIFO, socket, device, or directory for bounded file I/O.
-///
-/// `fs::read` / `File::open` on a FIFO blocks the worker. Metadata does not.
-/// Call this before any content open (fszero-ai-filesystem-excellence-jqf.9.1).
-/// Missing paths return Ok so the caller can emit not-found.
+/// `fs::read` / `File::open` on a FIFO blocks the worker. Metadata does not. Call
+/// this before any content open. Missing paths return Ok so the caller can emit not-found.
 pub fn refuse_non_regular_file(path: &Path) -> Result<(), String> {
     let Ok(meta) = fs::metadata(path) else {
         return Ok(());
@@ -600,32 +572,7 @@ impl std::fmt::Display for AtomicWriteError {
     }
 }
 
-// Process-environment failpoints poison unrelated parallel libtest cases.
-#[cfg(test)]
-std::thread_local! {
-    static TEST_ATOMIC_FAILPOINT: std::cell::Cell<Option<&'static str>> = const { std::cell::Cell::new(None) };
-}
-
-#[cfg(test)]
-pub struct TestAtomicFailpointGuard(Option<&'static str>);
-
-#[cfg(test)]
-impl Drop for TestAtomicFailpointGuard {
-    fn drop(&mut self) {
-        TEST_ATOMIC_FAILPOINT.with(|failpoint| failpoint.set(self.0));
-    }
-}
-
-#[cfg(test)]
-pub fn test_atomic_failpoint(value: Option<&'static str>) -> TestAtomicFailpointGuard {
-    let previous = TEST_ATOMIC_FAILPOINT.with(|failpoint| failpoint.replace(value));
-    TestAtomicFailpointGuard(previous)
-}
-
 fn atomic_failpoint(stage: &'static str) -> Result<(), AtomicWriteError> {
-    #[cfg(test)]
-    let injected = TEST_ATOMIC_FAILPOINT.with(|failpoint| failpoint.get() == Some(stage));
-    #[cfg(not(test))]
     let injected = std::env::var("FSZERO_ATOMIC_FAILPOINT").ok().as_deref() == Some(stage);
     if injected {
         Err(AtomicWriteError {
@@ -696,10 +643,9 @@ pub fn full_sync_file(file: &fs::File) -> Result<(), String> {
             fn fcntl(fd: i32, command: i32, ...) -> i32;
         }
         const F_FULLFSYNC: i32 = 51;
-        // SAFETY: `file` owns a live fd for this call. F_FULLFSYNC is Darwin
-        // fcntl command 51 and takes no varargs, so the two-argument form
-        // matches the libc ABI. The kernel does not retain `fd`. `-1` reports
-        // failure via errno.
+        // SAFETY: `file` owns a live fd for this call. F_FULLFSYNC is Darwin fcntl
+        // command 51 and takes no varargs, so the two-argument form matches the
+        // libc ABI. The kernel does not retain `fd`. `-1` reports failure via errno.
         if unsafe { fcntl(file.as_raw_fd(), F_FULLFSYNC) } == -1 {
             return Err(format!(
                 "durability unavailable: FULLFSYNC failed: {}",
@@ -732,12 +678,9 @@ fn flush_dir(path: &Path) -> Result<(), String> {
         fn FlushFileBuffers(handle: isize) -> i32;
         fn CloseHandle(handle: isize) -> i32;
     }
-    // SAFETY: `wide` is a NUL-terminated UTF-16 path that outlives this call.
-    // GENERIC_READ (0x8000_0000) + FILE_SHARE_READ|WRITE|DELETE (1|2|4) +
-    // OPEN_EXISTING (3) + FILE_FLAG_BACKUP_SEMANTICS (0x0200_0000) is the
-    // documented way to open a directory handle. NULL security and no
-    // template handle are valid. The result is either INVALID_HANDLE_VALUE
-    // (-1) or an owned handle we CloseHandle below.
+    // SAFETY: `wide` is a NUL-terminated UTF-16 path that outlives this call. GENERIC_READ
+    // (0x8000_0000) + FILE_SHARE_READ|WRITE|DELETE (1|2|4) + OPEN_EXISTING (3) +
+    // FILE_FLAG_BACKUP_SEMANTICS (0x0200_0000) is the documented way to open a directory handle.
     let handle = unsafe {
         CreateFileW(
             wide.as_ptr(),
@@ -794,10 +737,9 @@ fn replace_file(src: &Path, dst: &Path) -> Result<(), String> {
     unsafe extern "system" {
         fn MoveFileExW(existing: *const u16, new: *const u16, flags: u32) -> i32;
     }
-    // SAFETY: `src` and `dst` are NUL-terminated UTF-16 buffers that outlive
-    // this call. Flags MOVEFILE_REPLACE_EXISTING (1) | MOVEFILE_WRITE_THROUGH
-    // (8) request replace-in-place with write-through durability. The API
-    // does not retain the pointers.
+    // SAFETY: `src` and `dst` are NUL-terminated UTF-16 buffers that outlive this
+    // call. Flags MOVEFILE_REPLACE_EXISTING (1) | MOVEFILE_WRITE_THROUGH (8) request
+    // replace-in-place with write-through durability. The API does not retain the pointers.
     if unsafe { MoveFileExW(src.as_ptr(), dst.as_ptr(), 1 | 8) } == 0 {
         Err("MoveFileExW atomic replacement failed".into())
     } else {
@@ -841,10 +783,9 @@ fn create_atomic_temp(parent: &Path, name: &str) -> Result<(PathBuf, fs::File), 
     })
 }
 
-/// Per-phase wall attribution for `atomic_write_with_outcome`, emitted as one
-/// JSON line on stderr when `FSZERO_ATOMIC_WRITE_PHASES` is set (fszero-1unf).
-/// Zero-cost when the env var is absent. Phases: prepare_dir_sync, temp_write,
-/// full_sync, rename, dir_sync (us).
+/// Per-phase wall attribution for `atomic_write_with_outcome`, emitted as one JSON
+/// line on stderr when `FSZERO_ATOMIC_WRITE_PHASES` is set. Zero-cost when the env
+/// var is absent. Phases: prepare_dir_sync, temp_write, full_sync, rename, dir_sync (us).
 struct AtomicWritePhaseTimer {
     enabled: bool,
     started: std::time::Instant,
@@ -877,8 +818,6 @@ impl AtomicWritePhaseTimer {
         if !self.enabled {
             return;
         }
-        #[cfg(test)]
-        record_test_phases(&self.entries);
         let phases: serde_json::Map<String, serde_json::Value> = self
             .entries
             .into_iter()
@@ -897,28 +836,10 @@ impl AtomicWritePhaseTimer {
 }
 
 fn atomic_write_phases_enabled() -> bool {
-    #[cfg(test)]
-    if TEST_ATOMIC_WRITE_PHASES.with(|flag| flag.get()) {
-        return true;
-    }
     match std::env::var("FSZERO_ATOMIC_WRITE_PHASES") {
         Ok(v) => matches!(v.as_str(), "1" | "true" | "TRUE" | "on" | "yes"),
         Err(_) => false,
     }
-}
-
-#[cfg(test)]
-std::thread_local! {
-    static TEST_ATOMIC_WRITE_PHASES: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
-    static LAST_ATOMIC_WRITE_PHASES: std::cell::RefCell<Vec<(&'static str, u64)>> =
-        const { std::cell::RefCell::new(Vec::new()) };
-}
-
-#[cfg(test)]
-fn record_test_phases(entries: &[(&'static str, u64)]) {
-    LAST_ATOMIC_WRITE_PHASES.with(|cell| {
-        *cell.borrow_mut() = entries.to_vec();
-    });
 }
 
 pub fn atomic_write_with_outcome(path: &Path, content: &[u8]) -> Result<(), AtomicWriteError> {
@@ -945,7 +866,7 @@ pub fn atomic_write_with_outcome(path: &Path, content: &[u8]) -> Result<(), Atom
         .to_string_lossy();
     refuse_unsupported_write_kind(path)?;
     // `symlink_metadata`: a tail symlink is replaced, not followed
-    // (filesystem-v1 / contract-v1 replace-link-entry). Mode/xattr carry
+    // (filesystem contract replace-link-entry). Mode/xattr carry
     // applies only to a regular file at this directory entry.
     let existing = fs::symlink_metadata(path)
         .ok()
@@ -1034,9 +955,8 @@ pub fn sync_file(path: &Path) -> Result<(), String> {
     full_sync_file(&file)
 }
 
-/// Extended attributes of `path` as a deterministic JSON object
-/// (name -> hex-encoded value). `Some("{}")` = readable, none present;
-/// `None` = unknown (unreadable or non-unix platform). fszero-l4g.
+/// Extended attributes of `path` as a deterministic JSON object (name -> hex-encoded value).
+/// `Some("{}")` = readable, none present; `None` = unknown (unreadable or non-unix platform)..
 pub fn xattrs_of(path: &Path) -> Option<String> {
     #[cfg(unix)]
     {
@@ -1048,7 +968,7 @@ pub fn xattrs_of(path: &Path) -> Option<String> {
             };
             map.insert(
                 name.to_string_lossy().into_owned(),
-                serde_json::Value::String(fszero_core::operation_schemas::hex_encode_pub(&value)),
+                serde_json::Value::String(fszero_core::hexutil::bytes_to_lower_hex(&value)),
             );
         }
         Some(serde_json::Value::Object(map).to_string())
@@ -1060,11 +980,9 @@ pub fn xattrs_of(path: &Path) -> Option<String> {
     }
 }
 
-/// Restore the journaled xattr set exactly: journaled attrs are re-set,
-/// attrs present now but absent from the journal are removed. Best-effort
-/// per attribute (system-managed attrs such as com.apple.provenance may
-/// refuse writes); hard failures are reported joined. Empty `journaled`
-/// means unknown and is skipped entirely.
+/// Restore the journaled xattr set exactly: journaled attrs are re-set, attrs present now but
+/// absent from the journal are removed. Best-effort per attribute (system-managed attrs such as
+/// com.apple.provenance may refuse writes); hard failures are reported joined.
 pub fn restore_xattrs(path: &Path, journaled: &str) -> Result<(), String> {
     if journaled.is_empty() {
         return Ok(());
@@ -1136,8 +1054,7 @@ pub fn mode_of(path: &Path) -> i64 {
     }
 }
 
-/// Restore journaled permission bits (fszero-7be). Negative = unknown,
-/// skipped; no-op on non-unix platforms.
+/// Restore journaled permission bits. Negative = unknown, skipped; no-op on non-unix platforms.
 pub fn set_mode(path: &Path, mode: i64) -> Result<(), String> {
     if mode < 0 {
         return Ok(());
@@ -1175,9 +1092,8 @@ pub fn file_meta_snapshot(path: &Path) -> (i64, i64, String) {
     )
 }
 
-/// Restore a journaled mtime after materializing journaled content
-/// (fszero-md6: build systems key on mtime; drift causes spurious or —
-/// worse — skipped rebuilds). 0 means unknown and is skipped.
+/// Restore a journaled mtime after materializing journaled content (: build systems key on
+/// mtime; drift causes spurious or worse — skipped rebuilds). 0 means unknown and is skipped.
 pub fn set_mtime_ns(path: &Path, mtime_ns: i64) -> Result<(), String> {
     if mtime_ns <= 0 {
         return Ok(());
@@ -1250,20 +1166,5 @@ pub fn resolve_scratch_read_path(arg: &str) -> Result<PathBuf, String> {
         Ok(target)
     } else {
         Err(scratch_read_hint())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::full_sync_file;
-    use std::io::Write;
-
-    #[test]
-    fn full_sync_file_succeeds_on_host_tempfile() {
-        let mut file = tempfile::tempfile().expect("host tempfile");
-        file.write_all(b"full-sync-barrier")
-            .expect("write host tempfile");
-        full_sync_file(&file)
-            .expect("durability barrier (sync_all + macOS F_FULLFSYNC) must succeed on this host");
     }
 }

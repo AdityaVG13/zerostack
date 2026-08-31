@@ -1,15 +1,13 @@
 # Journal delta feed
 
-Generated evidence for **fszero-sa2v**.
 
 ## Wire schema
 
 Each serde snake_case delta contains `version`, `seq`, `op`, `path`,
 `before_hash`, `after_hash`, `byte_range`, and `replacement`.
-`op` is `upsert` or `remove`. Hashes are lowercase SHA-256 of the exact
-image bytes. `replacement` contains only the changed postimage bytes, so the
-wire is self-contained and does not require parsing or expanding an `fz://`,
-`gz://`, or `tz://` reference.
+`op` is `upsert` or `remove`. Hashes are lowercase SHA-256 of exact image bytes.
+`replacement` contains only changed postimage bytes, so the wire is self-contained
+and does not require reference expansion.
 
 `byte_range` is the minimal changed span after removing the common prefix and
 suffix. Its three offsets are architecture-neutral `u64` byte offsets and are
@@ -38,8 +36,10 @@ expansion, diffing, and hashing are `O(B)` for total pre/post bytes. Consumer
 integration is `O(L + D + S)`, where `D` is replacement bytes and `S` is caller
 state cloning required for atomic publication. Consumer memory is `O(D + S)`.
 
-## Detached RCH verification
+## Verification
 
-`rch exec -- cargo test --test journal_delta -- --nocapture`
-
-`rch exec -- cargo check --all-targets`
+```bash
+RCH_REQUIRE_REMOTE=1 rch exec -- env \
+  CARGO_TARGET_DIR=/tmp/rch_target_zerostack \
+  cargo test -p fszero-store --test journal_delta_gap -- --test-threads=1
+```

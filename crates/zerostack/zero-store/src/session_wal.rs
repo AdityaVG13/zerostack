@@ -1,19 +1,6 @@
-//! Session-merge WAL for engine recovery journals.
-//!
-//! [`DurableJournal`](crate::DurableJournal) is a single-transaction digest
-//! 2PC with a 64 KiB record cap, fail-closed torn records, no foreign-writer
-//! merge, and fatal `sync_all`. Engines (TokenZero recovery, FS/GZ session
-//! journals) need the opposite:
-//!
-//! - caller-supplied opaque bytes of unbounded size (hard cap is
-//!   [`SESSION_WAL_MAX_RECORD_BYTES`], 64 MiB, not 64 KiB)
-//! - append-only records; compaction is a snapshot rewrite the caller owns
-//! - torn tail fails open (prefix is kept)
-//! - foreign writers are detected via [`FileIdentity`]; merge is caller-owned
-//! - fsync is optional ([`SyncPolicy`])
-//!
-//! One writer per WAL unless the caller reloads, merges, and republishes after
-//! [`SessionWal::foreign_write_since`].
+//! Session-merge WAL for engine recovery journals. [`DurableJournal`](crate::DurableJournal) is a
+//! single-transaction digest 2PC with a 64 KiB record cap, fail-closed torn records, no
+//! foreign-writer merge, and fatal `sync_all`.
 
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Write};

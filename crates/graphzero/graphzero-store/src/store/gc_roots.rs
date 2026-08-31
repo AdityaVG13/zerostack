@@ -1,16 +1,6 @@
-//! Shared-CAS GC reachability-root publisher for GraphZero (zerostack.cas-gc.legacy).
-//!
-//! Implements the producer side of the frozen multi-engine GC contract under
-//! `~/AI/tokenzero/schemas/shared-cas-gc/v1`. GraphZero writes only its own
-//! namespace: `<store-root>/gc/roots/graphzero/<project_id>/current.json`.
-//! The record lists every blob hash GraphZero currently considers live, so an
-//! independent coordinator can collect unreachable shared-CAS objects without
-//! deleting blobs retained by graph facts, snapshots, refs, active queries, or
-//! legacy stores.
-//!
-//! Safety invariant: when in doubt, retain. This module never deletes; it
-//! only publishes roots. Enumerating too many hashes is conservative; missing
-//! one is a bug.
+//! Shared-CAS GC reachability-root publisher for GraphZero. Implements the producer side of the
+//! frozen multi-engine GC contract under `~/AI/tokenzero/schemas/shared-cas-gc`. GraphZero writes
+//! only its own namespace: `<store-root>/gc/roots/graphzero/<project_id>/current.json`.
 
 use std::collections::BTreeSet;
 use std::fs::{self, OpenOptions};
@@ -103,11 +93,9 @@ impl PinRecord {
     }
 }
 
-/// Stable project identity: full lowercase SHA-256 of the canonicalized store root.
-///
-/// The contract requires a 64-hex project_id. GraphZero derives it from the
-/// canonicalized absolute store-root path so the same project always gets the
-/// same id, while distinct store roots never collide.
+/// Stable project identity: full lowercase SHA-256 of the canonicalized store root. The contract
+/// requires a 64-hex project_id. GraphZero derives it from the canonicalized absolute store-root
+/// path so the same project always gets the same id, while distinct store roots never collide.
 pub fn project_id(store_root: &Path) -> String {
     let canonical = absolute_path(store_root).to_string_lossy().into_owned();
     fast_hex(&Sha256::digest(canonical.as_bytes()))
@@ -155,13 +143,6 @@ pub fn read_reachability_snapshot_at(path: &Path) -> Result<ReachabilitySnapshot
 }
 
 /// Exclusive publisher lock for one GC namespace directory.
-///
-/// The GC record is a read-modify-write (read current epoch, increment,
-/// rename over `current.json`), so atomic rename alone is not enough: two
-/// unsynchronised publishers can read the same epoch and the later rename
-/// silently discards the other's blob set. This lock is scoped to the
-/// namespace directory, not the store writer lock, so publishing roots never
-/// blocks indexing.
 struct GcNamespaceLock {
     file: fs::File,
 }
@@ -187,17 +168,9 @@ impl Drop for GcNamespaceLock {
     }
 }
 
-/// Publish a reachability snapshot atomically on the same filesystem.
-///
-/// Protocol: take the namespace publisher lock, refuse any epoch that does not
-/// strictly exceed the currently published one, then write a uniquely named
-/// sibling temp file, flush it, and rename it over `current.json`. Never
-/// modifies `current.json` in place.
-///
-/// Strict monotonicity is a safety property, not bookkeeping: a snapshot that
-/// declared a blob set reachable must never be replaced by an older-epoch
-/// snapshot that omits it, or a sweeper on the shared root becomes entitled to
-/// collect still-live objects.
+/// Publish a reachability snapshot atomically on the same filesystem. Protocol: take the namespace
+/// publisher lock, refuse any epoch that does not strictly exceed the currently published one, then
+/// write a uniquely named sibling temp file, flush it, and rename it over `current.json`.
 pub fn publish_reachability_snapshot(
     store_root: &Path,
     epoch: u64,
@@ -242,9 +215,8 @@ fn publish_reachability_snapshot_locked(
     let tmp = dir.join(format!(".current.{}.tmp", process_nonce()));
     {
         let mut f = OpenOptions::new()
-            .create(true)
             .write(true)
-            .truncate(true)
+            .create_new(true)
             .open(&tmp)
             .with_context(|| format!("create temp snapshot {}", tmp.display()))?;
         f.write_all(text.as_bytes())
@@ -272,9 +244,8 @@ pub fn publish_pin_record(store_root: &Path, pin: &PinRecord) -> Result<PathBuf>
     let tmp = dest.with_extension(format!("{}.tmp", process_nonce()));
     {
         let mut f = OpenOptions::new()
-            .create(true)
             .write(true)
-            .truncate(true)
+            .create_new(true)
             .open(&tmp)
             .with_context(|| format!("create temp pin {}", tmp.display()))?;
         f.write_all(text.as_bytes())
@@ -289,18 +260,6 @@ pub fn publish_pin_record(store_root: &Path, pin: &PinRecord) -> Result<PathBuf>
 }
 
 /// Enumerate every blob hash GraphZero considers live at `store_root`.
-///
-/// Sources:
-///   - the canonical shared-CAS object directory (`blobs/sha256/...`)
-///   - the legacy local BlobStore (`blobs/`, flat 64-hex files)
-///   - the records sidecar (`records_latest.jsonl`)
-///   - the paths sidecar for every published snapshot (`shards/paths_*.txt`)
-///   - the per-user ref-index entries that point back at this store_root
-///     and name `gz://blob/<hash>` refs.
-///
-/// This is intentionally conservative: it may include hashes that are no
-/// longer referenced by current graph facts, but it must never drop a hash
-/// that is.
 pub fn enumerate_live_blob_hashes(store_root: &Path) -> Result<BTreeSet<String>> {
     let mut hashes = BTreeSet::new();
     collect_cas_object_hashes(store_root, &mut hashes)?;
@@ -562,8 +521,7 @@ fn process_nonce() -> u64 {
 }
 
 fn sync_dir(path: &Path) -> std::io::Result<()> {
-    // Prefer File::sync_all over libc::fsync (graphzero-esig8 / site-0019):
-    // isomorphic durability, no unsafe, matches hub atomic_write/indexer.
+    // Sync directory metadata through the safe File API.
     #[cfg(unix)]
     {
         fs::File::open(path)?.sync_all()?;

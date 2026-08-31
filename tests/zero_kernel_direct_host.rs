@@ -7,24 +7,24 @@ use std::time::{Duration, Instant};
 
 use parking_lot::Mutex;
 
-use fszero_kernel::ZeroFileEngine;
 use serde_json::{Value, json};
 use tempfile::tempdir;
-use tokenzero_kernel::ZeroTokenEngine;
 use zero_abi::{
     AsgrepOptions, CapsulePublication, CompressionRequest, CompressionResult, EffectChangeKind,
-    EffectChangeRequest, EffectRequest, EngineError, EngineErrorKind, EngineInvocation,
-    FileEffectKind, FileEffectReceipt, FileEffectRequest, FileEngine, FileLease, FileReadRequest,
-    FileSnapshot, KernelBudget, KernelContext, LookupOptions, ProjectionRequest, ProjectionResult,
-    ReadOptions, SafetyVerdict, ShellOptions, SpeculationBinding, StructuralCoverage,
-    StructuralEngine, StructuralHit, StructuralQuery, StructuralResult, TaskLensCompilerImpact,
-    TaskLensRequest, TaskLensResult, TokenAccounting, TokenEngine, ZeroHandle, ZeroKernelEvent,
-    sha256_hex,
+    EffectChangeRequest, EffectRequest, EngineCallContext, EngineError, EngineErrorKind,
+    EngineInvocation, FileEffectKind, FileEffectReceipt, FileEffectRequest, FileEngine, FileLease,
+    FileReadRequest, FileSnapshot, KernelBudget, KernelContext, LookupOptions, ProjectionRequest,
+    ProjectionResult, ReadOptions, SafetyVerdict, ShellOptions, SpeculationBinding,
+    StructuralCoverage, StructuralEngine, StructuralHit, StructuralQuery, StructuralResult,
+    TaskLensCompilerImpact, TaskLensRequest, TaskLensResult, TokenAccounting, TokenEngine,
+    ZeroHandle, ZeroKernelEvent, sha256_hex,
 };
+use zero_fs::ZeroFileEngine;
 use zero_kernel::{
-    AtomicCancellation, CellPreparation, HostError, PreparedCell, ShellCommand, TransactionRecord,
-    TransactionState, ZeroKernel,
+    AtomicCancellation, CellPreparation, HostError, PreparedCell, ShellCommand,
+    TransactionCoordinator, TransactionError, TransactionRecord, TransactionState, ZeroKernel,
 };
+use zero_token::ZeroTokenEngine;
 
 fn handle(bytes: &[u8]) -> ZeroHandle {
     ZeroHandle::from_digest(blake3::hash(bytes).to_hex().as_str()).unwrap()
@@ -73,6 +73,8 @@ impl FileEngine for Files {
             byte_len: bytes.len() as u64,
             modified_unix_ns: 0,
             mode: 0,
+            symlink_target: None,
+            symlink_target_is_dir: false,
             inline_utf8,
             outline,
         })
@@ -208,7 +210,7 @@ impl FileEngine for Files {
 fn capsule_object_digest(capsule: &zero_abi::WorkCapsule) -> String {
     let value = serde_json::to_value(capsule).expect("capsule JSON");
     let envelope = serde_json::json!({
-        "schema": "zerostack.capsule.object.v1",
+        "schema": "zerostack.capsule.object",
         "capsule": value,
     });
     sha256_hex(zero_abi::canonical_json(&envelope).as_bytes())
@@ -834,7 +836,7 @@ fn production_kernel_relaxed_with_graph(root: &std::path::Path) -> ZeroKernel {
         ZeroFileEngine::open(root, &store_root, "contract").expect("open production file engine"),
     );
     let graph = Arc::new(
-        graphzero_kernel::ZeroStructuralEngine::open(root, store_root.join("graph"), &store_root)
+        zero_graph::ZeroStructuralEngine::open(root, store_root.join("graph"), &store_root)
             .expect("open production structural engine"),
     );
     ZeroKernel::new(
@@ -1355,6 +1357,52 @@ fn event_publication_failure_compensates_effects_and_state() {
 }
 
 #[test]
+fn transaction_rejects_expected_preimage_when_target_is_absent() {
+    let root = tempdir().unwrap();
+    let files = Arc::new(Files::default());
+    let invocation = EngineInvocation {
+        context: EngineCallContext {
+            workspace_root: root.path().to_path_buf(),
+            project_root: root.path().to_path_buf(),
+            session_id: "missing-preimage".into(),
+            cell_id: "cell-1".into(),
+            trace_id: "missing-preimage-cell-1".into(),
+            deadline_unix_ms: u64::MAX,
+            budget: KernelBudget {
+                wall_ms: 1_000,
+                cpu_ms: 1_000,
+                memory_bytes: 1024 * 1024,
+                call_limit: 8,
+                task_limit: 2,
+                output_byte_limit: 4096,
+            },
+        },
+        cancellation: Arc::new(AtomicCancellation::new()),
+    };
+    let coordinator = TransactionCoordinator::new(
+        root.path().join("transactions"),
+        zero_store::ZeroCas::open(root.path().join("cas")),
+        Arc::clone(&files) as Arc<dyn FileEngine>,
+    );
+    let mut transaction = coordinator.begin(invocation).unwrap();
+    let error = transaction
+        .apply(FileEffectRequest {
+            kind: FileEffectKind::Write,
+            path: PathBuf::from("missing.txt"),
+            content: Some(b"replacement".to_vec()),
+            expected_preimage: Some(handle(b"expected")),
+            patch: None,
+            expect_absent: false,
+        })
+        .expect_err("an expected preimage requires an existing target");
+    assert!(
+        matches!(error, TransactionError::Engine(ref error) if error.kind == EngineErrorKind::Conflict),
+        "{error}"
+    );
+    assert!(!files.0.lock().contains_key(Path::new("missing.txt")));
+}
+
+#[test]
 fn fresh_kernel_continues_transaction_cell_sequence() {
     let root = tempdir().unwrap();
     let files = Arc::new(Files::default());
@@ -1695,7 +1743,7 @@ fn read_snapshot_and_edit_commit_exactly_once_in_one_cell() {
               target: {path: "edit.ts"},
               selection: {exactText: "before"},
             });
-            const receipt = await z.edit(snap, {find: "before", replace: "after"});
+            const receipt = await z.edit(snap, {find: "before", replacement: "after"});
             const after = await z.read("edit.ts");
             return {receipt, after};
             "#,
@@ -1747,7 +1795,7 @@ fn one_cell_find_snap_edit_verify_returns_only_final_ack() {
             });
             await z.edit(snap, {
               find: "pub const BEFORE: u32 = 1;",
-              replace: "pub const AFTER: u32 = 1;",
+              replacement: "pub const AFTER: u32 = 1;",
             });
             return await z.read("src/needle.rs");
             "#,
@@ -1791,7 +1839,7 @@ fn read_snapshot_edit_rejects_stale_preimage_without_mutation() {
     let snap = serde_json::to_string(&snap).unwrap();
     let response = kernel
         .execute_cell(&format!(
-            "const snap = {snap}; return await z.edit(snap, {{find: \"before\", replace: \"after\"}});"
+            "const snap = {snap}; return await z.edit(snap, {{find: \"before\", replacement: \"after\"}});"
         ))
         .unwrap();
 
@@ -1815,7 +1863,7 @@ fn failed_cell_restores_snapshot_aware_edit() {
         .execute_cell(
             r#"
             const snap = await z.read({path: "rollback.ts"});
-            await z.edit(snap, {find: "before", replace: "after"});
+            await z.edit(snap, {find: "before", replacement: "after"});
             throw new Error("stop after snap-aware edit");
             "#,
         )
@@ -1922,7 +1970,7 @@ fn snapshot_aware_edit_rejects_patch_outside_selection() {
               path: "scope.ts",
               selection: {exactText: "before"},
             });
-            return await z.edit(snap, {find: "elsewhere", replace: "changed"});
+            return await z.edit(snap, {find: "elsewhere", replacement: "changed"});
             "#,
         )
         .unwrap();
@@ -2697,7 +2745,7 @@ fn edit_path_rejects_whole_file_replacement_string() {
         .execute_cell(
             r#"
             const p = 'guard-edit.txt';
-            await z.edit(p, {create: 'v1\nv2\nv3\n'});
+            await z.edit(p, {create: 'line-one\nline-two\nline-three\n'});
             let caught = null;
             try { await z.edit(p, 'WHOLE-FILE-REPLACEMENT'); }
             catch (e) { caught = String(e.message || e); }
@@ -2726,7 +2774,7 @@ fn edit_path_rejects_whole_file_replacement_string() {
     );
     assert_eq!(
         pair.get(1).and_then(Value::as_str),
-        Some("v1\nv2\nv3\n"),
+        Some("line-one\nline-two\nline-three\n"),
         "file must be untouched"
     );
 }
@@ -2739,11 +2787,11 @@ fn edit_path_find_replacement_substitutes_first_unique_match() {
         .execute_cell(
             r#"
             const p = 'guard-edit-sub.txt';
-            await z.edit(p, {create: `v1
-v2
-v3
+            await z.edit(p, {create: `line-one
+line-two
+line-three
 `});
-            await z.edit(p, { find: 'v2', replacement: 'V2-DONE' });
+            await z.edit(p, { find: 'line-two', replacement: 'LINE-TWO-DONE' });
             return await z.read(p);
         "#,
         )
@@ -2754,17 +2802,93 @@ v3
     let returned = response.value.unwrap();
     assert_eq!(
         returned.as_str(),
-        Some("\"v1\\nV2-DONE\\nv3\\n\""),
+        Some("\"line-one\\nLINE-TWO-DONE\\nline-three\\n\""),
         "substituted content must round-trip"
     );
     assert_eq!(
         std::fs::read_to_string(root.path().join("guard-edit-sub.txt")).unwrap(),
-        "v1
-V2-DONE
-v3
+        "line-one
+LINE-TWO-DONE
+line-three
 ",
         "filesystem must reflect substitution"
     );
+}
+
+#[test]
+fn direct_edit_and_apply_reject_retired_patch_aliases() {
+    let cases = [
+        (
+            "edit old/new",
+            "await z.edit('target.txt', {old: 'alpha', new: 'beta'});",
+        ),
+        (
+            "edit pattern/replace",
+            "await z.edit('target.txt', {pattern: 'alpha', replace: 'beta'});",
+        ),
+        (
+            "edit find/replace",
+            "await z.edit('target.txt', {find: 'alpha', replace: 'beta'});",
+        ),
+        (
+            "apply nested find/replace",
+            "await z.apply([{path: 'target.txt', edit: {find: 'alpha', replace: 'beta'}}]);",
+        ),
+        (
+            "apply nested old/new",
+            "await z.apply([{path: 'target.txt', edit: {old: 'alpha', new: 'beta'}}]);",
+        ),
+        (
+            "apply flat edit",
+            "await z.apply([{path: 'target.txt', find: 'alpha', replacement: 'beta'}]);",
+        ),
+        (
+            "edit unknown field",
+            "await z.edit('target.txt', {find: 'alpha', replacement: 'beta', unexpected: true});",
+        ),
+        (
+            "edit typed find alias",
+            "await z.edit('target.txt', {kind: 'replace_exact', find: 'alpha', replacement: 'beta', expectedCount: 1});",
+        ),
+        (
+            "edit typed expected_count alias",
+            "await z.edit('target.txt', {kind: 'replace_exact', old: 'alpha', replacement: 'beta', expected_count: 1});",
+        ),
+        (
+            "apply nested unknown field",
+            "await z.apply([{path: 'target.txt', edit: {find: 'alpha', replacement: 'beta', unexpected: true}}]);",
+        ),
+        (
+            "edit bare string create",
+            "await z.edit('missing.txt', 'alpha');",
+        ),
+    ];
+
+    for (label, operation) in cases {
+        let root = tempdir().unwrap();
+        let kernel = production_kernel_relaxed(root.path());
+        let setup = kernel
+            .execute_cell("await z.edit('target.txt', {create: 'alpha'}); return true;")
+            .unwrap();
+        assert_eq!(
+            setup.outcome,
+            zero_abi::ZeroKernelOutcome::Completed,
+            "canonical setup failed for {label}: {setup:?}"
+        );
+        let response = kernel
+            .execute_cell(&format!("{operation} return true;"))
+            .unwrap();
+        assert_eq!(
+            response.outcome,
+            zero_abi::ZeroKernelOutcome::Failed,
+            "{label} dispatched: {response:?}"
+        );
+        assert_eq!(
+            fs::read_to_string(root.path().join("target.txt")).unwrap(),
+            "alpha",
+            "{label} mutated the file"
+        );
+    }
 }
 
 #[test]
@@ -3892,9 +4016,7 @@ fn atomic_effect_binds_source_capsule_policy_state_before_and_receipt() {
     assert_eq!(receipt.path, PathBuf::from("atomic.txt"));
     assert!(receipt.after.is_some());
     assert!(receipt.journal.as_str().starts_with("z://blob/"));
-    // No placeholder receipt
     assert!(!receipt.journal.as_str().is_empty());
-    // Verify file actually exists with expected content
     let files_lock = files.0.lock();
     assert_eq!(
         files_lock
@@ -4040,17 +4162,13 @@ fn atomic_effect_receipt_is_exact_and_single_authority() {
         .execute_atomic_effect(source, request, AtomicCancellation::new())
         .unwrap();
     assert_eq!(response.effects.len(), 1);
-    // Receipt must not be placeholder: journal must be valid handle and after must be resolvable
     let receipt = &response.effects[0];
     assert!(receipt.journal.as_str().starts_with("z://blob/"));
     assert!(receipt.after.is_some());
-    // Ensure no second effect authority remains: there is only one committed receipt, not a staged placeholder
     assert_eq!(
         files.0.lock().get(&PathBuf::from("drift.txt")).unwrap(),
         b"ok"
     );
-    // The public host surface is the one-call atomic path; internal split helpers are crate-private
-    // This is enforced by visibility (pub(crate) for begin_transaction etc.) - compile-time guarantee
     response.validate().unwrap();
     assert_eq!(kernel.live_frames(), 0);
 }
@@ -4326,9 +4444,7 @@ fn failed_cell_with_large_wall_budget_returns_without_failed_frame_delay() {
         4,
     );
     let started = Instant::now();
-    let response = kernel
-        .execute_cell("throw new Error('boom');")
-        .unwrap();
+    let response = kernel.execute_cell("throw new Error('boom');").unwrap();
     let elapsed = started.elapsed();
     assert_eq!(response.outcome, zero_abi::ZeroKernelOutcome::Failed);
     assert!(

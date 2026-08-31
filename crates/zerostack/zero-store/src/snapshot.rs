@@ -1,23 +1,4 @@
-//! Snapshot-isolation contract and explicit stale-reader semantics
-//! (ZS-OPS-002 / V6-R14).
-//!
-//! Concurrent reads and branch races are serializable at the root: every
-//! commit is a parent-root CAS in `durable_journal` (a second writer from
-//! the same parent observes `RootMismatch` -- never a torn or interleaved
-//! root). This module adds the reader side of that contract:
-//!
-//! - [`take_root_snapshot`] captures the current published root and its
-//!   generation as an immutable [`SnapshotView`].
-//! - [`resolve_snapshot_read`] resolves a reader's snapshot against the
-//!   current root. Staleness is *explicit*: a stale reader receives a sealed
-//!   [`SnapshotStalenessReceipt`] naming both the snapshot and the current
-//!   root. The store never silently redirects a stale reader to newer data
-//!   and never serves mixed roots: a read under a snapshot is either served
-//!   exactly from the snapshot root or refused with the receipt.
-//! - [`snapshot_isolation_contract`] freezes the contract manifest:
-//!   readers read exactly one root; stale readers are explicit; concurrent
-//!   writers are serializable via the parent-root CAS; a branch race leaves
-//!   exactly one authoritative root.
+//! Snapshot-isolation contract and explicit stale-reader semantics.
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -32,12 +13,12 @@ pub const SNAPSHOT_SCHEMA_VERSION: u16 = 1;
 /// Domain tag bound into every staleness receipt digest.
 pub const SNAPSHOT_STALENESS_DOMAIN: &[u8] = b"zerostack.snapshot-staleness\0";
 /// ABI tag carried by snapshot artifacts.
-pub const SNAPSHOT_ABI_VERSION: &str = "v6-r14";
+pub const SNAPSHOT_ABI_VERSION: &str = "zerostack.snapshot/1";
 
 fn now_unix_ns() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_nanos() as u64)
+        .map(|duration| u64::try_from(duration.as_nanos()).unwrap_or(u64::MAX))
         .unwrap_or(0)
 }
 
@@ -61,10 +42,9 @@ impl SnapshotView {
     }
 }
 
-/// Sealed receipt for one snapshot resolution. `stale == false` means the
-/// snapshot root is still the current root; `stale == true` is the explicit
-/// stale-reader artifact: the read must either re-snapshot or be refused --
-/// the store never silently serves newer data to a stale view.
+/// Sealed receipt for one snapshot resolution. `stale == false` means the snapshot root is
+/// still the current root; `stale == true` is the explicit stale-reader artifact: the read
+/// must either re-snapshot or be refused the store never silently serves newer data to a stale view.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct SnapshotStalenessReceipt {
@@ -112,12 +92,9 @@ pub fn take_root_snapshot(paths: &JournalPaths) -> Result<SnapshotView, JournalE
     ))
 }
 
-/// Resolve a reader snapshot against the current published root.
-///
-/// Explicit stale-reader semantics: when the snapshot root differs from the
-/// current root the resolution is `stale == true` with a sealed receipt
-/// naming both roots and generations. The caller must re-snapshot or refuse
-/// the read; a stale view is never silently advanced.
+/// Resolve a reader snapshot against the current published root. Explicit stale-reader semantics:
+/// when the snapshot root differs from the current root the resolution is `stale == true` with a
+/// sealed receipt naming both roots and generations.
 pub fn resolve_snapshot_read(
     paths: &JournalPaths,
     view: SnapshotView,
@@ -143,7 +120,7 @@ pub fn resolve_snapshot_read(
     })
 }
 
-/// The frozen snapshot-isolation contract manifest (ZS-OPS-002).
+/// The frozen snapshot-isolation contract manifest.
 pub fn snapshot_isolation_contract() -> serde_json::Value {
     serde_json::json!({
         "schema_version": SNAPSHOT_SCHEMA_VERSION,

@@ -1,9 +1,6 @@
-//! Explicit GraphZero durability evidence over the canonical ZeroStore journal.
-//!
-//! Ordinary indexing does not call this module. Callers opt in only after they
-//! have an assembly expectation, canonical surface bytes, and a candidate
-//! manifest. This module proves the local store transition; it never mints a
-//! hub native durability receipt.
+//! Explicit GraphZero durability evidence over the canonical ZeroStore journal. Ordinary indexing
+//! does not call this module. Callers opt in only after they have an assembly expectation,
+//! canonical surface bytes, and a candidate manifest.
 
 use std::collections::BTreeSet;
 use std::fs;
@@ -12,13 +9,13 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, bail, ensure};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use zero_abi::{Sha256Digest, canonical_json, sha256};
+use zero_abi::{DurableProfile, DurableProfileId, Sha256Digest, canonical_json, sha256};
 use zero_store::{
-    ContinuationCartridge, DurableProfile, DurableProfileId, FaultPlan, JournalBinding,
-    JournalFailureCode, JournalPaths, JournalState, OwnerDeathReceipt, RecoveryOutcome,
-    RecoveryReceipt, abort_journal_with_fault, commit_journal_with_fault,
-    initialize_published_root, prepare_journal_with_fault, read_continuation_cartridge,
-    read_journal_record, read_published_root, record_owner_death, recover_journal,
+    ContinuationCartridge, FaultPlan, JournalBinding, JournalFailureCode, JournalPaths,
+    JournalState, OwnerDeathReceipt, RecoveryOutcome, RecoveryReceipt, abort_journal_with_fault,
+    commit_journal_with_fault, initialize_published_root, prepare_journal_with_fault,
+    read_continuation_cartridge, read_journal_record, read_published_root, record_owner_death,
+    recover_journal,
 };
 
 use super::blob_store::BlobStore;
@@ -28,8 +25,8 @@ use super::shard::file_hash64;
 use crate::ContentHash;
 
 pub const DURABILITY_RECEIPT_SCHEMA_VERSION: u16 = 1;
-const RECEIPT_DOMAIN: &[u8] = b"graphzero.durability_receipt.v1\0";
-const MANIFEST_DOMAIN: &[u8] = b"graphzero.manifest.v1\0";
+const RECEIPT_DOMAIN: &[u8] = b"graphzero.durability_receipt\0";
+const MANIFEST_DOMAIN: &[u8] = b"graphzero.manifest\0";
 const JOURNAL_DIR: &str = ".durability";
 
 /// Frozen feeder identities required by the local parity evidence contract.
@@ -818,8 +815,8 @@ fn validate_surface(surface: &CanonicalSurfaceBytes) -> Result<()> {
     ensure!(!refs.is_empty(), "canonical ref set is empty");
     for reference in refs {
         ensure!(
-            reference.starts_with("gz://blob/"),
-            "evidence ref is not a full gz://blob ref: {reference}"
+            reference.starts_with("z://blob/"),
+            "evidence ref is not a full z://blob/ ref: {reference}"
         );
         let GzRef::Blob { hash, fragment } = GzRef::parse(&reference)
             .map_err(|error| anyhow::anyhow!("invalid evidence ref {reference}: {error}"))?
@@ -838,7 +835,7 @@ fn validate_surface(surface: &CanonicalSurfaceBytes) -> Result<()> {
             "fragment evidence ref is not allowed: {reference}"
         );
         ensure!(
-            reference == format!("gz://blob/{hash}"),
+            reference == format!("z://blob/{hash}"),
             "evidence ref is not canonical: {reference}"
         );
     }
@@ -1132,7 +1129,3 @@ fn read_owner_death(paths: &JournalPaths) -> Result<Option<OwnerDeathReceipt>> {
         Err(error) => Err(error).context("read owner-death receipt"),
     }
 }
-
-#[cfg(test)]
-#[path = "../../../../../tests/graphzero/unit/graphzero-store/durability_receipt_tests.rs"]
-mod tests;

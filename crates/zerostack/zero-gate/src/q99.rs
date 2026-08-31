@@ -1,8 +1,5 @@
-//! Proof-carrying Q99 causal-cache validation and receipt-generated claims.
-//!
-//! Semantic cache validity, provider telemetry, reasoning continuation, and
-//! complete-work claims remain distinct. No token/cache observation can mint
-//! quality authority, and no unlabeled percentage is representable here.
+//! Proof-carrying Q99 causal-cache validation and receipt-generated claims. Semantic cache
+//! validity, provider telemetry, reasoning continuation, and complete-work claims remain distinct.
 
 use std::{collections::BTreeSet, error::Error, fmt};
 
@@ -108,12 +105,10 @@ impl CacheValidity {
                     "provider and reasoning coordinates require their distinct exact statuses",
                 ))
             }
-            Self::SoundOverapproximation if coordinate != CacheCoordinate::Graph => {
-                Err(q99_error(
-                    Q99FailureCode::StatusCoordinateMismatch,
-                    "sound overapproximation is only a graph/dependency-closure status",
-                ))
-            }
+            Self::SoundOverapproximation if coordinate != CacheCoordinate::Graph => Err(q99_error(
+                Q99FailureCode::StatusCoordinateMismatch,
+                "sound overapproximation is only a graph/dependency-closure status",
+            )),
             Self::ByteIdenticalPrefix if coordinate != CacheCoordinate::Rendering => {
                 Err(q99_error(
                     Q99FailureCode::StatusCoordinateMismatch,
@@ -140,16 +135,20 @@ impl CacheValidity {
                     "exact reasoning continuation is only a reasoning status",
                 ))
             }
-            Self::Approximate { error_bound_digest } if *error_bound_digest == Sha256Digest::ZERO => {
+            Self::Approximate { error_bound_digest }
+                if *error_bound_digest == Sha256Digest::ZERO =>
+            {
                 Err(q99_error(
                     Q99FailureCode::ZeroDigest,
                     "approximate status requires a nonzero error-bound digest",
                 ))
             }
-            Self::Invalid { reason_digest } if *reason_digest == Sha256Digest::ZERO => Err(q99_error(
-                Q99FailureCode::ZeroDigest,
-                "invalid status requires a nonzero reason digest",
-            )),
+            Self::Invalid { reason_digest } if *reason_digest == Sha256Digest::ZERO => {
+                Err(q99_error(
+                    Q99FailureCode::ZeroDigest,
+                    "invalid status requires a nonzero reason digest",
+                ))
+            }
             _ => Ok(()),
         }
     }
@@ -232,7 +231,7 @@ impl CausalCacheComponentClaim {
         if self.schema_version != Q99_CACHE_SCHEMA_VERSION {
             return Err(q99_error(
                 Q99FailureCode::SchemaVersionMismatch,
-                "cache component schema version is not v1",
+                "cache component schema is unsupported",
             ));
         }
         self.binding.validate()?;
@@ -388,10 +387,7 @@ impl CausalCacheAssessmentRecord {
                 (CacheCoordinate::ProviderCache, CacheValidity::ProviderEligible) => {
                     provider_eligible = true;
                 }
-                (
-                    CacheCoordinate::ProviderCache,
-                    CacheValidity::ProviderReportedHit { tokens },
-                ) => {
+                (CacheCoordinate::ProviderCache, CacheValidity::ProviderReportedHit { tokens }) => {
                     provider_eligible = true;
                     provider_hit = Some(*tokens);
                 }
@@ -650,10 +646,7 @@ pub struct VerifiedCausalWorkRecord {
 impl VerifiedCausalWorkRecord {
     pub fn validate(&self) -> Result<(), Q99Error> {
         self.receipt.validate().map_err(|error| {
-            q99_error(
-                Q99FailureCode::InvalidCausalWorkReceipt,
-                error.to_string(),
-            )
+            q99_error(Q99FailureCode::InvalidCausalWorkReceipt, error.to_string())
         })?;
         let bytes = canonical_causal_work_bytes(&self.receipt)?;
         require_nonzero(
@@ -708,7 +701,7 @@ impl Q99TaskPairClaim {
         if self.schema_version != Q99_TASK_PAIR_SCHEMA_VERSION {
             return Err(q99_error(
                 Q99FailureCode::SchemaVersionMismatch,
-                "Q99 task-pair schema version is not v1",
+                "Q99 task-pair schema is unsupported",
             ));
         }
         require_nonzero(
@@ -847,7 +840,7 @@ impl Q99PreparationClaim {
         if self.schema_version != Q99_PREPARATION_SCHEMA_VERSION {
             return Err(q99_error(
                 Q99FailureCode::SchemaVersionMismatch,
-                "Q99 preparation schema version is not v1",
+                "Q99 preparation schema is unsupported",
             ));
         }
         require_nonzero(
@@ -867,10 +860,7 @@ impl Q99PreparationClaim {
     }
 
     pub fn digest(&self) -> Result<Sha256Digest, Q99Error> {
-        Ok(domain_digest(
-            PREPARATION_DOMAIN,
-            &self.canonical_bytes()?,
-        ))
+        Ok(domain_digest(PREPARATION_DOMAIN, &self.canonical_bytes()?))
     }
 }
 
@@ -1008,8 +998,7 @@ impl Q99ClaimRecord {
                 "Q99 denominator cannot be zero",
             ));
         }
-        if matches!(self.label, Q99Label::Q99State | Q99Label::Q99Input)
-            && numerator > denominator
+        if matches!(self.label, Q99Label::Q99State | Q99Label::Q99Input) && numerator > denominator
         {
             return Err(q99_error(
                 Q99FailureCode::InvalidClaim,
@@ -1017,10 +1006,7 @@ impl Q99ClaimRecord {
             ));
         }
         let expected = match (self.label, self.threshold_relation) {
-            (
-                Q99Label::Q99State | Q99Label::Q99Input,
-                Q99ThresholdRelation::AtLeast99Of100,
-            ) => {
+            (Q99Label::Q99State | Q99Label::Q99Input, Q99ThresholdRelation::AtLeast99Of100) => {
                 self.work_profile.is_none()
                     && self.threshold_numerator == 99
                     && self.threshold_denominator == 100
@@ -1441,12 +1427,9 @@ fn work_profile(receipt: &CausalWorkReceipt) -> WorkProfile {
 }
 
 fn canonical_causal_work_bytes(receipt: &CausalWorkReceipt) -> Result<Vec<u8>, Q99Error> {
-    receipt.validate().map_err(|error| {
-        q99_error(
-            Q99FailureCode::InvalidCausalWorkReceipt,
-            error.to_string(),
-        )
-    })?;
+    receipt
+        .validate()
+        .map_err(|error| q99_error(Q99FailureCode::InvalidCausalWorkReceipt, error.to_string()))?;
     canonical_bytes(receipt)
 }
 
@@ -1601,10 +1584,7 @@ pub(crate) fn verified_evidence_digest(
         "span_count": certificate.spans.len(),
     }))
     .map_err(|error| json_error(error.to_string()))?;
-    Ok(digest_value(
-        b"zerostack.q99.verified_evidence\0",
-        &value,
-    ))
+    Ok(digest_value(b"zerostack.q99.verified_evidence\0", &value))
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -1672,4 +1652,3 @@ fn q99_error(code: Q99FailureCode, detail: impl Into<String>) -> Q99Error {
 fn json_error(detail: String) -> Q99Error {
     q99_error(Q99FailureCode::Json, detail)
 }
-

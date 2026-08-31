@@ -1,8 +1,6 @@
-//! tsserver typed-edge adapter.
-//!
-//! The adapter consumes resolved TypeScript server call/import targets from an
-//! LSP-side driver and enriches tree-sitter facts without making tsserver a
-//! mandatory extraction dependency.
+//! tsserver typed-edge adapter. The adapter consumes resolved TypeScript
+//! server call/import targets from an LSP-side driver and enriches
+//! tree-sitter facts without making tsserver a mandatory extraction dependency.
 
 use crate::confidence_band;
 use crate::{
@@ -140,23 +138,17 @@ impl TsServerLiveStatus {
     }
 }
 
-/// Probe the real TypeScript language server executable used for live
-/// tsserver-backed enrichment.
-///
-/// Contract fixtures call apply_tsserver_edges directly with synthetic
-/// resolutions. Live integration callers/tests use this probe first, so reports
-/// distinguish unavailable TypeScript server tooling from contract-only success.
-/// GRAPHZERO_TSSERVER_BIN overrides the executable for CI and developer shells.
+/// Probe the real TypeScript language server executable used for live tsserver-backed enrichment.
+/// Contract fixtures call apply_tsserver_edges directly with synthetic resolutions.
 pub fn probe_live_tsserver() -> TsServerLiveStatus {
     let binary = std::env::var("GRAPHZERO_TSSERVER_BIN")
         .unwrap_or_else(|_| "typescript-language-server".to_string());
     probe_live_tsserver_binary(binary)
 }
 
-/// Spawn contract: the executable and `--version` are discrete argv entries;
-/// the probe inherits the caller's environment, blocks until the diagnostic
-/// command exits, and reports spawn failures or non-zero status with the exact
-/// executable name rather than treating missing output as success.
+/// Spawn contract: the executable and `--version` are discrete argv entries; the probe inherits the
+/// caller's environment, blocks until the diagnostic command exits, and reports spawn failures or
+/// non-zero status with the exact executable name rather than treating missing output as success.
 fn probe_live_tsserver_binary(binary: String) -> TsServerLiveStatus {
     match probe_binary_version(&binary) {
         Ok(version) => TsServerLiveStatus::available(binary, version),

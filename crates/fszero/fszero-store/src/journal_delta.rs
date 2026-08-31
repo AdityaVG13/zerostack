@@ -1,7 +1,6 @@
-//! Portable, ordered mutation-journal deltas (fszero-sa2v).
-//!
-//! A byte range is half-open in each image: `start..before_end` is replaced
-//! by `start..after_end`. This makes unequal-length replacements explicit.
+//! Portable, ordered mutation-journal deltas. A byte range is half-open in each image:
+//! `start..before_end` is replaced by `start..after_end`. This makes unequal-length replacements
+//! explicit.
 
 use crate::recovery::RecoveryStore;
 use serde::{Deserialize, Serialize};
@@ -125,9 +124,8 @@ impl RecoveryStore {
     }
 }
 
-/// Atomically integrate a page into caller-owned logical state.
-///
-/// No workspace path or engine-specific ref is read. Every touched preimage,
+/// Atomically integrate a page into caller-owned logical state. No
+/// workspace path or engine-specific ref is read. Every touched preimage,
 /// replacement, sequence, operation, and range is validated before publication.
 pub fn integrate_journal_deltas(
     state: &mut BTreeMap<String, Vec<u8>>,

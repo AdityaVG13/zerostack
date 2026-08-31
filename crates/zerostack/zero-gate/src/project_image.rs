@@ -1,43 +1,24 @@
 #![forbid(unsafe_code)]
 
-//! W8 shadow-only immutable project-image manifest reporter (`zerostack-pfvi`).
-//!
-//! Shadow reporter: deterministic for one root, no production authority.
-//! It reads current engine receipts/contracts without editing engine
-//! repositories and keeps L1 (provider cache), L2 (logical validity), and
-//! L3 (physical residency) distinct. A hypothetical child after a declared
-//! change shares unchanged objects and names affected claims without
-//! mutating the old root. All unknown/missing inputs remain explicit.
-//!
-//! # Laws
-//! - [`ProjectImageManifest::has_authority`] is always `false`.
-//! - [`ValidityClass`] distinguishes `ValidNotResident` from `Invalid`.
-//! - [`hypothetical_child`] preserves `parent_root` and computes a
-//!   deterministic `child_root` from parent + declared change.
-//! - Every optional input carries an explicit `unknown_reason` when `None`.
-//! - Canonical bytes are sorted-key JSON; `digest()` is
-//!   `SHA-256(domain || canonical_bytes)` for determinism.
+//! Deterministic, shadow-only project-image manifest reporting.
+//! Reports one root and has no production decision authority.
 
 use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use zero_abi::{canonical_json, sha256, Sha256Digest};
+use zero_abi::{Sha256Digest, canonical_json, sha256};
 
 use crate::residency::{LayerValidityEntry, LayerValidityLedger};
 
-// ---------------------------------------------------------------------------
 // Constants
-// ---------------------------------------------------------------------------
 
-pub const PROJECT_IMAGE_SCHEMA_VERSION: &str = "zerostack.project_image.shadow.v1";
+pub const PROJECT_IMAGE_SCHEMA_VERSION: &str = "zerostack.project_image.shadow";
 pub const PROJECT_IMAGE_DOMAIN: &[u8] = b"zerostack.project_image.shadow\0";
 /// Marker that this report is shadow-only and grants no authority.
 pub const SHADOW_HAS_AUTHORITY: bool = false;
 
-// ---------------------------------------------------------------------------
 // Errors
-// ---------------------------------------------------------------------------
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ProjectImageError {
@@ -64,9 +45,7 @@ fn img_err(msg: impl Into<String>) -> ProjectImageError {
     ProjectImageError::InvalidObject(msg.into())
 }
 
-// ---------------------------------------------------------------------------
 // Exact objects (immutable CAS identities)
-// ---------------------------------------------------------------------------
 
 /// One exact immutable object in the image (CAS identity + size).
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -101,9 +80,7 @@ impl ExactObject {
     }
 }
 
-// ---------------------------------------------------------------------------
 // Declared graphs (causal / proof) -- explicit unknown
-// ---------------------------------------------------------------------------
 
 /// Declared causal graph reference. `digest == None` requires `unknown_reason`.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -205,9 +182,7 @@ impl ProofGraphRef {
     }
 }
 
-// ---------------------------------------------------------------------------
 // Registered representations
-// ---------------------------------------------------------------------------
 
 /// Registered representation kinds ( cheapest sufficient view lattice ).
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
@@ -283,9 +258,7 @@ impl RegisteredRepresentation {
     }
 }
 
-// ---------------------------------------------------------------------------
 // L1 / L2 / L3 distinct validity
-// ---------------------------------------------------------------------------
 
 /// Per-object L1/L2/L3 state kept distinct (no aliasing).
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -321,7 +294,7 @@ impl PerObjectLayers {
                 _ => {
                     return Err(ProjectImageError::InvalidValidity(
                         "l2_needs_refetch requires l2_logically_valid == true".into(),
-                    ))
+                    ));
                 }
             }
         }
@@ -390,9 +363,7 @@ pub enum ValidityClass {
     Unknown,
 }
 
-// ---------------------------------------------------------------------------
 // Demand scenarios
-// ---------------------------------------------------------------------------
 
 /// One finite demand scenario (declared envelope).
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -431,9 +402,7 @@ impl DemandScenario {
     }
 }
 
-// ---------------------------------------------------------------------------
 // Complete resource ledger (shadow snapshot, no authority)
-// ---------------------------------------------------------------------------
 
 /// One resource row in the complete ledger (shadow copy of `zero-ledger` rows).
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -487,10 +456,6 @@ impl ShadowResourceLedger {
     }
 
     pub fn validate(&self) -> Result<(), ProjectImageError> {
-        if self.rows.is_empty() && self.unknown_reason.is_none() {
-            // Empty ledger is allowed as "no charges yet" -- not an error, but
-            // callers that expect complete ledger should use unknown() instead.
-        }
         for r in &self.rows {
             r.validate()?;
         }
@@ -502,15 +467,11 @@ impl ShadowResourceLedger {
     }
 }
 
-// ---------------------------------------------------------------------------
 // ProjectImageManifest (shadow, immutable, deterministic)
-// ---------------------------------------------------------------------------
 
-/// Immutable project-image manifest reporter (W8, shadow-only).
-///
-/// Deterministic for one `root`; serializes to sorted-key JSON.
-/// L1/L2/L3 are kept in `per_object_layers` without aliasing.
-/// `has_authority()` is always false.
+/// Immutable project-image manifest reporter (shadow-only).
+/// Deterministic for one `root`; serializes to sorted-key JSON. L1/L2/L3
+/// are kept in `per_object_layers` without aliasing. `has_authority` is always false.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ProjectImageManifest {
@@ -644,8 +605,7 @@ impl ProjectImageManifest {
         }
         self.resource_ledger.validate()?;
 
-        // Cross-check: every per_object_layers entry must correspond to an exact object or be explicit unknown.
-        // (No hard error if extra -- it may be a tombstoned L2 record kept for accounting.)
+        // Extra layer entries may be tombstoned L2 records retained for accounting.
         let object_set: BTreeSet<Sha256Digest> =
             self.exact_objects.iter().map(|o| o.digest).collect();
         for l in &self.per_object_layers {
@@ -703,9 +663,7 @@ impl ProjectImageManifest {
     }
 }
 
-// ---------------------------------------------------------------------------
 // Hypothetical child (shares unchanged objects, names affected claims)
-// ---------------------------------------------------------------------------
 
 /// A declared change that hypothetically forks the image.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -794,13 +752,9 @@ impl HypotheticalChildReport {
     }
 }
 
-/// Model one hypothetical child after a declared change while preserving the old root.
-///
-/// The child shares all unchanged `exact_objects` by digest; only objects whose
-/// digest is in `change.changed_object_roots` are considered affected. Per-object
-/// layer entries for affected objects are synthesized as unknown with an explicit
-/// reason; unchanged layers are cloned. Demand scenarios are cloned verbatim.
-/// The child root is `SHA-256(domain || parent_root || sorted changed digests || sorted claim ids)`.
+/// Model one hypothetical child after a declared change while preserving the old root. The child
+/// shares all unchanged `exact_objects` by digest; only objects whose digest is in
+/// `change.changed_object_roots` are considered affected.
 pub fn hypothetical_child(
     parent: &ProjectImageManifest,
     change: &DeclaredChange,
@@ -823,10 +777,8 @@ pub fn hypothetical_child(
     let mut child_exact_objects = Vec::new();
     for obj in &parent.exact_objects {
         if changed_set.contains(&obj.digest) {
-            // Affected: keep the same digest in the child for reporting (hypothetical
-            // new bytes would have a new digest; callers that know the new digest
-            // should replace this entry after forking). We keep the digest to show
-            // which identity is affected without mutating the parent.
+            // Preserve the parent digest to identify the affected object. Callers replace it after
+            // producing new bytes, without mutating the parent image.
             child_exact_objects.push(obj.clone());
         } else {
             shared_objects.push(obj.digest);
@@ -931,9 +883,7 @@ pub fn hypothetical_child(
     })
 }
 
-// ---------------------------------------------------------------------------
 // Convenience: layer ledger helpers
-// ---------------------------------------------------------------------------
 
 /// Build a `BTreeMap` view of per-object validity classes for quick lookup.
 pub fn validity_class_map(
@@ -946,12 +896,9 @@ pub fn validity_class_map(
         .collect()
 }
 
-/// Build a best-effort L2-only validity view from fully known manifest layers.
-///
-/// The manifest remains the source of truth. L1/L3 flags are intentionally
-/// not carried because `LayerValidityLedger` exposes no reconstruction API for
-/// them. Entries without L2 validity are skipped; refetch-pending L2 identity
-/// is preserved with [`LayerValidityLedger::mark_l3_loss`].
+/// Build a best-effort L2-only validity view from fully known manifest layers. The manifest remains
+/// the source of truth. L1/L3 flags are intentionally not carried because `LayerValidityLedger`
+/// exposes no reconstruction API for them.
 pub fn layer_ledger_from_manifest(manifest: &ProjectImageManifest) -> LayerValidityLedger {
     let mut ledger = LayerValidityLedger::new();
     for layer in &manifest.per_object_layers {
@@ -969,29 +916,11 @@ pub fn layer_ledger_from_manifest(manifest: &ProjectImageManifest) -> LayerValid
     ledger
 }
 
-// ---------------------------------------------------------------------------
-// W8 exact Q99 + child-image repair shadow reporting (`zerostack-e7dz`)
-// ---------------------------------------------------------------------------
-//
-// Shadow-only extension of the W8 reporter: exact-rational demand coverage,
-// exact Q99 slack, action-guard simulation (deny/replenish), minimum repair
-// `g_min`, and a hypothetical child warm-swap report (W8-T4/T11/T12).
-//
-// Laws (all shadow; nothing here mutates or publishes roots):
-// - Q99 means demanded-valid mass, not cache-hit percentage. `valid_mass`
-//   counts only L2-valid demanded mass; L1 provider hits and L3 physical
-//   residency are separate labeled figures and never alias the Q99 basis.
-// - Every Q99 figure is reported against its labeled denominator
-//   (`q99_demanded_mass:<N>`); no bare percentages are emitted.
-// - Zero demanded mass reports `unavailable`/`None` with an explicit reason;
-//   impossibility is reported, never averaged into a fake number.
-// - `g_min = max(0, B + A - (1 - theta) * W_next)` with `theta = 99/100`,
-//   computed with exact integer arithmetic (numerator over denominator 100).
-// - Provider hits never repair logical validity: an added object with
-//   `l2_valid != Some(true)` contributes no valid mass.
+// Shadow reporting covers exact-rational demand, Q99 slack, deny/replenish simulation,
+// minimum repair `g_min`, and hypothetical child warm swaps.
 
-/// Schema of the W8 exact Q99 shadow reports.
-pub const PROJECT_IMAGE_Q99_SCHEMA_VERSION: &str = "zerostack.project_image.shadow.q99.v1";
+/// Schema of the exact Q99 shadow reports.
+pub const PROJECT_IMAGE_Q99_SCHEMA_VERSION: &str = "zerostack.project_image.shadow.q99";
 /// Q99 theta: valid mass must cover 99/100 of demanded mass.
 pub const Q99_SHADOW_THETA_NUMERATOR: u64 = 99;
 pub const Q99_SHADOW_THETA_DENOMINATOR: u64 = 100;
@@ -1104,9 +1033,7 @@ impl std::fmt::Display for ExactRational {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Exact-rational demand coverage (W8-T11)
-// ---------------------------------------------------------------------------
+// Exact-rational demand coverage
 
 /// How one demanded instance classifies for Q99 mass accounting.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -1146,13 +1073,8 @@ pub struct CoverageDemandRow {
     pub mass_class: DemandMassClass,
 }
 
-/// Exact-rational demand coverage of a finite demand envelope (W8-T11).
-///
-/// Q99 means demanded-valid mass, not cache-hit percentage: `valid_mass`
-/// counts only L2-valid demanded mass. L1 provider hits and L3 physical
-/// residency are reported as separate labeled figures and never alias the
-/// Q99 basis. Zero demanded mass reports `coverage == None` with an explicit
-/// reason (impossibility is reported, never averaged into a fake 0%).
+/// Exact-rational demand coverage of a finite demand envelope. Q99 means demanded-valid
+/// mass, not cache-hit percentage: `valid_mass` counts only L2-valid demanded mass.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct DemandCoverageReport {
@@ -1297,14 +1219,11 @@ pub fn demand_coverage(
     compute_demand_coverage(manifest, &manifest.demand_scenarios)
 }
 
-// ---------------------------------------------------------------------------
-// Exact Q99 slack (W8-T11 / ZS-CACHE-012 shadow)
-// ---------------------------------------------------------------------------
+// Exact Q99 slack (shadow)
 
-/// Exact Q99 slack: `sigma = W_R - 0.99*W`, where `W_R` is L2-valid AND
-/// L3-resident demanded mass and `W` is demanded mass. Reported exactly over
-/// denominator 100; no floats, no bare percentages. Zero-weight envelopes
-/// are unavailable and never report a vacuous hold.
+/// Exact Q99 slack: `sigma = W_R - 0.99*W`, where `W_R` is L2-valid AND L3-resident
+/// demanded mass and `W` is demanded mass. Reported exactly over denominator 100; no
+/// floats, no bare percentages. Zero-weight envelopes are unavailable and never report a vacuous hold.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Q99SlackReport {
@@ -1377,9 +1296,7 @@ pub fn compute_q99_slack(
     })
 }
 
-// ---------------------------------------------------------------------------
-// Q99 action-guard simulation (W8-T11): deny/replenish, minimum repair g_min
-// ---------------------------------------------------------------------------
+// Q99 action-guard simulation: deny/replenish, minimum repair g_min
 
 /// Declared addition of one object in a proposed action. `l2_valid == None`
 /// means missing evidence: the addition never contributes valid mass.
@@ -1464,14 +1381,8 @@ pub enum ActionGuardOutcome {
     Unavailable { reason: String },
 }
 
-/// Exact action-guard simulation (W8-T11): pure arithmetic over the
-/// manifest's finite demand envelope. Never mutates or publishes roots;
-/// grants no authority.
-///
-/// Variables follow the W8 design notes: `B` baseline L2-valid mass, `A`
-/// declared L2-valid additions, `G` invalidated mass, `W_next` next demanded
-/// mass, and `g_min = max(0, B + A - (1 - theta) * W_next)` with
-/// `theta = 99/100`. Provider hits never repair L2.
+/// Exact action-guard simulation: pure arithmetic over the manifest's finite demand
+/// envelope. Never mutates or publishes roots; grants no authority.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ActionGuardSimulation {
@@ -1501,7 +1412,7 @@ pub struct ActionGuardSimulation {
     /// Exact `g_min` numerator over denominator 100:
     /// `100 * (B + A_valid) - W_next` (may be <= 0).
     pub g_min_numerator_100: i128,
-    /// Minimum repair mass (W8 design):
+    /// Minimum repair mass (design):
     /// `max(0, ceil(g_min_numerator_100 / 100))`.
     pub g_min: u64,
     /// Exact check that repairing `g_min` restores the obligation:
@@ -1664,11 +1575,9 @@ pub fn simulate_action_guard(
     })
 }
 
-// ---------------------------------------------------------------------------
-// Hypothetical child warm-swap report (W8-T4 precommit warm-swap, W8-T12)
-// ---------------------------------------------------------------------------
+// Ledger records for hypothetical child warm swaps.
 
-/// One ledged prewarm row (W8-T12): declared exact work for one warmed
+/// One ledged prewarm row: declared exact work for one warmed
 /// branch. Unselected branches are ledged exactly like the selected one.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -1681,11 +1590,9 @@ pub struct PrewarmLedgerRow {
     pub note: Option<String>,
 }
 
-/// Precommit warm-swap report (W8-T4 + W8-T12): the hypothetical child is
-/// warmed before publish; this report states whether swapping it in holds
-/// Q99 over the declared next envelope and ledges all prewarming work,
-/// including unselected branches. Shadow-only: nothing is mutated or
-/// published; the old root is preserved.
+/// Precommit warm-swap report (+): the hypothetical child is warmed before publish;
+/// this report states whether swapping it in holds Q99 over the declared next envelope and ledges
+/// all prewarming work, including unselected branches.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ChildWarmSwapReport {
@@ -1711,7 +1618,7 @@ pub struct ChildWarmSwapReport {
     pub prewarm_rows: Vec<PrewarmLedgerRow>,
     /// Sum of declared prewarm work across all branches (exact).
     pub total_prewarm_mass: u64,
-    /// Declared prewarm work of unselected branches (W8-T12 ledging).
+    /// Declared prewarm work of unselected branches (ledging).
     pub unselected_prewarm_mass: u64,
     pub shadow_note: String,
 }
@@ -1723,10 +1630,9 @@ impl ChildWarmSwapReport {
     }
 }
 
-/// Build the warm-swap report: forks the parent via [`hypothetical_child`],
-/// computes exact coverage/slack of the child over `child_envelope`, and
-/// ledges the declared prewarm branches. Exactly one branch must be marked
-/// `selected` and must be the child root. Nothing is mutated or published.
+/// Build the warm-swap report: forks the parent via [`hypothetical_child`], computes exact
+/// coverage/slack of the child over `child_envelope`, and ledges the declared prewarm branches.
+/// Exactly one branch must be marked `selected` and must be the child root.
 pub fn child_warm_swap_report(
     parent: &ProjectImageManifest,
     change: &DeclaredChange,

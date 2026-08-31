@@ -1,4 +1,4 @@
-//! Definition and import line classification for grep hits (fszero-nqbg).
+//! Definition and import line classification for grep hits.
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LineClass {

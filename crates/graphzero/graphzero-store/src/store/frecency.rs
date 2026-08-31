@@ -1,8 +1,6 @@
-//! Heuristic frecency sidecar (graphzero-tyyi).
-//!
-//! Access counts live in `<store_root>/frecency.json` next to git-empirical
-//! state. Decay is computed at read time (no background job). This ranking is
-//! **not** a substitute for blast path-min confidence.
+//! Heuristic frecency sidecar. Access counts live in `<store_root>/frecency.json` next to
+//! git-empirical state. Decay is computed at read time (no background job). This ranking is **not**
+//! a substitute for blast path-min confidence.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -11,11 +9,11 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
-pub const FRECENCY_SCHEMA: &str = "graphzero.frecency.v1";
+pub const FRECENCY_SCHEMA: &str = "graphzero.frecency";
 pub const HALF_LIFE_HUMAN_SECS: f64 = 10.0 * 86_400.0;
 pub const HALF_LIFE_AI_SECS: f64 = 3.0 * 86_400.0;
 
-/// fff AI-mode modification buckets: 30s / 5m / 15m / 1h / 4h.
+/// AI-mode modification buckets: 30s / 5m / 15m / 1h / 4h.
 const AI_MODIFY_BUCKETS: &[(f64, f64)] = &[
     (30.0, 4.0),
     (300.0, 3.0),
@@ -143,7 +141,7 @@ pub fn score_path(
 }
 
 pub fn path_from_evidence_ref(reference: &str) -> Option<String> {
-    let rest = reference.strip_prefix("gz://path/")?;
+    let rest = reference.strip_prefix("path/")?;
     let path = rest.split('#').next()?.trim();
     if path.is_empty() {
         None
@@ -153,9 +151,7 @@ pub fn path_from_evidence_ref(reference: &str) -> Option<String> {
 }
 
 pub fn blob_hash_from_ref(reference: &str) -> Option<String> {
-    let rest = reference
-        .strip_prefix("gz://blob/")
-        .or_else(|| reference.strip_prefix("gz://b/"))?;
+    let rest = reference.strip_prefix("z://blob/")?;
     let hash = rest.split('#').next()?.trim();
     if hash.is_empty() || hash.chars().any(|c| !c.is_ascii_hexdigit()) {
         None

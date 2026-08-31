@@ -13,7 +13,7 @@ pub struct SurvivingSpan {
     pub source: String,
 }
 
-/// Coverage certificate attached to every verify result (FR-006 analogue).
+/// Coverage certificate attached to every verify result (analogue).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ClaimCertificate {
     pub tier_a_pct: f64,
@@ -24,7 +24,7 @@ pub struct ClaimCertificate {
     pub gap_blob_count: usize,
 }
 
-/// Structured verify output for CLI / MCP JSON.
+/// Structured claim-verification result.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ClaimVerifyResult {
     pub schema_version: u32,
@@ -39,7 +39,7 @@ pub struct ClaimVerifyResult {
     pub surviving_spans: Vec<SurvivingSpan>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub unknown_reason: Option<String>,
-    /// WHY rows for evidence refs (opt-in provenance; graphzero-3wbh).
+    /// Optional provenance rows for evidence references.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub provenance: Vec<crate::ProvenanceRecord>,
 }

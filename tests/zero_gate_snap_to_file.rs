@@ -1,25 +1,4 @@
-//! Adjudicated corpus for the K0 Snap-to-File gate (`zerostack-xbg3`).
-//!
-//! Every acceptance criterion is measured here:
-//! - safe one-expansion path with no model-visible discovery (the expand
-//!   ledger contains only the exact known classes; every lookup is ledged
-//!   `backend_work`);
-//! - S0 exact object/file root: a single-atom projection is returned
-//!   root-exact and flagged primary-file orientation, never sold as the
-//!   complete multi-file demand (the completeness claim stays bound to the
-//!   certified S3 envelope);
-//! - Unknown coverage escapes to the frozen native baseline with the
-//!   strategy preserved (request/scope/index roots stay in the packet);
-//! - Unsafe demands refuse with typed reasons and no guessed subset;
-//! - zero false-complete by construction (a completeness claim exists only
-//!   on `Snapped`, and only for the certified envelope; the full closure
-//!   covers the adjudicated ground truth);
-//! - read-only authority (no edit/transaction/commit/write field exists on
-//!   the packet or the permit wire form);
-//! - the same packet is byte-stable through two harness adapters (route
-//!   construction and wire round-trip) and across two route instances;
-//! - the decision view certifies Proved only with every evidence class the
-//!   route holds, and degrades to Unknown otherwise.
+//! Contract cases for the Snap-to-File gate.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -34,9 +13,7 @@ use zero_gate::{
     NativeBaseline, ProtectedScope,
 };
 
-// ---------------------------------------------------------------------------
 // Fixture helpers
-// ---------------------------------------------------------------------------
 
 fn digest(seed: u8) -> Sha256Digest {
     Sha256Digest::from_bytes(sha256(&[seed; 32]))
@@ -151,7 +128,7 @@ fn route() -> SnapToFileRoute {
         "tenant-a".to_owned(),
         1,
         digest(0x31),
-        "index-v1".to_owned(),
+        "index-current".to_owned(),
     )
     .unwrap()
 }
@@ -231,9 +208,7 @@ fn assert_no_discovery_rows(expansion: &zero_gate::FirstExpansion) {
     }
 }
 
-// ---------------------------------------------------------------------------
 // Safe path: one expansion, no discovery, exact evidence, native comparison
-// ---------------------------------------------------------------------------
 
 #[test]
 fn corpus_safe_multi_file_snap_single_expansion_no_discovery() {
@@ -253,7 +228,7 @@ fn corpus_safe_multi_file_snap_single_expansion_no_discovery() {
     let req = request("task-main", &all);
     let scp = scope(&[]);
     let inp = input(
-        "index-v1",
+        "index-current",
         &[(a, Some(true)), (b, Some(true)), (c, Some(true))],
         1,
     );
@@ -277,7 +252,7 @@ fn corpus_safe_multi_file_snap_single_expansion_no_discovery() {
 
     // Independent projection root (domain || canonical JSON) without using production helper
     let expected_projection_root = {
-        const DOMAIN: &[u8] = b"zerostack.w9e.projection\0";
+        const DOMAIN: &[u8] = b"zerostack.demand.projection\0";
         let hex_sorted: Vec<String> = {
             let mut v = vec![a.to_hex(), b.to_hex(), c.to_hex()];
             v.sort();
@@ -323,9 +298,7 @@ fn corpus_safe_multi_file_snap_single_expansion_no_discovery() {
     assert_eq!(adjudicated.native_savings_bytes, expected_savings);
 }
 
-// ---------------------------------------------------------------------------
 // Focused supplement: packet/view binding and ledger reconciliation
-// ---------------------------------------------------------------------------
 
 #[test]
 fn corpus_safe_multi_file_packet_view_binding_and_ledger_reconciliation() {
@@ -347,7 +320,7 @@ fn corpus_safe_multi_file_packet_view_binding_and_ledger_reconciliation() {
     let req = request("task-main", &all);
     let scp = scope(&[]);
     let inp = input(
-        "index-v1",
+        "index-current",
         &[(a, Some(true)), (b, Some(true)), (c, Some(true))],
         1,
     );
@@ -378,9 +351,7 @@ fn corpus_safe_multi_file_packet_view_binding_and_ledger_reconciliation() {
     );
 }
 
-// ---------------------------------------------------------------------------
 // S0: exact object/file root, never sold as the complete multi-file demand
-// ---------------------------------------------------------------------------
 
 #[test]
 fn corpus_s0_exact_file_root_not_sold_as_multi_file() {
@@ -402,7 +373,7 @@ fn corpus_s0_exact_file_root_not_sold_as_multi_file() {
     let req = request("task-main", &[a]);
     let scp = scope(&[]);
     let inp = input(
-        "index-v1",
+        "index-current",
         &[(a, Some(true)), (b, Some(true)), (c, Some(true))],
         1,
     );
@@ -483,9 +454,7 @@ fn corpus_s0_exact_file_root_not_sold_as_multi_file() {
     assert!(metrics.expanded_atoms < metrics.certified_atoms);
 }
 
-// ---------------------------------------------------------------------------
 // Unknown -> native escape; Unsafe -> refusal; both with zero false-complete
-// ---------------------------------------------------------------------------
 
 #[test]
 fn corpus_unknown_coverage_escapes_to_native_preserving_strategy() {
@@ -507,7 +476,7 @@ fn corpus_unknown_coverage_escapes_to_native_preserving_strategy() {
     // Coverage of `b` is unknown: the checker evaluated it but cannot
     // establish coverage.
     let inp = input(
-        "index-v1",
+        "index-current",
         &[(a, Some(true)), (b, None), (c, Some(true))],
         1,
     );
@@ -540,7 +509,7 @@ fn corpus_unknown_coverage_escapes_to_native_preserving_strategy() {
     assert_eq!(packet.project_root, m.root.to_hex());
     assert_eq!(packet.scope_root, scp.scope_root.to_hex());
     assert_eq!(packet.index_root, digest(0x31).to_hex());
-    assert_eq!(packet.index_version, "index-v1");
+    assert_eq!(packet.index_version, "index-current");
 
     // Decision view: claimed grade Unknown, and the certificate degrades to
     // Unknown because the coverage class is missing -- never a guessed
@@ -577,7 +546,7 @@ fn corpus_unsafe_demand_refuses_without_guessed_subset() {
     // `b` is protected: the demand must refuse.
     let scp = scope(&[b]);
     let inp = input(
-        "index-v1",
+        "index-current",
         &[(a, Some(true)), (b, Some(true)), (c, Some(true))],
         1,
     );
@@ -622,7 +591,7 @@ fn corpus_under_declared_envelope_refuses_false_complete() {
     let req = request("task-main", &[a, b]);
     let scp = scope(&[]);
     let inp = input(
-        "index-v1",
+        "index-current",
         &[(a, Some(true)), (b, Some(true)), (c, Some(true))],
         1,
     );
@@ -654,7 +623,7 @@ fn corpus_projection_atom_missing_from_image_escapes() {
     let req = request("task-main", &[a, b, ghost]);
     let scp = scope(&[]);
     let inp = input(
-        "index-v1",
+        "index-current",
         &[(a, Some(true)), (b, Some(true)), (ghost, Some(true))],
         1,
     );
@@ -668,9 +637,7 @@ fn corpus_projection_atom_missing_from_image_escapes() {
     packet.validate().unwrap();
 }
 
-// ---------------------------------------------------------------------------
 // Adapter stability: the same packet through two harness adapters
-// ---------------------------------------------------------------------------
 
 #[test]
 fn corpus_packet_stable_through_two_harness_adapters() {
@@ -690,7 +657,7 @@ fn corpus_packet_stable_through_two_harness_adapters() {
     let req = request("task-main", &all);
     let scp = scope(&[]);
     let inp = input(
-        "index-v1",
+        "index-current",
         &[(a, Some(true)), (b, Some(true)), (c, Some(true))],
         1,
     );
@@ -721,9 +688,7 @@ fn corpus_packet_stable_through_two_harness_adapters() {
     assert_eq!(packet_b.decision_view_root, packet_a.decision_view_root);
 }
 
-// ---------------------------------------------------------------------------
 // Read-only authority surface
-// ---------------------------------------------------------------------------
 
 #[test]
 fn corpus_packet_and_permit_have_read_only_authority_surface() {
@@ -743,7 +708,7 @@ fn corpus_packet_and_permit_have_read_only_authority_surface() {
     let req = request("task-main", &all);
     let scp = scope(&[]);
     let inp = input(
-        "index-v1",
+        "index-current",
         &[(a, Some(true)), (b, Some(true)), (c, Some(true))],
         1,
     );
@@ -799,12 +764,10 @@ fn corpus_packet_and_permit_have_read_only_authority_surface() {
     );
 }
 
-// ---------------------------------------------------------------------------
 // Exactly one first expansion per snap call; decision view certificate laws
-// ---------------------------------------------------------------------------
 
 #[test]
-fn corpus_snap_issues_fresh_handle_and_expands_exactly_once_per_call() {
+fn corpus_snap_issues_fresh_handle_per_call() {
     let a = digest(1);
     let b = digest(2);
     let c = digest(3);
@@ -821,7 +784,7 @@ fn corpus_snap_issues_fresh_handle_and_expands_exactly_once_per_call() {
     let req = request("task-main", &all);
     let scp = scope(&[]);
     let inp = input(
-        "index-v1",
+        "index-current",
         &[(a, Some(true)), (b, Some(true)), (c, Some(true))],
         1,
     );
@@ -841,32 +804,19 @@ fn corpus_snap_issues_fresh_handle_and_expands_exactly_once_per_call() {
         expansion_two.session.handle_id()
     );
 
-    // Exactly one first expansion per snap: delta_seq 0 and same visible bytes.
+    // Every returned expansion starts at sequence zero with the full three atoms.
     assert_eq!(expansion_one.session.delta_seq(), 0);
     assert_eq!(expansion_two.session.delta_seq(), 0);
     assert_eq!(expansion_one.atoms.len(), 3);
     assert_eq!(expansion_two.atoms.len(), 3);
     assert_eq!(expansion_one.visible_bytes, expansion_two.visible_bytes);
 
-    // Session authority is isolated: a handle from one snap cannot be substituted into another's session.
-    // The second handle's session is distinct; attempting to expand the first handle again must fail.
-    let live_one = live_for(&gate, &handle_one);
-    let live_two = live_for(&gate, &handle_two);
-    // Both handles share the same plan, so live state is equivalent; but session handles differ.
-    // Prove isolation by showing each handle's session is independent and a second first-expansion is refused.
     let err = gate.snap(&m, &req, &scp, &inp, &native).unwrap();
-    // third snap still issues fresh handle (proves per-call issuance)
+    // A third call also receives a new handle.
     let (packet_three, _, _, handle_three) = assert_snapped(err);
     assert_ne!(packet_three.handle_id, packet_one.handle_id);
     assert_ne!(packet_three.handle_id, packet_two.handle_id);
     assert_ne!(handle_three.handle_id(), handle_one.handle_id());
-
-    // Verify that a second expand_first on the same handle is refused (exactly once).
-    // We need a fresh route handle for this check; use handle_one's session via direct W9E route would be ideal,
-    // but snap route holds the session inside. Instead we verify that the packet's handle cannot be double-expanded
-    // through the snap API: a second snap with the same request issues a fresh handle rather than reusing the old one,
-    // which we already demonstrated. The isolation is thus proven by distinct handle ids and independent ledgers.
-    let _ = (live_one, live_two);
 }
 
 #[test]
@@ -892,7 +842,7 @@ fn corpus_decision_view_certificate_laws_hold() {
     // Safe: every needed class present -> Proved stands.
     let mut gate = route();
     let inp_safe = input(
-        "index-v1",
+        "index-current",
         &[(a, Some(true)), (b, Some(true)), (c, Some(true))],
         1,
     );
@@ -914,7 +864,7 @@ fn corpus_decision_view_certificate_laws_hold() {
     // never to a guessed subset.
     let mut gate = route();
     let inp_unknown = input(
-        "index-v1",
+        "index-current",
         &[(a, Some(true)), (b, None), (c, Some(true))],
         1,
     );
@@ -940,7 +890,7 @@ fn corpus_decision_view_certificate_laws_hold() {
 
 #[test]
 fn corpus_empty_projection_request_fails_closed() {
-    // The W9-E grammar requires a nonempty projection; a malformed request
+    // The grammar requires a nonempty projection; a malformed request
     // can never reach the route (one grammar, fail-closed).
     let error = DemandRequest::new("task-main".to_owned(), vec![]).unwrap_err();
     assert!(matches!(error, zero_gate::DemandError::EmptyProjection));
@@ -964,7 +914,7 @@ fn corpus_ledger_measurement_sources_are_honest() {
     let req = request("task-main", &all);
     let scp = scope(&[]);
     let inp = input(
-        "index-v1",
+        "index-current",
         &[(a, Some(true)), (b, Some(true)), (c, Some(true))],
         1,
     );

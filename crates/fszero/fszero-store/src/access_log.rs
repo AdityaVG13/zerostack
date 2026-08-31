@@ -54,10 +54,9 @@ pub fn rel_path_for_log_with_canon(
                     return slash_rel(rel);
                 }
             }
-            // Deleted/renamed target: canonicalize(full) fails, but `full`
-            // usually IS already canonical (resolved at staging time), so
-            // strip the canonical root directly — otherwise a delete-vs-edit
-            // conflict logs an absolute path instead of a repo-relative one.
+            // Deleted/renamed target: canonicalize(full) fails, but `full` usually IS already
+            // canonical (resolved at staging time), so strip the canonical root directly —
+            // otherwise a delete-vs-edit conflict logs an absolute path instead of a repo-relative one.
             if let Ok(rel) = full.strip_prefix(&canon_root) {
                 return slash_rel(rel);
             }

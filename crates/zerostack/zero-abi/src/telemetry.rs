@@ -1,7 +1,4 @@
-//! Shared counters emitted by GraphZero prevented-read accounting and consumed by ledgers.
-//!
-//! Source anchor: GraphZero `crates/graphzero-query/src/accounting.rs`
-//! (`PreventedReadAccounting::{prevented_files, prevented_bytes}`).
+//! Shared prevented-read counters used by GraphZero accounting and ZeroStack ledgers.
 
 use serde::{Deserialize, Serialize};
 

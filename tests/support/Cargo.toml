@@ -3,12 +3,22 @@ name = "zerostack-test-support"
 version = "0.1.0"
 edition.workspace = true
 license.workspace = true
-description = "Shared test scaffolding for ZeroStack and the three engine repos"
+description = "Reusable fixtures for root ZeroStack behavior tests"
+
+[features]
+default = []
+git = ["dep:git2"]
+graph = ["git", "dep:graphzero-store"]
+kernel = ["dep:blake3", "dep:zero-abi", "dep:zero-pulse"]
 
 [dependencies]
-blake3.workspace = true
+blake3 = { workspace = true, optional = true }
 sha2.workspace = true
-zero-abi = { path = "../../crates/zerostack/zero-abi" }
+git2 = { workspace = true, optional = true }
+graphzero-store = { workspace = true, optional = true }
+tempfile.workspace = true
+zero-abi = { workspace = true, optional = true }
+zero-pulse = { workspace = true, optional = true }
 
 [lints]
 workspace = true

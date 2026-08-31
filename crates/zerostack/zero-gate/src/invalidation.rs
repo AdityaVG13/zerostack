@@ -1,16 +1,13 @@
-//! Proof-carrying Robust Snap and causal-artifact invalidation intake.
-//!
-//! Engine-authored descriptors remain replay records. Only successful exact
-//! verifier evidence can mint opaque ZeroStack authority for a complete world
-//! fiber or protected support closure. Value equality, support validity, and
-//! reuse economics remain distinct decisions.
+//! Proof-carrying Robust Snap and causal-artifact invalidation intake. Engine-authored descriptors
+//! remain replay records. Only successful exact verifier evidence can mint opaque ZeroStack
+//! authority for a complete world fiber or protected support closure.
 
 use std::{error::Error, fmt};
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use zero_abi::{
-    ArtifactOwner, CertifiedInfluenceClosure, Sha256Digest, RobustSnapCertificate, SnapLevel,
+    ArtifactOwner, CertifiedInfluenceClosure, RobustSnapCertificate, Sha256Digest, SnapLevel,
     canonical_json, freshness_contract_digest, robust_snap_contract_digest, sha256,
 };
 use zero_cert::VerifiedEvidence;
@@ -89,7 +86,7 @@ impl RobustSnapIntakeClaim {
         if self.schema_version != ROBUST_SNAP_INTAKE_SCHEMA_VERSION {
             return Err(intake_error(
                 InvalidationFailureCode::SchemaVersionMismatch,
-                "Robust Snap intake schema version is not v1",
+                "Robust Snap intake schema is unsupported",
             ));
         }
         require_nonzero(
@@ -110,10 +107,7 @@ impl RobustSnapIntakeClaim {
     }
 
     pub fn digest(&self) -> Result<Sha256Digest, InvalidationIntakeError> {
-        Ok(domain_digest(
-            SNAP_CLAIM_DOMAIN,
-            &self.canonical_bytes()?,
-        ))
+        Ok(domain_digest(SNAP_CLAIM_DOMAIN, &self.canonical_bytes()?))
     }
 }
 
@@ -142,7 +136,7 @@ impl RobustSnapIntakeRecord {
         if self.contract_version != INVALIDATION_INTAKE_CONTRACT_VERSION {
             return Err(intake_error(
                 InvalidationFailureCode::SchemaVersionMismatch,
-                "Robust Snap intake contract version is not v1",
+                "Robust Snap intake contract is unsupported",
             ));
         }
         self.claim.validate()?;
@@ -420,7 +414,7 @@ impl CausalArtifactIntakeClaim {
         if self.schema_version != CAUSAL_ARTIFACT_SCHEMA_VERSION {
             return Err(intake_error(
                 InvalidationFailureCode::SchemaVersionMismatch,
-                "causal artifact intake schema version is not v1",
+                "causal artifact intake schema is unsupported",
             ));
         }
         if self.declared_support_roots.is_empty()
@@ -504,7 +498,7 @@ impl CausalArtifactIntakeRecord {
         if self.contract_version != INVALIDATION_INTAKE_CONTRACT_VERSION {
             return Err(intake_error(
                 InvalidationFailureCode::SchemaVersionMismatch,
-                "causal artifact intake contract version is not v1",
+                "causal artifact intake contract is unsupported",
             ));
         }
         self.claim.validate()?;
@@ -527,10 +521,8 @@ impl CausalArtifactIntakeRecord {
         )?;
         if self.claim.digest()? != self.claim_digest
             || self.claim.support_closure_digest != self.support_closure.certificate_digest
-            || domain_digest(
-                b"zerostack.causal_artifact.closure_bytes\0",
-                &closure_bytes,
-            ) != self.support_closure_bytes_digest
+            || domain_digest(b"zerostack.causal_artifact.closure_bytes\0", &closure_bytes)
+                != self.support_closure_bytes_digest
             || self.disposition != expected_disposition
             || self.expected_authority_digest()? != self.authority_digest
         {
@@ -582,10 +574,7 @@ impl ProofCarryingInvalidationAuthority {
         binding: &CausalCacheBinding,
     ) -> Result<BoundCausalCacheInvalidation, InvalidationIntakeError> {
         binding.validate().map_err(|error| {
-            intake_error(
-                InvalidationFailureCode::BindingMismatch,
-                error.to_string(),
-            )
+            intake_error(InvalidationFailureCode::BindingMismatch, error.to_string())
         })?;
         let claim = &self.record.claim;
         if claim.artifact_digest != binding.artifact_digest
@@ -608,10 +597,7 @@ impl ProofCarryingInvalidationAuthority {
         }
         Ok(BoundCausalCacheInvalidation {
             binding_digest: binding.digest().map_err(|error| {
-                intake_error(
-                    InvalidationFailureCode::BindingMismatch,
-                    error.to_string(),
-                )
+                intake_error(InvalidationFailureCode::BindingMismatch, error.to_string())
             })?,
             invalidation_authority_digest: self.record.authority_digest,
             support_class: claim.support_class,
@@ -645,10 +631,7 @@ impl BoundCausalCacheInvalidation {
         binding: &CausalCacheBinding,
     ) -> Result<bool, InvalidationIntakeError> {
         let binding_digest = binding.digest().map_err(|error| {
-            intake_error(
-                InvalidationFailureCode::BindingMismatch,
-                error.to_string(),
-            )
+            intake_error(InvalidationFailureCode::BindingMismatch, error.to_string())
         })?;
         let expected_bound = domain_digest(
             CACHE_BINDING_DOMAIN,
@@ -925,4 +908,3 @@ fn intake_error(
 fn json_error(detail: String) -> InvalidationIntakeError {
     intake_error(InvalidationFailureCode::Json, detail)
 }
-

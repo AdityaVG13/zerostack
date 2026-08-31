@@ -7,7 +7,7 @@ appears here only when a real proptest failure generates one. An empty layout
 means no failing seed is persisted; it does not prove that no property has
 ever failed.
 
-Rules (enforced by `scripts/check_proptest_contract.py`):
+Rules:
 
 - Never hand-edit or fabricate regression lines. Proptest writes them, one
   failing seed per line, in proptest's persistence format.
@@ -15,8 +15,8 @@ Rules (enforced by `scripts/check_proptest_contract.py`):
   `SourceParallel` finds no `lib.rs` above `tests/`. The macro config pins
   `FileFailurePersistence::Direct(concat!(env!("CARGO_MANIFEST_DIR"),
   "/proptest-regressions/tests/blast_proptest.txt"))`, so shrunk failures
-  land in this directory directly (as `tests/blast_proptest.txt` mirrors
-  `tests/blast_proptest.rs`). No manual moving is needed or allowed.
+  land under `proptest-regressions/tests/`. The property is defined in
+  `tests/graphzero/query_blast_proptest.rs`. No manual moving is allowed.
 - Replay a failing seed exactly with `PROPTEST_RNG_SEED=<emitted>`.
   `PROPTEST_DISABLE_FAILURE_PERSISTENCE` is forbidden in CI and release
-  checks. See `docs/proptest.md`.
+  checks.

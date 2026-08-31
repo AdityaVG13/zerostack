@@ -1,7 +1,5 @@
-//! Criterion benchmark for 'snap to file' fast export path (latency + size).
-//! Focus of swarm perf experiments.
-//! Run: cargo bench -p graphzero-store --bench snap_to_file
-//! With scale: GRAPHZERO_BENCH_FILES=200 cargo bench -p graphzero-store --bench snap_to_file
+//! Benchmarks snap-to-file export latency and encoded size.
+//! Set `GRAPHZERO_BENCH_FILES` to scale the fixture.
 
 mod common;
 
@@ -14,7 +12,6 @@ use tempfile::tempdir;
 
 /// Bench snap() + export_capsule (real snap-to-file) to temp file + measure resulting size.
 /// Extended for A/B size vs mocks/competitors, warm vs cold, full loop elements.
-/// Use real fixtures: if GRAPHZERO_BENCH_USE_REAL=1 and .graphzero around, but common uses synthetic (override in env).
 fn bench_snap_to_file(c: &mut Criterion) {
     let fx = common::fixture();
     let snapshot = Snapshot::open(&fx.store_root, Some(&fx.repo_root))

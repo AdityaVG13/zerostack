@@ -1,69 +1,7 @@
 #![forbid(unsafe_code)]
 
-//! W9-E exact first and incremental expansion for one demand family
-//! (`zerostack-rybb`).
-//!
-//! # The family: exact scenario closure (S3 task closure)
-//!
-//! One narrow, adjudicatable W9-E request family, end to end in ZeroStack:
-//!
-//! 1. **Demand compilation** (`compile_demand`): a request names exactly one
-//!    declared demand scenario from the W8 project image plus a projection
-//!    (atom roots inside that scenario's envelope). The demand plan is the
-//!    scenario's full multi-file envelope; the projection is the exact view
-//!    the first expansion returns. A primary file can never stand in for the
-//!    multi-file closure.
-//! 2. **Completeness check through published GraphZero inputs**
-//!    (`check_completeness`): the hub consumes the published
-//!    [`GraphZeroCompletenessInput`] envelope (coverage universe with
-//!    trivalent per-atom coverage over one index) and emits a total
-//!    `Safe`/`Unsafe`/`Unknown` verdict plus a V7 shadow certificate
-//!    (`zerostack-4lfp`) whose root binds evidence, scope, contract,
-//!    checker identity/version, and the resource ledger.
-//! 3. **Issuance** ([`W9eRoute::compile_and_check`]): only a `Safe` fold of
-//!    image validity and graph coverage issues a [`SafeExpandHandle`]
-//!    (`zerostack-qg2a`). `Unsafe`/`Unknown` refuse with typed reasons;
-//!    nothing is ever labeled complete on missing evidence.
-//! 4. **Exactly one first expansion** ([`W9eRoute::expand_first`]): the
-//!    handle is revalidated against live hub state, then the projection is
-//!    returned root/projection exact. A second first expansion on the same
-//!    handle is refused.
-//! 5. **Continuation-bound incremental deltas**
-//!    ([`W9eRoute::expand_delta`]): a sequence-bound continuation token
-//!    appends only new (never-before-expanded) atoms from the certified
-//!    envelope; every delta revalidates the live handle first.
-//!
-//! # Laws
-//!
-//! - **One grammar.** The only target reference is a scenario id plus atom
-//!   roots that must resolve inside that scenario's declared envelope. There
-//!   is no second target-ref grammar and no broad model-visible discovery:
-//!   the model never sees an `ls`/`grep`/probe, and every lookup is ledged.
-//! - **False-complete is a blocker.** The demand must *equal* the coverage
-//!   universe and every demanded atom must be positively covered and
-//!   L2-valid. A demand that under-declares the graph's coverage
-//!   (`coverage_exceeds_demand`), a positively uncovered atom
-//!   (`atom_not_covered`), an L2-invalid atom, or a protected atom being
-//!   demanded are all `Unsafe`. Missing coverage, unknown coverage, an
-//!   unknown envelope, or a demanded atom with no image record are
-//!   `Unknown`. Nothing missing is ever labeled complete.
-//! - **First attempt only.** The checker is total and never retries; a
-//!   retried check (`attempt_count != 1`) refuses issuance, and a hidden
-//!   retry observed after issue revokes the live handle.
-//! - **Root/projection exact.** The first expansion returns exactly the
-//!   projection atoms, and the returned set's root must equal the permit's
-//!   projection root.
-//! - **New atoms only.** A continuation delta may only append atoms that are
-//!   in the certified envelope and not yet expanded; replaying a stale
-//!   continuation is refused.
-//! - **Bounded and ledged.** Every collection is bounded (the family
-//!   certifies at most [`MAX_CERTIFIED_ATOMS`] atoms, matching the V7
-//!   evidence-item bound), and every byte or lookup is recorded in a bounded
-//!   [`ExpandLedger`] with `exact`/`estimate`/`unknown` measurement sources
-//!   plus native-baseline comparison fields.
-//!
-//! GraphZero source is not edited from this module; the checker consumes the
-//! published input envelope only.
+//! Exact-first, incremental expansion for the exact-scenario-closure demand family.
+//! Compiles one request, selects a safe plan, and expands only proven missing layers.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::{error::Error, fmt};
@@ -71,38 +9,33 @@ use std::{error::Error, fmt};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use zero_abi::{
-    CheckerIdentity, CompletenessEvidence, EtnfError, EvidenceItem, ExpandOutcome,
-    ExplicitFallback, FallbackKind, Falsifier, FiniteWitness, LiveCompleteness, LiveExpandState,
-    ObjectClass, ProposedAuthorityTransition, ProposedTransitionKind, ROOTED_ABI_VERSION,
-    ResourceLedger, RootedEvidence, SafeExpandHandle, SafeExpandIssueRequest, SafeExpandIssuer,
-    SafetyVerdict, Sha256Digest, V7ShadowReport, canonical_json, canonical_object_bytes,
+    CheckerIdentity, CompletenessEvidence, EtnfError, EtnfShadowReport, EvidenceItem,
+    ExpandOutcome, ExplicitFallback, FallbackKind, Falsifier, FiniteWitness, LiveCompleteness,
+    LiveExpandState, ObjectClass, ProposedAuthorityTransition, ProposedTransitionKind,
+    ROOTED_ABI_VERSION, ResourceLedger, RootedEvidence, SafeExpandHandle, SafeExpandIssueRequest,
+    SafeExpandIssuer, SafetyVerdict, Sha256Digest, canonical_json, canonical_object_bytes,
     object_root, sha256, sha256_hex,
 };
 
 use crate::project_image::{ProjectImageManifest, ValidityClass};
 
-// ---------------------------------------------------------------------------
 // Constants
-// ---------------------------------------------------------------------------
 
 /// Wire schema of this module's route artifacts.
-pub const DEMAND_EXPAND_SCHEMA_VERSION: &str = "zerostack.w9e.demand_expand.v1";
+pub const DEMAND_EXPAND_SCHEMA_VERSION: &str = "zerostack.demand_expand";
 /// Published GraphZero completeness-input envelope schema (the checker
 /// consumes this shape; GraphZero source is not edited from here).
 pub const GRAPHZERO_COMPLETENESS_INPUT_SCHEMA_VERSION: &str =
-    "zerostack.graphzero.completeness_input.v1";
+    "zerostack.graphzero.completeness_input";
 /// Stable name of the implemented demand family.
-pub const W9E_FAMILY_NAME: &str = "exact_scenario_closure";
+pub const EXACT_SCENARIO_CLOSURE_FAMILY: &str = "exact_scenario_closure";
 /// Checker identity and version bound into every completeness certificate.
-pub const CHECKER_ID: &str = "zerostack.w9e.completeness.total";
+pub const CHECKER_ID: &str = "zerostack.demand.completeness.total";
 pub const CHECKER_VERSION: &str = "1.0.0";
 /// Renderer contract identity bound into every handle (exact-atoms renderer).
-pub const RENDERER_NAME: &str = "zerostack.w9e.renderer.exact_atoms";
+pub const RENDERER_NAME: &str = "zerostack.demand.renderer.exact_atoms";
 
-/// Maximum certified atoms per demand. Bounded by the V7 evidence-item cap
-/// ([`zero_abi::etnf::ETNF_MAX_EVIDENCE_ITEMS`]): the certificate binds one
-/// evidence item per coverage record, so the family is narrow by
-/// construction.
+/// Maximum certified atoms per demand. One evidence item binds each coverage record.
 pub const MAX_CERTIFIED_ATOMS: usize = 128;
 /// Maximum coverage-universe size the checker accepts (== certified bound).
 pub const MAX_COVERAGE_UNIVERSE_ATOMS: usize = 128;
@@ -119,18 +52,16 @@ pub const MAX_DEMAND_STRING_BYTES: usize = 256;
 pub const EXPAND_LEDGER_MAX_ROWS: usize = 32;
 
 /// Domain separation tags for derived roots.
-const DEMAND_PLAN_DOMAIN: &[u8] = b"zerostack.w9e.demand_plan\0";
-const PROJECTION_DOMAIN: &[u8] = b"zerostack.w9e.projection\0";
-const SCOPE_DOMAIN: &[u8] = b"zerostack.w9e.protected_scope\0";
-const REQUEST_DOMAIN: &[u8] = b"zerostack.w9e.demand_request\0";
-const DELTA_DOMAIN: &[u8] = b"zerostack.w9e.incremental_delta\0";
-const ISSUE_NONCE_DOMAIN: &[u8] = b"zerostack.w9e.issue_nonce\0";
+const DEMAND_PLAN_DOMAIN: &[u8] = b"zerostack.demand.demand_plan\0";
+const PROJECTION_DOMAIN: &[u8] = b"zerostack.demand.projection\0";
+const SCOPE_DOMAIN: &[u8] = b"zerostack.demand.protected_scope\0";
+const REQUEST_DOMAIN: &[u8] = b"zerostack.demand.demand_request\0";
+const DELTA_DOMAIN: &[u8] = b"zerostack.demand.incremental_delta\0";
+const ISSUE_NONCE_DOMAIN: &[u8] = b"zerostack.demand.issue_nonce\0";
 
-// ---------------------------------------------------------------------------
 // Errors
-// ---------------------------------------------------------------------------
 
-/// Fail-closed error for the whole W9-E demand family.
+/// Fail-closed error for the whole demand family.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum DemandError {
     /// A bound string field was empty.
@@ -186,7 +117,7 @@ pub enum DemandError {
     RevalidationUnknown { reasons: Vec<String> },
     /// The completeness certificate failed to build or bind.
     Certificate(String),
-    /// The W8 project image rejected an input.
+    /// The project image rejected an input.
     Manifest(String),
     /// The published GraphZero input envelope was rejected.
     InvalidInput(String),
@@ -199,68 +130,135 @@ pub enum DemandError {
 impl fmt::Display for DemandError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::EmptyString(field) => write!(formatter, "w9e {field} must be nonempty"),
-            Self::BoundExceeded { field, actual, maximum } => write!(
+            Self::EmptyString(field) => {
+                write!(formatter, "demand expansion {field} must be nonempty")
+            }
+            Self::BoundExceeded {
+                field,
+                actual,
+                maximum,
+            } => write!(
                 formatter,
-                "w9e {field} has {actual} items, maximum {maximum}"
+                "demand expansion {field} has {actual} items, maximum {maximum}"
             ),
             Self::ControlCharacter(field) => {
-                write!(formatter, "w9e {field} must be free of control characters")
+                write!(
+                    formatter,
+                    "demand expansion {field} must be free of control characters"
+                )
             }
-            Self::ZeroRoot(field) => write!(formatter, "w9e requires a nonzero {field}"),
+            Self::ZeroRoot(field) => {
+                write!(formatter, "demand expansion requires a nonzero {field}")
+            }
             Self::ScenarioNotFound { scenario_id } => {
-                write!(formatter, "w9e scenario {scenario_id:?} not found in project image")
+                write!(
+                    formatter,
+                    "demand expansion scenario {scenario_id:?} not found in project image"
+                )
             }
-            Self::EmptyProjection => write!(formatter, "w9e projection must be nonempty"),
+            Self::EmptyProjection => {
+                write!(formatter, "demand expansion projection must be nonempty")
+            }
             Self::ProjectionExceedsDemand { atom_root } => write!(
                 formatter,
-                "w9e projection atom {atom_root} is outside the scenario envelope"
+                "demand expansion projection atom {atom_root} is outside the scenario envelope"
             ),
             Self::DeltaAtomNotCertified { atom_root } => {
-                write!(formatter, "w9e delta atom {atom_root} is not certified by the plan")
+                write!(
+                    formatter,
+                    "demand expansion delta atom {atom_root} is not certified by the plan"
+                )
             }
             Self::DeltaAtomAlreadyExpanded { atom_root } => {
-                write!(formatter, "w9e delta atom {atom_root} was already expanded")
+                write!(
+                    formatter,
+                    "demand expansion delta atom {atom_root} was already expanded"
+                )
             }
             Self::DeltaAtomProtected { atom_root } => {
-                write!(formatter, "w9e delta atom {atom_root} is protected")
+                write!(
+                    formatter,
+                    "demand expansion delta atom {atom_root} is protected"
+                )
             }
-            Self::EmptyDelta => write!(formatter, "w9e delta must be nonempty"),
-            Self::StaleContinuation { handle_id, expected, actual } => write!(
+            Self::EmptyDelta => write!(formatter, "demand expansion delta must be nonempty"),
+            Self::StaleContinuation {
+                handle_id,
+                expected,
+                actual,
+            } => write!(
                 formatter,
-                "w9e stale continuation for {handle_id}: expected seq {expected}, got {actual}"
+                "demand expansion stale continuation for {handle_id}: expected seq {expected}, got {actual}"
             ),
             Self::SessionExhausted { handle_id } => {
-                write!(formatter, "w9e session {handle_id} is exhausted; no new atoms remain")
+                write!(
+                    formatter,
+                    "demand expansion session {handle_id} is exhausted; no new atoms remain"
+                )
             }
             Self::UnknownHandle { handle_id } => {
-                write!(formatter, "w9e no session for handle {handle_id}")
+                write!(
+                    formatter,
+                    "demand expansion has no session for handle {handle_id}"
+                )
             }
             Self::AlreadyFirstExpanded { handle_id } => write!(
                 formatter,
-                "w9e handle {handle_id} already performed its one first expansion"
+                "demand expansion handle {handle_id} already performed its one first expansion"
             ),
             Self::SessionRootMismatch(field) => {
-                write!(formatter, "w9e session {field} does not match the permit")
+                write!(
+                    formatter,
+                    "demand expansion session {field} does not match the permit"
+                )
             }
             Self::ProjectionMismatch { expected, actual } => write!(
                 formatter,
-                "w9e returned atoms root to {actual}, projection requires {expected}"
+                "demand expansion returned atoms root {actual}, projection requires {expected}"
             ),
-            Self::HandleIssuance(detail) => write!(formatter, "w9e handle issuance refused: {detail}"),
+            Self::HandleIssuance(detail) => {
+                write!(
+                    formatter,
+                    "demand expansion handle issuance refused: {detail}"
+                )
+            }
             Self::RevalidationUnsafe { reasons } => {
-                write!(formatter, "w9e live revalidation Unsafe: {reasons:?}")
+                write!(
+                    formatter,
+                    "demand expansion live revalidation Unsafe: {reasons:?}"
+                )
             }
             Self::RevalidationUnknown { reasons } => {
-                write!(formatter, "w9e live revalidation Unknown: {reasons:?}")
+                write!(
+                    formatter,
+                    "demand expansion live revalidation Unknown: {reasons:?}"
+                )
             }
-            Self::Certificate(detail) => write!(formatter, "w9e certificate failure: {detail}"),
-            Self::Manifest(detail) => write!(formatter, "w9e project image rejected input: {detail}"),
+            Self::Certificate(detail) => {
+                write!(formatter, "demand expansion certificate failure: {detail}")
+            }
+            Self::Manifest(detail) => {
+                write!(
+                    formatter,
+                    "demand expansion project image rejected input: {detail}"
+                )
+            }
             Self::InvalidInput(detail) => {
-                write!(formatter, "w9e invalid GraphZero completeness input: {detail}")
+                write!(
+                    formatter,
+                    "demand expansion invalid GraphZero completeness input: {detail}"
+                )
             }
-            Self::Serialization(detail) => write!(formatter, "w9e serialization failure: {detail}"),
-            Self::Internal(detail) => write!(formatter, "w9e internal invariant violated: {detail}"),
+            Self::Serialization(detail) => write!(
+                formatter,
+                "demand expansion serialization failure: {detail}"
+            ),
+            Self::Internal(detail) => {
+                write!(
+                    formatter,
+                    "demand expansion internal invariant violated: {detail}"
+                )
+            }
         }
     }
 }
@@ -329,11 +327,9 @@ fn digest_hex_list(atoms: &[Sha256Digest]) -> Vec<String> {
     atoms.iter().map(|atom| atom.to_hex()).collect()
 }
 
-// ---------------------------------------------------------------------------
 // The one target-ref grammar: scenario id + atom roots inside its envelope
-// ---------------------------------------------------------------------------
 
-/// A request in the single W9-E target-ref grammar: one scenario reference
+/// A request in the single target-ref grammar: one scenario reference
 /// plus a nonempty projection of atom roots that must resolve inside that
 /// scenario's declared envelope.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -348,7 +344,10 @@ pub struct DemandRequest {
 }
 
 impl DemandRequest {
-    pub fn new(scenario_id: String, projection_atoms: Vec<Sha256Digest>) -> Result<Self, DemandError> {
+    pub fn new(
+        scenario_id: String,
+        projection_atoms: Vec<Sha256Digest>,
+    ) -> Result<Self, DemandError> {
         validate_string("scenario_id", &scenario_id)?;
         if projection_atoms.is_empty() {
             return Err(DemandError::EmptyProjection);
@@ -376,7 +375,11 @@ impl DemandRequest {
         if self.projection_atoms.is_empty() {
             return Err(DemandError::EmptyProjection);
         }
-        validate_atom_list("projection_atoms", &self.projection_atoms, MAX_PROJECTION_ATOMS)?;
+        validate_atom_list(
+            "projection_atoms",
+            &self.projection_atoms,
+            MAX_PROJECTION_ATOMS,
+        )?;
         let expected = domain_root(
             REQUEST_DOMAIN,
             &serde_json::json!({
@@ -385,7 +388,9 @@ impl DemandRequest {
             }),
         );
         if self.request_root != expected {
-            return Err(DemandError::Internal("request_root does not bind its fields"));
+            return Err(DemandError::Internal(
+                "request_root does not bind its fields",
+            ));
         }
         Ok(())
     }
@@ -426,7 +431,11 @@ impl ProtectedScope {
 
     pub fn validate(&self) -> Result<(), DemandError> {
         validate_string("scope_id", &self.scope_id)?;
-        validate_atom_list("protected_atoms", &self.protected_atoms, MAX_PROTECTED_ATOMS)?;
+        validate_atom_list(
+            "protected_atoms",
+            &self.protected_atoms,
+            MAX_PROTECTED_ATOMS,
+        )?;
         let expected = domain_root(
             SCOPE_DOMAIN,
             &serde_json::json!({
@@ -469,9 +478,7 @@ impl IncrementalDeltaRequest {
     }
 }
 
-// ---------------------------------------------------------------------------
 // Demand plan (the certified multi-file closure)
-// ---------------------------------------------------------------------------
 
 /// The compiled demand: the scenario's full certified envelope plus the
 /// requested projection. The plan root binds the envelope; the projection
@@ -543,7 +550,11 @@ impl DemandPlan {
             return Err(dem_err("demand envelope must be nonempty"));
         }
         validate_atom_list("demanded_atoms", &self.demanded_atoms, MAX_CERTIFIED_ATOMS)?;
-        validate_atom_list("projection_atoms", &self.projection_atoms, MAX_PROJECTION_ATOMS)?;
+        validate_atom_list(
+            "projection_atoms",
+            &self.projection_atoms,
+            MAX_PROJECTION_ATOMS,
+        )?;
         let expected_plan = domain_root(
             DEMAND_PLAN_DOMAIN,
             &serde_json::json!({
@@ -557,7 +568,9 @@ impl DemandPlan {
             return Err(DemandError::Internal("plan_root does not bind its fields"));
         }
         if self.projection_root != expected_projection {
-            return Err(DemandError::Internal("projection_root does not bind its fields"));
+            return Err(DemandError::Internal(
+                "projection_root does not bind its fields",
+            ));
         }
         let demand_set: BTreeSet<Sha256Digest> = self.demanded_atoms.iter().copied().collect();
         for atom in &self.projection_atoms {
@@ -587,9 +600,7 @@ pub fn projection_root_of(projection_atoms: &[Sha256Digest]) -> Sha256Digest {
     )
 }
 
-// ---------------------------------------------------------------------------
 // Published GraphZero completeness inputs
-// ---------------------------------------------------------------------------
 
 /// One atom's coverage record from the published coverage universe. `None`
 /// means the checker evaluated the atom but its coverage is unknown --
@@ -650,9 +661,7 @@ impl GraphZeroCompletenessInput {
             return Err(DemandError::ZeroRoot("index_root"));
         }
         validate_string("index_version", &self.index_version)?;
-        // `task_id` is bound tighter than the generic string bound because it
-        // is embedded in a V7 witness fact ("task:<id>"), which allows at
-        // most ETNF_MAX_ID_BYTES bytes.
+        // The witness embeds `task_id`, so it cannot exceed ETNF_MAX_ID_BYTES.
         if self.task_id.is_empty() {
             return Err(DemandError::EmptyString("task_id"));
         }
@@ -688,7 +697,9 @@ impl GraphZeroCompletenessInput {
             previous = Some(atom.atom_root);
         }
         if self.attempt_count == 0 {
-            return Err(DemandError::InvalidInput("attempt_count must be nonzero".into()));
+            return Err(DemandError::InvalidInput(
+                "attempt_count must be nonzero".into(),
+            ));
         }
         Ok(())
     }
@@ -698,21 +709,20 @@ impl GraphZeroCompletenessInput {
 /// exactly this digest, so the certificate transitively binds each record.
 fn coverage_record_digest(atom: Sha256Digest, covered: Option<bool>) -> String {
     sha256_hex(
-        canonical_json(&serde_json::json!({ "atom": atom.to_hex(), "covered": covered })).as_bytes(),
+        canonical_json(&serde_json::json!({ "atom": atom.to_hex(), "covered": covered }))
+            .as_bytes(),
     )
 }
 
-// ---------------------------------------------------------------------------
 // Completeness check (total, first-attempt, certificate-emitting)
-// ---------------------------------------------------------------------------
 
 /// The total outcome of one completeness check through the published
-/// GraphZero inputs. The [`V7ShadowReport`] is always produced (observable
+/// GraphZero inputs. The [`EtnfShadowReport`] is always produced (observable
 /// evidence); its certificate exists exactly when the verdict is `Safe`.
 #[derive(Clone, Debug, PartialEq)]
 pub struct CompletenessCheck {
     pub verdict: SafetyVerdict,
-    pub report: V7ShadowReport,
+    pub report: EtnfShadowReport,
     /// Parsed certificate root; `Some` exactly when `verdict` is `Safe`.
     pub certificate_root: Option<Sha256Digest>,
     /// Index lookups the check consumed (backend-private, ledged).
@@ -727,21 +737,9 @@ const SAFE_WITNESS_FACTS: [&str; 4] = [
     "projection_within_demand",
 ];
 
-/// Run the total completeness check over the published GraphZero inputs.
-///
-/// Fail-closed laws:
-/// - Empty universe -> `Unknown` (`no_coverage_evidence`).
-/// - `attempt_count != 1` -> `Unsafe` (`hidden_retry`).
-/// - Coverage record `covered == None` -> `Unknown` (`coverage_unknown`).
-/// - Coverage record `covered == Some(false)` -> `Unsafe` (`atom_not_covered`).
-/// - A universe atom absent from the demand -> `Unsafe`
-///   (`coverage_exceeds_demand`): the graph positively establishes the
-///   demand under-declares the task closure (false-complete blocker).
-/// - A demanded atom absent from the universe -> `Unknown`
-///   (`demanded_atom_uncovered`): no evidence about it exists.
-///
-/// Verdicts fold under the ZS-KERNEL-004 meet (`Unsafe` dominates `Unknown`
-/// dominates `Safe`).
+/// Run the total completeness check over the published GraphZero inputs. Fail-closed laws Empty
+/// universe -> `Unknown` (`no_coverage_evidence`). `attempt_count != 1` -> `Unsafe`
+/// (`hidden_retry`). Coverage record `covered == None` -> `Unknown` (`coverage_unknown`).
 pub fn check_completeness(
     input: &GraphZeroCompletenessInput,
     plan: &DemandPlan,
@@ -771,7 +769,10 @@ pub fn check_completeness(
         universe_set.insert(atom.atom_root);
         if !demand_set.contains(&atom.atom_root) {
             verdicts.push(SafetyVerdict::Unsafe {
-                reasons: vec![format!("coverage_exceeds_demand:{}", atom.atom_root.to_hex())],
+                reasons: vec![format!(
+                    "coverage_exceeds_demand:{}",
+                    atom.atom_root.to_hex()
+                )],
             });
             continue;
         }
@@ -846,21 +847,21 @@ pub fn check_completeness(
     .map_err(|error| DemandError::Certificate(error.to_string()))?;
 
     let falsifiers = vec![
-        Falsifier::new("W9E-f1", "demanded atom missing from coverage universe")
+        Falsifier::new("demand-f1", "demanded atom missing from coverage universe")
             .map_err(|error| DemandError::Certificate(error.to_string()))?,
-        Falsifier::new("W9E-f2", "coverage atom missing from demand plan")
+        Falsifier::new("demand-f2", "coverage atom missing from demand plan")
             .map_err(|error| DemandError::Certificate(error.to_string()))?,
-        Falsifier::new("W9E-f3", "coverage atom positively not covered")
+        Falsifier::new("demand-f3", "coverage atom positively not covered")
             .map_err(|error| DemandError::Certificate(error.to_string()))?,
-        Falsifier::new("W9E-f4", "coverage status unknown")
+        Falsifier::new("demand-f4", "coverage status unknown")
             .map_err(|error| DemandError::Certificate(error.to_string()))?,
-        Falsifier::new("W9E-f5", "projection exceeds the certified envelope")
+        Falsifier::new("demand-f5", "projection exceeds the certified envelope")
             .map_err(|error| DemandError::Certificate(error.to_string()))?,
-        Falsifier::new("W9E-f6", "protected atom demanded")
+        Falsifier::new("demand-f6", "protected atom demanded")
             .map_err(|error| DemandError::Certificate(error.to_string()))?,
-        Falsifier::new("W9E-f7", "delta re-expands a previously expanded atom")
+        Falsifier::new("demand-f7", "delta re-expands a previously expanded atom")
             .map_err(|error| DemandError::Certificate(error.to_string()))?,
-        Falsifier::new("W9E-f8", "continuation replay (stale session)")
+        Falsifier::new("demand-f8", "continuation replay (stale session)")
             .map_err(|error| DemandError::Certificate(error.to_string()))?,
     ];
 
@@ -875,7 +876,7 @@ pub fn check_completeness(
         true,
     );
 
-    let report = V7ShadowReport::new(
+    let report = EtnfShadowReport::new(
         verdict.clone(),
         checker,
         scope.scope_root.to_hex(),
@@ -897,7 +898,7 @@ pub fn check_completeness(
         (None, true) => {
             return Err(DemandError::Internal(
                 "Safe completeness check without certificate",
-            ))
+            ));
         }
         (_, false) => None,
     };
@@ -914,9 +915,7 @@ pub fn check_completeness(
     })
 }
 
-// ---------------------------------------------------------------------------
 // Demand compilation (project image + request + protected scope)
-// ---------------------------------------------------------------------------
 
 /// Result of demand compilation: either a ready plan or a typed refusal.
 #[derive(Clone, Debug, PartialEq)]
@@ -933,19 +932,9 @@ pub struct CompiledDemand {
     pub compile_backend_work: u64,
 }
 
-/// Compile demand from the W8 project image, one request, and the protected
-/// scope.
-///
-/// Fail-closed laws:
-/// - Scenario missing -> `Unknown` (`scenario_not_found:<id>`); scenario
-///   with no declared envelope -> `Unknown` (`scenario_envelope_unknown`).
-/// - Demanded atom with no image record -> `Unknown`
-///   (`demanded_atom_missing_from_image`); no layer entry or unknown L2 ->
-///   `Unknown` (`demanded_atom_layers_unknown`); L2-invalid -> `Unsafe`
-///   (`demanded_atom_l2_invalid`).
-/// - A demanded protected atom -> `Unsafe` (`protected_atom_demanded`).
-/// - A projection atom outside the envelope -> `Unsafe`
-///   (`projection_exceeds_demand`).
+/// Compile demand from the project image, one request, and the protected scope. Fail-closed laws
+/// Scenario missing -> `Unknown` (`scenario_not_found:<id>`); scenario with no declared envelope ->
+/// `Unknown` (`scenario_envelope_unknown`).
 pub fn compile_demand(
     manifest: &ProjectImageManifest,
     request: &DemandRequest,
@@ -979,8 +968,11 @@ pub fn compile_demand(
     let mut backend_work: u64 = 1; // scenario resolution
     let mut verdicts: Vec<SafetyVerdict> = Vec::new();
 
-    let image_set: BTreeSet<Sha256Digest> =
-        manifest.exact_objects.iter().map(|object| object.digest).collect();
+    let image_set: BTreeSet<Sha256Digest> = manifest
+        .exact_objects
+        .iter()
+        .map(|object| object.digest)
+        .collect();
     let layer_map: BTreeMap<Sha256Digest, ValidityClass> = manifest
         .per_object_layers
         .iter()
@@ -995,7 +987,10 @@ pub fn compile_demand(
         }
         if !image_set.contains(atom) {
             verdicts.push(SafetyVerdict::Unknown {
-                reasons: vec![format!("demanded_atom_missing_from_image:{}", atom.to_hex())],
+                reasons: vec![format!(
+                    "demanded_atom_missing_from_image:{}",
+                    atom.to_hex()
+                )],
             });
             continue;
         }
@@ -1050,9 +1045,7 @@ pub fn compile_demand(
     }))
 }
 
-// ---------------------------------------------------------------------------
 // Bounded expand ledger + native baseline + adjudication metrics
-// ---------------------------------------------------------------------------
 
 /// One bounded ledger row. `measurement_source` is `exact`, `estimate`, or
 /// `unknown`; nothing estimated is ever reported as exact.
@@ -1125,7 +1118,7 @@ impl ExpandLedger {
                 other => {
                     return Err(DemandError::InvalidInput(format!(
                         "ledger row measurement_source must be exact|estimate|unknown, got {other:?}"
-                    )))
+                    )));
                 }
             }
         }
@@ -1152,10 +1145,9 @@ impl NativeBaseline {
     }
 }
 
-/// Adjudication metrics for one first expansion against the adjudicated
-/// ground truth. `false_complete` is `true` exactly when the route claimed a
-/// complete expansion whose returned atoms do not cover the ground truth --
-/// the release blocker this corpus measures.
+/// Adjudication metrics for one first expansion against the adjudicated ground truth.
+/// `false_complete` is `true` exactly when the route claimed a complete expansion whose
+/// returned atoms do not cover the ground truth the release blocker this corpus measures.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct AdjudicatedMetrics {
     pub false_complete: bool,
@@ -1194,9 +1186,7 @@ pub fn adjudicate(
     }
 }
 
-// ---------------------------------------------------------------------------
 // Expansion artifacts
-// ---------------------------------------------------------------------------
 
 /// One exact atom returned by an expansion.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -1339,9 +1329,7 @@ impl IncrementalDelta {
     }
 }
 
-// ---------------------------------------------------------------------------
-// The trusted W9-E route
-// ---------------------------------------------------------------------------
+// The trusted route
 
 /// Outcome of one `compile_and_check` call.
 #[derive(Clone, Debug, PartialEq)]
@@ -1374,11 +1362,11 @@ struct SessionState {
     terminal: bool,
 }
 
-/// The trusted hub-owned W9-E route. Owns the issuance secret (guests never
+/// The trusted hub-owned route. Owns the issuance secret (guests never
 /// see it), the live index/tenant/epoch bindings, the per-handle session
 /// registry (exactly-one-first-expansion law), and every revalidation.
 #[derive(Clone, Debug)]
-pub struct W9eRoute {
+pub struct ExactScenarioClosureRoute {
     issuer: SafeExpandIssuer,
     tenant: String,
     epoch: u64,
@@ -1388,7 +1376,7 @@ pub struct W9eRoute {
     sessions: BTreeMap<Sha256Digest, SessionState>,
 }
 
-impl W9eRoute {
+impl ExactScenarioClosureRoute {
     pub fn new(
         secret: [u8; 32],
         tenant: String,
@@ -1417,17 +1405,22 @@ impl W9eRoute {
     pub fn renderer_contract_root() -> Sha256Digest {
         let value = serde_json::json!({
             "renderer": RENDERER_NAME,
-            "family": W9E_FAMILY_NAME,
+            "family": EXACT_SCENARIO_CLOSURE_FAMILY,
             "version": 1,
         });
         // Constant canonical input: both fallible calls cannot fail.
-        let canonical = canonical_object_bytes(ObjectClass::AuthorityObject, ROOTED_ABI_VERSION, &value)
-            .expect("renderer contract is canonical");
+        let canonical =
+            canonical_object_bytes(ObjectClass::AuthorityObject, ROOTED_ABI_VERSION, &value)
+                .expect("renderer contract is canonical");
         object_root(ObjectClass::AuthorityObject, ROOTED_ABI_VERSION, &canonical)
             .expect("renderer contract roots")
     }
 
-    fn issue_nonce(&mut self, plan_root: Sha256Digest, projection_root: Sha256Digest) -> Sha256Digest {
+    fn issue_nonce(
+        &mut self,
+        plan_root: Sha256Digest,
+        projection_root: Sha256Digest,
+    ) -> Sha256Digest {
         self.issue_serial = self.issue_serial.saturating_add(1);
         domain_root(
             ISSUE_NONCE_DOMAIN,
@@ -1555,11 +1548,7 @@ impl W9eRoute {
     }
 
     /// Live revalidation of one handle (passthrough; typed outcome).
-    pub fn revalidate(
-        &self,
-        handle: &SafeExpandHandle,
-        live: &LiveExpandState,
-    ) -> ExpandOutcome {
+    pub fn revalidate(&self, handle: &SafeExpandHandle, live: &LiveExpandState) -> ExpandOutcome {
         self.issuer.revalidate(handle, live)
     }
 
@@ -1606,12 +1595,8 @@ impl W9eRoute {
     ) -> Result<zero_abi::ExpandPermit, DemandError> {
         match self.issuer.revalidate(handle, live) {
             ExpandOutcome::Safe(permit) => Ok(permit),
-            ExpandOutcome::Unsafe { reasons } => {
-                Err(DemandError::RevalidationUnsafe { reasons })
-            }
-            ExpandOutcome::Unknown { reasons } => {
-                Err(DemandError::RevalidationUnknown { reasons })
-            }
+            ExpandOutcome::Unsafe { reasons } => Err(DemandError::RevalidationUnsafe { reasons }),
+            ExpandOutcome::Unknown { reasons } => Err(DemandError::RevalidationUnknown { reasons }),
         }
     }
 
@@ -1658,15 +1643,18 @@ impl W9eRoute {
             "bytes",
             "estimate",
         )?;
-        ledger.push("native_baseline_probes", native.probe_count, "probes", "estimate")?;
+        ledger.push(
+            "native_baseline_probes",
+            native.probe_count,
+            "probes",
+            "estimate",
+        )?;
         Ok(ledger)
     }
 
-    /// Perform the exactly-one first expansion. Revalidates every handle
-    /// binding against live hub state, then returns exactly the projection
-    /// atoms (root/projection exact) with the bounded ledger and the
-    /// continuation token. A second first expansion on the same handle is
-    /// refused.
+    /// Perform the exactly-one first expansion. Revalidates every handle binding against live hub
+    /// state, then returns exactly the projection atoms (root/projection exact) with the bounded
+    /// ledger and the continuation token. A second first expansion on the same handle is refused.
     pub fn expand_first(
         &mut self,
         handle: &SafeExpandHandle,
@@ -1695,9 +1683,8 @@ impl W9eRoute {
                 byte_len: state.atom_lens.get(atom).copied().unwrap_or(0),
             })
             .collect();
-        let projection_root = projection_root_of(
-            &atoms.iter().map(|atom| atom.atom_root).collect::<Vec<_>>(),
-        );
+        let projection_root =
+            projection_root_of(&atoms.iter().map(|atom| atom.atom_root).collect::<Vec<_>>());
         if projection_root != permit.projection_root() {
             return Err(DemandError::ProjectionMismatch {
                 expected: permit.projection_root(),
@@ -1753,10 +1740,9 @@ impl W9eRoute {
         Ok(expansion)
     }
 
-    /// Append one continuation-bound incremental delta. The handle is
-    /// revalidated against live hub state first; the delta may only contain
-    /// new atoms from the certified envelope (never previously expanded,
-    /// never protected). Returns the delta plus the next continuation.
+    /// Append one continuation-bound incremental delta. The handle is revalidated against live
+    /// hub state first; the delta may only contain new atoms from the certified envelope
+    /// (never previously expanded, never protected). Returns the delta plus the next continuation.
     pub fn expand_delta(
         &mut self,
         session: &IncrementalSession,
@@ -1837,7 +1823,12 @@ impl W9eRoute {
         ledger.push("retry_count", 0, "attempts", "exact")?;
         ledger.push("false_complete", 0, "bool", "exact")?;
         ledger.push("new_atoms", new_atom_count as u64, "count", "exact")?;
-        ledger.push("expanded_atoms", state.expanded.len() as u64, "count", "exact")?;
+        ledger.push(
+            "expanded_atoms",
+            state.expanded.len() as u64,
+            "count",
+            "exact",
+        )?;
         ledger.push(
             "terminal",
             if state.terminal { 1 } else { 0 },

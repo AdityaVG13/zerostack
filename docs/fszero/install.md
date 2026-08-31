@@ -1,18 +1,9 @@
-# Install and build FSZero
+# Files domain (used by ZeroStack)
 
-FSZero currently builds from source. The repository pins its toolchain.
+The files/state library is a ZeroStack domain surface, not an installable product.
 
-## Build the standalone CLI
-
-```bash
-git clone https://github.com/AdityaVG13/zerostack
-cd zerostack
-cargo build --release -p fszero-cli
-  # <!-- audit:skip --> binary is produced by the preceding cargo build
-./target/release/fszero --help
-```
-
-The CLI is for FSZero-only diagnostics, batch operations, store inspection, worlds, history, and recovery maintenance. It is not a second model-facing planner.
+The public execution surface is ZeroKernel (`z.read`, `z.edit`, `z.apply`).
+The only installable program is ZeroStack (`zero-kernel`).
 
 ## Use through ZeroKernel
 
@@ -22,16 +13,7 @@ cd zerostack
 cargo build -p zero-kernel
 ```
 
-ZeroKernel loads `fszero-kernel` behind `z.read`, `z.edit`, and `z.apply`. Do not register retired FSZero MCP or engine-local CodeMode catalogs beside it.
-
-## Store configuration
-
-| Setting | Purpose |
-| --- | --- |
-| `FSZERO_ROOT` | Standalone workspace root |
-| `FSZERO_ALLOW_EPHEMERAL=1` | Explicit disposable fallback when durable recovery cannot open |
-| `FSZERO_SHARED_STORE=1` | Opt into a configured shared ZeroStack store |
-| `ZEROSTACK_STORE_ROOT` | Shared root, honored only with explicit opt-in |
+ZeroKernel loads `zero-fs` behind `z.read`, `z.edit`, and `z.apply`.
 
 ## Verify a checkout
 

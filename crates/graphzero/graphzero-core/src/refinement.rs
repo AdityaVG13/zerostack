@@ -1,26 +1,4 @@
-//! Counterexample-guided refinement loop (RACC row ZS-GRAPH-008).
-//!
-//! CAPTURE -> ADD -> REVOKE -> RETAIN:
-//! - CAPTURE: an [`ObservedInfluence`] records an undeclared influence seen at
-//!   runtime (sandbox/execution trace) or surfaced as a
-//!   `MissingDependencyEdge` omission impact with
-//!   [`RecoveryTrigger::ForceAutomaticRecovery`] (omission.rs).
-//! - ADD: the influence is converted into a true dependency edge in the
-//!   [`DependencyGraph`] (invalidation.rs `add_dependency`). The added edge is
-//!   labeled [`EdgeProvenance::RuntimeObserved`] (mapping to
-//!   [`TruthClass::RuntimeObserved`]) and is never silently upgraded to
-//!   declared.
-//! - REVOKE: all dependent certificates in the upward closure of the new
-//!   edge's source are invalidated via the existing
-//!   [`InvalidationCertificate`] machinery (sound overapprox, never too
-//!   little).
-//! - RETAIN: every counterexample that forced an edge add is appended to a
-//!   retained store. Duplicate observation of the same influence is
-//!   idempotent: no second edge, no second revocation, no second retained
-//!   record.
-//!
-//! The loop never weakens the invalidation contract: it only *adds* edges to
-//! a graph whose incremental/full equivalence claim remains fail-closed.
+//! Counterexample-guided dependency refinement.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -41,11 +19,9 @@ pub struct ObservedInfluence {
 }
 
 impl ObservedInfluence {
-    /// Capture an influence from an omission impact.
-    ///
-    /// Only a `MissingDependencyEdge` omission that forces automatic recovery
-    /// (impacts actions or invalidation) is a candidate for refinement.
-    /// Advisory omissions return `None` -- they never mint graph edges.
+    /// Capture an influence from an omission impact. Only a `MissingDependencyEdge`
+    /// omission that forces automatic recovery (impacts actions or invalidation) is a
+    /// candidate for refinement. Advisory omissions return `None` -- they never mint graph edges.
     #[must_use]
     pub fn from_omission_impact(
         impact: &OmissionImpact,
@@ -113,10 +89,9 @@ pub struct RetainedCounterexample {
     pub invalidation: InvalidationCertificate,
 }
 
-/// Store of retained counterexamples plus the set of edges already applied.
-///
-/// Append-only for records; `applied` mirrors the graph edges this loop added
-/// so duplicate observations are recognized without a graph re-scan.
+/// Store of retained counterexamples plus the set of edges already
+/// applied. Append-only for records; `applied` mirrors the graph edges
+/// this loop added so duplicate observations are recognized without a graph re-scan.
 #[derive(Clone, Debug, Default, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct RetainedCounterexampleStore {
     records: Vec<RetainedCounterexample>,
@@ -223,12 +198,9 @@ impl RefinementLoop {
         }
     }
 
-    /// Ingest one observed influence: ADD -> REVOKE -> RETAIN, idempotently.
-    ///
-    /// When the influence's edge is already present in the graph -- whether
-    /// added by a prior counterexample or declared upfront -- the observation
-    /// is a no-op: no second edge, no second revocation, no second retained
-    /// record.
+    /// Ingest one observed influence: ADD -> REVOKE -> RETAIN, idempotently. When the influence's edge
+    /// is already present in the graph -- whether added by a prior counterexample or declared upfront
+    /// -- the observation is a no-op: no second edge, no second revocation, no second retained record.
     pub fn observe(&mut self, influence: ObservedInfluence) -> RefinementOutcome {
         let already = self
             .graph
@@ -258,17 +230,12 @@ impl RefinementLoop {
     }
 
     /// Sweep `trace` repeatedly until a full pass adds no edge (fixed point).
-    ///
-    /// Fair exercise: when every missing true edge's influence appears at
-    /// least once in `trace`, the loop adds exactly the missing edges and
-    /// stops. `iterations` counts only sweeps that added at least one edge, so
-    /// `iterations <= #missing_edges` holds under fair exercise.
     pub fn refine_to_fixed_point(&mut self, trace: &[ObservedInfluence]) -> FixedPointReport {
         let mut iterations = 0usize;
         loop {
             let before = self.store.len();
             for obs in trace {
-                if let RefinementOutcome::EdgeAdded { .. } = self.observe(obs.clone()) {}
+                let _ = self.observe(obs.clone());
             }
             let added = self.store.len() - before;
             if added == 0 {
@@ -282,11 +249,9 @@ impl RefinementLoop {
         }
     }
 
-    /// Provenance label of the edge `input -> output`, when it exists.
-    ///
-    /// Edges added by this loop are `RuntimeObserved`; edges present before
-    /// refinement are `Declared`. The label is never upgraded: an observed
-    /// edge stays `RuntimeObserved` even across duplicate observations.
+    /// Provenance label of the edge `input -> output`, when it exists. Edges added by this loop
+    /// are `RuntimeObserved`; edges present before refinement are `Declared`. The label is never
+    /// upgraded: an observed edge stays `RuntimeObserved` even across duplicate observations.
     #[must_use]
     pub fn provenance_of(&self, input: ArtifactId, output: ArtifactId) -> Option<EdgeProvenance> {
         if !self

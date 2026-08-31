@@ -207,10 +207,8 @@ impl ProjectGraph {
             .collect()
     }
 
-    /// Certify that `relation` is absent under **complete** scoped coverage.
-    ///
-    /// Incomplete coverage yields [`GraphError::CoverageNotComplete`] -- never
-    /// a silent "proved absent" from a mere not-found scan.
+    /// Certify that `relation` is absent under **complete** scoped coverage. Incomplete coverage yields
+    /// [`GraphError::CoverageNotComplete`] -- never a silent "proved absent" from a mere not-found scan.
     pub fn certify_absence(
         &self,
         relation: Relation,

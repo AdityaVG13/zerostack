@@ -1,8 +1,6 @@
-//! Proof-carrying exact RCQ and reasoning-epoch contraction contract.
-//!
-//! The trusted path supports only exact continuation identity. A clean restart,
-//! approximate continuation, or classifier score cannot mint this capability;
-//! those paths require a quality guard and frozen-baseline deoptimization.
+//! Proof-carrying exact RCQ and reasoning-epoch contraction contract. The trusted path supports only
+//! exact continuation identity. A clean restart, approximate continuation, or classifier score
+//! cannot mint this capability; those paths require a quality guard and frozen-baseline deoptimization.
 
 use std::{error::Error, fmt};
 
@@ -102,7 +100,7 @@ impl ReasoningSafepoint {
         if self.schema_version != SEMANTIC_CUT_SCHEMA_VERSION {
             return Err(cut_error(
                 SemanticCutFailureCode::SchemaVersionMismatch,
-                "reasoning safepoint schema version is not v1",
+                "reasoning safepoint schema is unsupported",
             ));
         }
         for (label, digest) in [
@@ -236,7 +234,7 @@ impl SemanticCutClaim {
         if self.schema_version != SEMANTIC_CUT_SCHEMA_VERSION {
             return Err(cut_error(
                 SemanticCutFailureCode::SchemaVersionMismatch,
-                "semantic-cut claim schema version is not v1",
+                "semantic-cut claim schema is unsupported",
             ));
         }
         self.baseline_terminal.validate()?;
@@ -285,8 +283,7 @@ impl SemanticCutClaim {
             ));
         }
         if self.baseline_terminal.reasoning_state_status != ReasoningStateStatus::ExactPreserved
-            || self.compiled_terminal.reasoning_state_status
-                != ReasoningStateStatus::ExactPreserved
+            || self.compiled_terminal.reasoning_state_status != ReasoningStateStatus::ExactPreserved
         {
             return Err(cut_error(
                 SemanticCutFailureCode::ContinuationNotExact,
@@ -454,7 +451,7 @@ impl SemanticCutEvidence {
         if self.contract_version != SEMANTIC_CUT_CONTRACT_VERSION {
             return Err(cut_error(
                 SemanticCutFailureCode::SchemaVersionMismatch,
-                "semantic-cut certificate contract version is not v1",
+                "semantic-cut certificate contract is unsupported",
             ));
         }
         self.claim.validate_exact()?;
@@ -539,9 +536,7 @@ impl SemanticCutCertificateRecord {
     }
 }
 
-pub fn semantic_cut_verifier_identity(
-    evidence: &VerifiedEvidence<'_, '_>,
-) -> SemanticCutDigest {
+pub fn semantic_cut_verifier_identity(evidence: &VerifiedEvidence<'_, '_>) -> SemanticCutDigest {
     let provenance = evidence.provenance();
     let body = json!({
         "index_id": provenance.index_id,
@@ -673,10 +668,7 @@ impl fmt::Display for SemanticCutError {
 }
 impl Error for SemanticCutError {}
 
-fn cut_error(
-    failure_code: SemanticCutFailureCode,
-    message: impl Into<String>,
-) -> SemanticCutError {
+fn cut_error(failure_code: SemanticCutFailureCode, message: impl Into<String>) -> SemanticCutError {
     SemanticCutError {
         failure_code,
         message: message.into(),
@@ -769,4 +761,3 @@ fn certificate_digest(
         ],
     )
 }
-

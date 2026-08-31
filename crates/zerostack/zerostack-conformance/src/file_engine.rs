@@ -1,20 +1,19 @@
 //! FileEngine contract tests: every implementation of `zero_abi::FileEngine`
 //! must satisfy these. Engines call `run_all` with their concrete instance.
 
-use zero_abi::{
-    EngineErrorKind, FileEffectKind, FileEffectRequest, FileEngine, FileReadRequest,
-    ReadOptions,
-};
 use std::path::PathBuf;
+use zero_abi::{
+    EngineErrorKind, FileEffectKind, FileEffectRequest, FileEngine, FileReadRequest, ReadOptions,
+};
 
-use crate::{conformance_invocation, ConformanceWorkspace, SuiteResult};
+use crate::{SuiteResult, conformance_invocation};
 
 /// Run the full FileEngine conformance suite.
 pub fn run_all(engine: &dyn FileEngine, root: &PathBuf, session: &str) -> SuiteResult {
     let mut result = SuiteResult::default();
     let invocation = conformance_invocation(root, session);
 
-    // --- write → read round-trip ---
+    // write → read round-trip
     {
         let name = "write_read_roundtrip";
         let request = FileEffectRequest {
@@ -41,7 +40,10 @@ pub fn run_all(engine: &dyn FileEngine, root: &PathBuf, session: &str) -> SuiteR
                         result.record_pass(name);
                     }
                     Ok(snapshot) => {
-                        result.record_fail(name, format!("content mismatch: {:?}", snapshot.inline_utf8));
+                        result.record_fail(
+                            name,
+                            format!("content mismatch: {:?}", snapshot.inline_utf8),
+                        );
                     }
                     Err(e) => result.record_fail(name, format!("read after write failed: {e}")),
                 }
@@ -50,7 +52,7 @@ pub fn run_all(engine: &dyn FileEngine, root: &PathBuf, session: &str) -> SuiteR
         }
     }
 
-    // --- read missing → NotFound (not silent empty) ---
+    // read missing → NotFound (not silent empty)
     {
         let name = "read_missing_returns_not_found";
         let read = engine.read(
@@ -67,7 +69,7 @@ pub fn run_all(engine: &dyn FileEngine, root: &PathBuf, session: &str) -> SuiteR
         }
     }
 
-    // --- digest stability: same bytes → same digest across calls ---
+    // digest stability: same bytes → same digest across calls
     {
         let name = "digest_stability";
         let request = FileEffectRequest {
@@ -97,7 +99,10 @@ pub fn run_all(engine: &dyn FileEngine, root: &PathBuf, session: &str) -> SuiteR
             (Ok(a), Ok(b)) if a.content == b.content => result.record_pass(name),
             (Ok(a), Ok(b)) => result.record_fail(
                 name,
-                format!("digests differ for identical content: {} vs {}", a.content, b.content),
+                format!(
+                    "digests differ for identical content: {} vs {}",
+                    a.content, b.content
+                ),
             ),
             (e1, e2) => result.record_fail(name, format!("reads failed: {e1:?} / {e2:?}")),
         }

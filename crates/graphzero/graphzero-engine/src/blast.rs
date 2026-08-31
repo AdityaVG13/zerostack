@@ -1,4 +1,4 @@
-//! P4.1 blast-radius intent queries (walking skeleton).
+//! Blast-radius intent parsing and impact analysis.
 
 mod parse;
 mod render;

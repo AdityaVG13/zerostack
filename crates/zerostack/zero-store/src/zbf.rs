@@ -1,10 +1,6 @@
-//! ZeroStore integration for the canonical `zero-abi` ZBF-1 contract.
-//!
-//! Format types remain re-exported here for source compatibility. `zero-abi`
-//! is the only format authority; this module owns only CAS persistence glue.
+//! Shared CAS persistence for canonical ZBF objects.
 
-use zero_abi::Sha256Digest;
-pub use zero_abi::zbf::*;
+use zero_abi::{DurableProfile, Sha256Digest, ZbfError, ZbfObject};
 
 use crate::{CasError, PutOutcome, SharedCas};
 

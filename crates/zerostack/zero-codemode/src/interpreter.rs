@@ -1,8 +1,6 @@
-//! Restricted, owned JavaScript-subset interpreter.
-//!
-//! The parser is Tree-sitter JavaScript. The evaluator owns the supported
-//! value space and exposes only the registered capability tree. It never
-//! evaluates source as host code.
+//! Restricted, owned JavaScript-subset interpreter. The parser is Tree-sitter
+//! JavaScript. The evaluator owns the supported value space and exposes only
+//! the registered capability tree. It never evaluates source as host code.
 
 use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, BTreeSet};
@@ -186,10 +184,9 @@ const MAX_DEPTH_HARD_CAP: usize = 128;
 /// Ceiling for `to_string` coercion recursion, independent of host limits.
 const MAX_TO_STRING_DEPTH: usize = 128;
 
-/// Conservative retained cost for one connector promise, including its map
-/// node, completion state, normalized result tree, and allocator overhead.
-/// This converts the explicit memory budget into backpressure/failure without
-/// imposing an operation-count ceiling on sequential plans.
+/// Conservative retained cost for one connector promise, including its map node, completion
+/// state, normalized result tree, and allocator overhead. This converts the explicit memory
+/// budget into backpressure/failure without imposing an operation-count ceiling on sequential plans.
 const ESTIMATED_CONNECTOR_PROMISE_BYTES: usize = 4 * 1024;
 
 /// RAII recursion-depth guard. Every entry increments the shared counter and
@@ -862,10 +859,9 @@ impl<'tree> Interpreter<'tree> {
                 if let Value::Object(object) = value {
                     let mut cursor = node.walk();
                     let parts: Vec<_> = node.named_children(&mut cursor).collect();
-                    // Snapshot fields and drop the RefCell borrow before
-                    // recursive bind. Nested pair patterns can alias the
-                    // same object (`const { self: { x: y } } = obj` when
-                    // `obj.self === obj`) and would otherwise panic.
+                    // Snapshot fields and drop the RefCell borrow before recursive bind. Nested pair patterns can
+                    // alias the same object (`const { self: { x: y } } = obj` when `obj.self === obj`) and would
+                    // otherwise panic.
                     let bindings: Vec<(Node<'tree>, Value<'tree>)> = {
                         let object = object.borrow();
                         parts
@@ -1208,6 +1204,9 @@ impl<'tree> Interpreter<'tree> {
                 let argument = node
                     .child_by_field_name("argument")
                     .ok_or_else(|| Fault::Host(self.unsupported("unary argument")))?;
+                if operator == "delete" {
+                    return self.delete_member(argument).map_err(Fault::Host);
+                }
                 if operator == "typeof"
                     && matches!(
                         argument.kind(),
@@ -1220,6 +1219,7 @@ impl<'tree> Interpreter<'tree> {
                 let value = self.eval(argument)?;
                 unary(&operator, value).map_err(Fault::Host)
             }
+
             "update_expression" => {
                 let target = node
                     .child_by_field_name("argument")
@@ -1282,9 +1282,16 @@ impl<'tree> Interpreter<'tree> {
                         .ok_or_else(|| Fault::Host(self.unsupported("array spread")))?,
                 )? {
                     Value::Array(items) => values.extend(items.borrow().iter().cloned()),
+                    Value::Set(items) => values.extend(items.borrow().iter().cloned()),
+                    Value::Map(entries) => values.extend(
+                        entries
+                            .borrow()
+                            .iter()
+                            .map(|(key, value)| new_array(vec![key.clone(), value.clone()])),
+                    ),
                     _ => {
                         return Err(Fault::Host(HostError::Data(
-                            "array spread requires an array".into(),
+                            "array spread requires an iterable array, set, or map".into(),
                         )));
                     }
                 }
@@ -1465,10 +1472,9 @@ impl<'tree> Interpreter<'tree> {
             .child_by_field_name("arguments")
             .ok_or_else(|| Fault::Host(self.unsupported("call arguments")))?;
 
-        // Tree-sitter parses program-level `await (async () => { ... })()` as
-        // `(await(async () => { ... }))()`: the contextual keyword becomes an
-        // identifier because the source is a script. Accept only that exact
-        // recovery shape. This does not install an ambient `await` function.
+        // Tree-sitter parses program-level `await (async => {... })` as `(await(async => {...
+        // }))`: the contextual keyword becomes an identifier because the source is a script.
+        // Accept only that exact recovery shape. This does not install an ambient `await` function.
         if function_node.kind() == "identifier" && self.text(function_node) == "await" {
             let mut cursor = arguments.walk();
             let children: Vec<_> = arguments
@@ -1721,11 +1727,8 @@ impl<'tree> Interpreter<'tree> {
             })
     }
 
-    /// Allocate the next dispatch sequence from the shared monotonic
-    /// allocator used by connector calls (promise ids), derived promises,
-    /// and synchronous state operations. State consumption can therefore
-    /// never collide with a later promise, and every traced operation keeps
-    /// a strictly increasing sequence and occurrence.
+    /// Allocate the next dispatch sequence from the shared monotonic allocator used by connector calls
+    /// (promise ids), derived promises, and synchronous state operations.
     fn allocate_sequence(&mut self) -> Result<u64, Fault<'tree>> {
         let sequence = self.next_sequence;
         self.next_sequence = self
@@ -1745,11 +1748,8 @@ impl<'tree> Interpreter<'tree> {
             return;
         }
         let trace_index = operations.len();
-        // The trace is bound at dispatch start to the capsule root of the
-        // installed guest surface; no host-side post-hoc stamping happens.
-        // A host without a guest surface (or with an empty capsule root)
-        // keeps that empty root, and response validation rejects it rather
-        // than a root being fabricated here.
+        // The trace is bound at dispatch start to the capsule root of the installed guest surface; no
+        // host-side post-hoc stamping happens.
         let capsule_root = self
             .host
             .guest
@@ -1845,10 +1845,9 @@ impl<'tree> Interpreter<'tree> {
                 "arguments exceed JSON limit".into(),
             )));
         }
-        // Total host-call budget: every admitted operation counts against the
-        // per-execution bound. The next dispatch past the bound fails typed
-        // before any adapter work, so sequential or concurrent call floods are
-        // bounded by the budget, not by wall time alone.
+        // Total host-call budget: every admitted operation counts against the per-execution
+        // bound. The next dispatch past the bound fails typed before any adapter work, so
+        // sequential or concurrent call floods are bounded by the budget, not by wall time alone.
         if self.metrics.connector_dispatches >= self.host.limits.max_connector_calls {
             self.metrics
                 .first_saturation_cause
@@ -1999,8 +1998,8 @@ impl<'tree> Interpreter<'tree> {
             PromiseState::Rejected(value) => Err(Fault::Throw(value)),
             PromiseState::Failed(error) => Err(Fault::Host(error)),
             PromiseState::Pending(PromiseKind::All(ids)) => {
-                // Persist reject/fail so progress_race_child cannot
-                // resolve() the same All forever (a6wz leftover).
+                // Persist rejection or failure so race progression cannot resolve the
+                // same `All` promise repeatedly.
                 match self.all(&ids) {
                     Ok(values) => {
                         let value = new_array(values);
@@ -2090,13 +2089,8 @@ impl<'tree> Interpreter<'tree> {
                         _ => None,
                     });
                     let Some(next) = next else {
-                        // No pending chain can settle this promise right
-                        // now. Keep making progress: poll connector
-                        // completions (their then-callbacks may settle this
-                        // promise) under the wall deadline and loop. A
-                        // genuinely unresolved promise reaches the wall
-                        // deadline and fails typed; it can never hang the
-                        // call past the budget (zerostack-zksb).
+                        // No pending chain can settle this promise right now. Keep making progress: poll connector
+                        // completions (their then-callbacks may settle this promise) under the wall deadline and loop.
                         self.tick()?;
                         self.microtask_streak = 0;
                         match self.receiver.recv_timeout(
@@ -2285,9 +2279,8 @@ impl<'tree> Interpreter<'tree> {
         }
     }
 
-    /// Advance one race child without waiting on a pending host Connector.
-    /// Then/All/Race used to `resolve()`/`pump()` here and host-wait, so a
-    /// later sibling that settled first still lost (gtoj leftover).
+    /// Advance one race child without waiting on a pending host connector.
+    /// A later settled sibling can therefore win while an earlier child remains pending.
     fn progress_race_child(&mut self, id: u64) -> Result<bool, HostError> {
         match self.promises.get(&id).cloned() {
             Some(PromiseState::Pending(PromiseKind::Then { parent, .. })) => {
@@ -2334,14 +2327,13 @@ impl<'tree> Interpreter<'tree> {
             self.drain()?;
             // Already-settled siblings win before Then/All pumps. pitl pumped
             // first, so race([resolve(1).then(x=>x+1), resolve('fast')])
-            // returned 2 (zerostack-gtoj).
+            // returned 2.
             if let Some(id) = self.first_settled_race_sibling(ids) {
                 return Ok(id);
             }
-            // Cheap microtasks only: Then with a settled parent, or a
-            // combinator whose children are already terminal. Full
-            // resolve()/pump() host-waits on Pending(Connector) and lets
-            // the earlier sibling steal the win (zerostack-a6wz).
+            // Cheap microtasks only: Then with a settled parent, or a combinator whose children are already
+            // terminal. Full resolve/pump host-waits on Pending(Connector) and lets the earlier sibling steal
+            // the win.
             let mut progressed = false;
             for id in ids {
                 if self.progress_race_child(*id)? {
@@ -2372,10 +2364,8 @@ impl<'tree> Interpreter<'tree> {
         }
     }
 
-    /// Fail-fast All: a settled reject/fail wins before host-waiting an
-    /// earlier Pending(Connector). Sequential resolve() waited the first
-    /// child, so all([slowPing, reject('x')]) timed out instead of
-    /// throwing x (zerostack-hzms; a6wz leftover).
+    /// Return a settled rejection before waiting on an earlier pending connector.
+    /// This preserves fail-fast `all` semantics when child completion order differs.
     fn all(&mut self, ids: &[u64]) -> Result<Vec<Value<'tree>>, Fault<'tree>> {
         if ids.is_empty() {
             return Ok(Vec::new());
@@ -2794,11 +2784,9 @@ impl<'tree> Interpreter<'tree> {
         }
     }
 
-    /// Bounded serializable cell state. Every invocation records one
-    /// synchronous `state` trace bound to the guest capsule root; its
-    /// sequence comes from the same monotonic allocator as connector
-    /// calls, so state consumption cannot collide with later promises.
-    /// The trace completes on both success and failure.
+    /// Bounded serializable cell state. Every invocation records one synchronous `state` trace bound to
+    /// the guest capsule root; its sequence comes from the same monotonic allocator as connector calls,
+    /// so state consumption cannot collide with later promises.
     fn z_state_member(
         &mut self,
         name: &str,
@@ -3696,6 +3684,38 @@ impl<'tree> Interpreter<'tree> {
         None
     }
 
+    fn delete_member(&mut self, node: Node<'tree>) -> Result<Value<'tree>, HostError> {
+        if !matches!(node.kind(), "member_expression" | "subscript_expression") {
+            return Err(self.unsupported("delete target"));
+        }
+        let object = node
+            .child_by_field_name("object")
+            .ok_or_else(|| self.unsupported("delete object"))?;
+        let key = if let Some(property) = node.child_by_field_name("property") {
+            self.text(property).to_owned()
+        } else if let Some(index) = node.child_by_field_name("index") {
+            to_key(&self.eval(index).map_err(|fault| self.fault(fault))?)
+        } else {
+            return Err(self.unsupported("delete property"));
+        };
+        let target = self.eval(object).map_err(|fault| self.fault(fault))?;
+        match target {
+            Value::Object(target) => {
+                let mut target = target.borrow_mut();
+                match target.access {
+                    ObjectAccess::Open => {
+                        target.fields.remove(&key);
+                        Ok(Value::Bool(true))
+                    }
+                    ObjectAccess::Strict => Err(HostError::Data(format!(
+                        "cannot delete property '{key}' on a connector result"
+                    ))),
+                }
+            }
+            _ => Err(self.unsupported("delete target")),
+        }
+    }
+
     fn assign(&mut self, node: Node<'tree>, value: Value<'tree>) -> Result<(), HostError> {
         if matches!(node.kind(), "member_expression" | "subscript_expression") {
             let object = node
@@ -4401,11 +4421,7 @@ fn to_string(value: &Value<'_>) -> String {
     to_string_depth(value, &mut BTreeSet::new(), 0)
 }
 
-/// Coercion with an independent pointer/depth guard. Arrays can reference
-/// themselves (for example via `push`), and string, template, join, sort,
-/// and error formatting all recurse through this helper, so cycles and
-/// excessive nesting fall back to a JS-like empty element instead of
-/// overflowing the native stack.
+/// Coercion with an independent pointer/depth guard.
 fn to_string_depth(value: &Value<'_>, active: &mut BTreeSet<usize>, depth: usize) -> String {
     if depth >= MAX_TO_STRING_DEPTH {
         return String::new();
@@ -4442,10 +4458,9 @@ fn to_key(value: &Value<'_>) -> String {
     }
 }
 
-/// `Object.defineProperty`: clone get/value out of the descriptor **before**
-/// taking `borrow_mut` on the target. The same object can be both target and
-/// descriptor (`Object.defineProperty(o, "x", o)`); holding borrow_mut +
-/// borrow on one RefCell panics.
+/// `Object.defineProperty`: clone get/value out of the descriptor **before** taking
+/// `borrow_mut` on the target. The same object can be both target and descriptor
+/// (`Object.defineProperty(o, "x", o)`); holding borrow_mut + borrow on one RefCell panics.
 fn object_define_property<'tree>(args: Vec<Value<'tree>>) -> Result<Value<'tree>, Fault<'tree>> {
     let mut iter = args.into_iter();
     let target = iter.next().unwrap_or(Value::Undefined);
@@ -4604,10 +4619,8 @@ fn relational<'tree>(
     ordering.is_some_and(predicate)
 }
 
-/// Decode a quoted string literal body, processing every JavaScript escape
-/// sequence exactly once, left to right. Every possible character after a
-/// backslash is handled explicitly, so no escape can silently pass through
-/// as raw text (the corruption class behind pc_78f6e48133fb).
+/// Decode a quoted string body and process each JavaScript escape once.
+/// Every character after a backslash is handled explicitly.
 fn unquote(value: &str) -> Result<String, HostError> {
     if value.len() >= 2 {
         let bytes = value.as_bytes();
@@ -4671,8 +4684,8 @@ fn apply_escape(after: &str) -> Result<(Option<char>, usize), HostError> {
             }
         }
         digit @ '1'..='9' => {
-            // Strict-mode JS rejects \\1-\\9 and legacy octal; so do we,
-            // rather than silently emitting the digit as text.
+            // Match strict-mode JS by rejecting \\1-\\9 and legacy octal instead of
+            // emitting the digit as text.
             let _ = digit;
             let shown: String = after.chars().take(2).collect();
             Err(unsupported_escape(&shown))

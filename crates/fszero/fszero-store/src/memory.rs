@@ -1,10 +1,5 @@
-//! Durable agent memory volume — path-keyed blobs in the recovery store.
-//!
-//! No daemon: every put is a synchronous SQLite write (same store as refs /
-//! worlds). Paths are normalized under `mem://` so they never collide with
-//! `fz://` content refs or `world_*` keys. Listing uses the `memory_paths`
-//! index (prefix-scoped LIKE via idx_memory_paths_prefix; empty
-//! prefix is O(index rows), not O(payloads) and not unlabeled O(1)).
+//! Durable path-keyed memory in the recovery store.
+//! Paths use `mem://`, separate from `z://blob` refs and `world_*` keys.
 
 use super::recovery::RecoveryStore;
 use std::path::{Component, Path};
@@ -54,8 +49,8 @@ fn rel_path(key: &str) -> String {
 
 pub fn put_memory(store: &mut RecoveryStore, path: &str, data: &[u8]) -> Result<String, String> {
     let key = mem_key(path)?;
-    // fszero-m1y.8: payload + content ref + memory_paths index must commit as
-    // one unit so a crash mid-put cannot leave orphan index/payload rows.
+    //.8: payload + content ref + memory_paths index must commit as one
+    // unit so a crash mid-put cannot leave orphan index/payload rows.
     let began = store.begin_exec_txn();
     let result = (|| {
         store.try_put_key(&key, data)?;

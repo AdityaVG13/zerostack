@@ -1,9 +1,6 @@
-//! Fuzz the WAL delta-codec decoders (graphzero-la0n).
-//!
-//! Invariant: whenever a decode succeeds, re-encoding the decoded semantic
-//! tuple must succeed and decode back to the identical tuple. Arbitrary
-//! trailing bytes are not asserted to be canonical; only semantic
-//! round-trip is required.
+//! Fuzz the WAL delta-codec decoders. Invariant: whenever a decode succeeds, re-encoding
+//! the decoded semantic tuple must succeed and decode back to the identical tuple.
+//! Arbitrary trailing bytes are not asserted to be canonical; only semantic round-trip is required.
 
 #![no_main]
 

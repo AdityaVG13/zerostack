@@ -1,5 +1,4 @@
 //! Provider-neutral usage observations and exactly-once savings attribution.
-//!
 //! Measured, estimated, and unmeasured coordinates remain distinct. Totals
 //! include measured events only, so missing provider data cannot become zero.
 
@@ -82,7 +81,6 @@ pub struct PlanWindow {
     pub provider: String,
     pub plan_tier: String,
     pub model_contract_root: String,
-    pub harness_contract_root: String,
     pub started_unix_ms: u64,
     pub ended_unix_ms: Option<u64>,
     pub reset_observed_unix_ms: Option<u64>,
@@ -179,12 +177,8 @@ pub fn coordinate_totals(events: &[UsageEvent]) -> Result<BTreeMap<UsageCoordina
     }
     Ok(totals)
 }
-/// Convert a provider-neutral observation into deterministic [`UsageEvent`]s.
-///
-/// Every coordinate in the observation produces one event, even when
-/// unmeasured (amount 0, observation Unmeasured). This preserves
-/// missing-data honesty: absent provider fields remain `Unmeasured` and
-/// never become measured zero.
+/// Convert a provider-neutral observation into deterministic [`UsageEvent`]s. Every coordinate in
+/// the observation produces one event, even when unmeasured (amount 0, observation Unmeasured).
 pub fn provider_usage_events(
     task_root: &str,
     arm: UsageArm,

@@ -1,13 +1,6 @@
-//! Bounded in-process zero-miss speculation.
-//!
-//! Admission happens only for a finalized unconditional call permit carrying
-//! exact prepared identity. Capacity refusal chooses ordinary execution before
-//! any work launches. Once admitted, the real call must claim the exact
-//! rooted result; absence is an invariant failure and never triggers duplicate
-//! execution. There is no prediction path: work launches only from a
-//! `SpeculationPermit` that validates as unconditional, certified-pure, and
-//! cancellation-bound, and (via `admit_prepared`) matches the sealed
-//! `PreparedCell` digest and binding.
+//! Bounded in-process zero-miss speculation. Admission happens only for a finalized unconditional
+//! call permit carrying exact prepared identity. Capacity refusal chooses ordinary execution before
+//! any work launches.
 
 use std::collections::BTreeMap;
 use std::panic::{AssertUnwindSafe, catch_unwind};
@@ -25,21 +18,9 @@ use zero_abi::{
 
 use crate::PreparedCell;
 
-/// Typed outcomes for zero-miss speculation — covers the five observable
-/// contracts the runtime guarantees without rerunning work:
-///
-/// * `Ordinary` — execution proceeded without speculation (plan marked the
-///   node ordinary or host chose not to speculate).
-/// * `SpeculativeWin` — speculative work completed with a value and the exact
-///   claim hit.
-/// * `SpeculativeDomainError` — speculative work completed with a typed
-///   domain error (e.g., file does not exist, invalid input, `retryable=false`);
-///   no retry is performed.
-/// * `Cancelled` — speculative work was cancelled by bounded-wait timeout or
-///   turn invalidation; the worker was joined and drained.
-/// * `CapacityRefusal` — admission was refused before launch due to the
-///   bounded inflight limit; caller preserved ordinary execution and no worker
-///   was leaked.
+/// Typed outcomes for zero-miss speculation — covers the five observable contracts the runtime
+/// guarantees without rerunning work * `Ordinary` — execution proceeded without speculation (plan
+/// marked the node ordinary or host chose not to speculate). * `SpeculativeWin` — speculative.
 #[derive(Debug)]
 pub enum SpeculationOutcome {
     Ordinary,
@@ -130,11 +111,9 @@ impl SpeculationRuntime {
             .unwrap_or(false)
     }
 
-    /// Admit one finalized unconditional permit. Validates the permit
-    /// (unconditional, certified-pure, cancellation-bound, positive budgets)
-    /// and enforces the bounded capacity *before* any thread is spawned.
-    /// On capacity refusal the ledger records an ordinary admission and
-    /// ordinary execution is preserved with no worker leaked.
+    /// Admit one finalized unconditional permit. Validates the permit (unconditional, certified-pure,
+    /// cancellation-bound, positive budgets) and enforces the bounded capacity *before* any thread is
+    /// spawned.
     pub fn admit<F>(
         &self,
         permit: SpeculationPermit,
@@ -146,11 +125,9 @@ impl SpeculationRuntime {
         self.admit_inner(permit, None, work)
     }
 
-    /// Admit one finalized unconditional permit bound to an exact
-    /// `PreparedCell` identity. In addition to `admit` validation the
-    /// permit's binding and finalized source root must match the sealed
-    /// prepared cell exactly; any drift is rejected before launch with no
-    /// worker created. This is the host-facing zero-miss entry point.
+    /// Admit one finalized unconditional permit bound to an exact `PreparedCell` identity. In addition
+    /// to `admit` validation the permit's binding and finalized source root must match the sealed
+    /// prepared cell exactly; any drift is rejected before launch with no worker created.
     pub fn admit_prepared<F>(
         &self,
         permit: SpeculationPermit,
@@ -275,11 +252,9 @@ impl SpeculationRuntime {
         Ok(SpeculationAdmission::Speculated)
     }
 
-    /// Claim the exact rooted result for an admitted permit. Waits at most
-    /// `wait`; on timeout the worker is cancelled but remains joined via
-    /// `end_turn`/Drop. A missing claim is an invariant failure and never
-    /// triggers duplicate execution. A second claim on the same permit cannot
-    /// commit a duplicate result — it fails closed.
+    /// Claim the exact rooted result for an admitted permit. Waits at most `wait`; on timeout the
+    /// worker is cancelled but remains joined via `end_turn`/Drop. A missing claim is an invariant
+    /// failure and never triggers duplicate execution.
     pub fn claim(&self, permit: &SpeculationPermit, wait: Duration) -> Result<Value, EngineError> {
         let key = permit
             .claim_key()
@@ -393,11 +368,9 @@ impl SpeculationRuntime {
         }
     }
 
-    /// Typed claim outcome for host integration — maps the same invariants as
-    /// `claim` onto the five typed contracts: speculative win, speculative
-    /// domain error, cancellation, ordinary (no admission), and capacity
-    /// refusal (handled at admission). Cancellation and domain errors are
-    /// typed via `EngineError` kinds and `retryable=false` for domain.
+    /// Typed claim outcome for host integration — maps the same invariants as `claim` onto the five
+    /// typed contracts: speculative win, speculative domain error, cancellation, ordinary (no
+    /// admission), and capacity refusal (handled at admission).
     pub fn claim_outcome(
         &self,
         permit: &SpeculationPermit,

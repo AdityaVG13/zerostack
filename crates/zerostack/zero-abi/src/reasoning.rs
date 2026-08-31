@@ -1,10 +1,5 @@
-//! Frozen same-model reasoning identity and strict no-downshift admission.
-//!
-//! This contract is a comparison identity. It does not infer quality from token
-//! counts, cache hits, or shorter traces. Strict admission keeps semantic
-//! identities and provider policy exact and permits only nondecreasing token
-//! ceilings/reserves. `decoder_identity` commits resolved sampling, randomness,
-//! context behavior, and provider defaults; an unresolved label is not valid authority.
+//! Frozen same-model reasoning identity and strict no-downshift admission. This contract is a
+//! comparison identity. It does not infer quality from token counts, cache hits, or shorter traces.
 
 use std::{collections::BTreeMap, error::Error, fmt};
 
@@ -41,15 +36,12 @@ pub enum NativeStatePolicy {
     Unavailable,
 }
 
-/// Explicit sampling parameters (CONTRACT-002). Integer parts-per-million
-/// encoding keeps canonical bytes exact -- no float canonicalization hazards.
-/// Absence of a [`ReasoningContract`] field means provider defaults are
-/// committed by `decoder_identity`; presence binds the override into the
-/// contract identity.
+/// Explicit sampling parameters. Integer parts-per-million encoding keeps canonical
+/// bytes exact -- no float canonicalization hazards.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct SamplingParams {
-    /// Temperature in parts per million: `0` (greedy) ..= 2_000_000 (2.0).
+    /// Temperature in parts per million: `0` (greedy)..= 2_000_000 (2.0).
     pub temperature_ppm: u32,
     /// Nucleus sampling cutoff in parts per million: `1_000_000` (1.0) means
     /// no truncation.
@@ -90,7 +82,7 @@ impl SamplingParams {
     }
 }
 
-/// Explicit stopping policy (CONTRACT-002): bounded stop sequences plus an
+/// Explicit stopping policy: bounded stop sequences plus an
 /// optional hard step ceiling.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -140,7 +132,7 @@ impl StoppingPolicy {
     }
 }
 
-/// Per-tool invocation permission (CONTRACT-002): the granularity that
+/// Per-tool invocation permission: the granularity that
 /// `tool_schema_digest` set-identity cannot express.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -195,7 +187,7 @@ pub struct ReasoningContract {
     allow_effort_downshift: bool,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     provider_extension: BTreeMap<String, Value>,
-    // CONTRACT-002: explicit invocation bindings. Absence (None/empty) is a
+    // Explicit invocation bindings. Absence is a
     // legitimate declared state meaning provider defaults; presence binds the
     // override into the contract identity and strict comparison.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -251,10 +243,9 @@ impl ReasoningContract {
         Ok(contract)
     }
 
-    /// Bind the CONTRACT-002 invocation fields (sampling params, stopping
-    /// policy, system prompt root, per-tool permissions) into the contract.
-    /// Any binding participates in the canonical bytes, the identity digest,
-    /// and strict paired comparison.
+    /// Bind the invocation fields (sampling params, stopping policy,
+    /// system prompt root, per-tool permissions) into the contract. Any binding
+    /// participates in the canonical bytes, the identity digest, and strict paired comparison.
     pub fn with_invocation_bindings(
         mut self,
         sampling_params: SamplingParams,
@@ -283,7 +274,7 @@ impl ReasoningContract {
         if self.schema_version != REASONING_CONTRACT_SCHEMA_VERSION {
             return Err(ReasoningContractError::new(
                 ReasoningContractFailureCode::SchemaVersionMismatch,
-                "reasoning contract schema version is not v1",
+                "reasoning contract schema is unsupported",
             ));
         }
         for (label, digest) in [
@@ -680,7 +671,7 @@ pub fn verify_strict_no_downshift(
             "provider extension changed without a cross-class theorem",
         ));
     }
-    // CONTRACT-002 invocation bindings: any mismatch reclassifies the pair,
+    // Invocation bindings: any mismatch reclassifies the pair,
     // exactly like the other comparison-identity fields.
     if baseline.sampling_params != candidate.sampling_params {
         return Err(ReasoningContractError::new(
@@ -771,7 +762,7 @@ pub fn reasoning_contract_schema() -> Value {
                 "type": "object"
             }
         },
-        "$id": "https://zerostack.dev/schemas/racc-r/reasoning-contract-v1.json",
+        "$id": "https://zerostack.dev/schemas/racc-r/reasoning-contract.json",
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "additionalProperties": false,
         "properties": {
@@ -801,7 +792,7 @@ pub fn reasoning_contract_schema() -> Value {
             "max_output_tokens", "reserved_reasoning_tokens", "reserved_visible_output_tokens",
             "reserved_recovery_tokens", "native_state_policy", "allow_effort_downshift",
         ],
-        "title": "RACC-R ReasoningContract V1",
+        "title": "RACC-R ReasoningContract",
         "type": "object",
     })
 }
@@ -914,7 +905,7 @@ fn validate_admission_fields(
     if contract_version != REASONING_CONTRACT_VERSION {
         return Err(ReasoningContractError::new(
             ReasoningContractFailureCode::SchemaVersionMismatch,
-            "strict reasoning admission version is not v1",
+            "strict reasoning admission schema is unsupported",
         ));
     }
     if baseline_contract_digest == Sha256Digest::ZERO

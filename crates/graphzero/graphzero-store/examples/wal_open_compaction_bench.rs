@@ -196,7 +196,7 @@ fn main() -> Result<()> {
         })
     };
     let result = json!({
-        "schema": "graphzero.wal-open-compaction-benchmark.v2",
+        "schema": "graphzero.wal-open-compaction-benchmark",
         "corpus": {
             "name": "graphzero-self-repo",
             "path": repo.display().to_string(),

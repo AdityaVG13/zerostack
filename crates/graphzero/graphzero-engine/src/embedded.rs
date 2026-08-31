@@ -1,8 +1,6 @@
-//! Embedding API for the single zerostack binary.
-//!
-//! The host owns the store path and passes it explicitly; this module keeps no
-//! process-global state, so multiple embedded instances can target different
-//! shared stores in one process.
+//! Embedding API for the single zerostack binary. The host owns the store path
+//! and passes it explicitly; this module keeps no process-global state, so
+//! multiple embedded instances can target different shared stores in one process.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -14,13 +12,9 @@ use graphzero_store::{ContentHash, SharedCas, Snapshot};
 use serde::{Deserialize, Serialize};
 
 use crate::blast::{BlastError, BlastRadiusCapsule, blast_radius, blast_radius_with_depth};
-use crate::codemode::{CodeModeResponse, execute};
 
 /// Sibling-scheme spellings of one content-addressed identity.
-///
-/// The matching SHA-256 suffix is an identity claim, not shared storage:
-/// a sibling ref is only resolvable where the same object is reachable and
-/// digest-verified (ZeroRef v1, docs/adr/002-zeroref-v1.md).
+/// A sibling ref resolves only when the same bytes are reachable and digest-verified.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SharedBlobRef {
     pub hash: String,
@@ -33,9 +27,9 @@ impl SharedBlobRef {
     pub fn for_hash(hash: impl Into<String>) -> Self {
         let hash = hash.into();
         Self {
-            gz_ref: format!("gz://blob/{hash}"),
-            fz_ref: format!("fz://blob/{hash}"),
-            tz_ref: format!("tz://blob/{hash}"),
+            gz_ref: format!("z://blob/{hash}"),
+            fz_ref: format!("z://blob/{hash}"),
+            tz_ref: format!("z://blob/{hash}"),
             hash,
         }
     }
@@ -113,11 +107,6 @@ impl EmbeddedGraphZero {
         index_repo_into_store(repo_root, &self.store_root).map(|_| ())
     }
 
-    pub fn execute_plan(&self, plan: &str) -> Result<CodeModeResponse> {
-        let snapshot = self.snapshot()?;
-        Ok(execute(&snapshot, plan))
-    }
-
     pub fn blast_radius(
         &self,
         intent: &str,
@@ -147,16 +136,14 @@ impl EmbeddedGraphZero {
         Ok(SharedBlobRef::for_hash(hash.to_hex()))
     }
 
-    /// Handle to the canonical ZeroRef v1 CAS under this store root
+    /// Handle to the canonical ZeroRef CAS under this store root
     /// (`blobs/sha256/<hh>/<hash>`, ADR 002 §7).
     pub fn shared_cas(&self) -> SharedCas {
         SharedCas::open(&self.store_root)
     }
 
-    /// ZeroRef v1 rollout path: publish bytes into the canonical CAS layout
-    /// and emit the full-hash sibling refs. `put_blob` remains the
-    /// backwards-compatible legacy flat-store write; hosts opt into v1
-    /// storage by calling this method instead.
+    /// ZeroRef rollout path: publish bytes into the canonical CAS layout and emit the full-hash sibling
+    /// refs. `put_blob` remains the flat-store write; hosts opt in storage by calling this method instead.
     pub fn put_blob_cas(&self, bytes: &[u8]) -> Result<SharedBlobRef> {
         let hash = self
             .shared_cas()

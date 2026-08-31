@@ -29,7 +29,7 @@ impl Default for ClaimVerifyConfig {
     }
 }
 
-/// Verify an agent assertion against the indexed graph.
+/// Verify a caller assertion against the indexed graph.
 pub fn verify_claim(
     snapshot: &Snapshot,
     kind: ClaimKind,

@@ -1,7 +1,6 @@
-//! Coverage bitmap: 3 bits per blob, one bit per tier A/B/C (FR-007).
-//!
-//! Bit layout per blob i (LSB-first within the packed byte stream):
-//! bit (i*3 + 0) = tier A indexed, (i*3 + 1) = tier B, (i*3 + 2) = tier C.
+//! Coverage bitmap: 3 bits per blob, one bit per tier A/B/C.
+//! Bit layout per blob i (LSB-first within the packed byte stream) bit
+//! (i*3 + 0) = tier A indexed, (i*3 + 1) = tier B, (i*3 + 2) = tier C.
 
 use anyhow::{Result, bail};
 

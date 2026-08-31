@@ -23,10 +23,9 @@ impl ProcessResourcePolicy {
         }
     }
 
-    /// Fail-closed share for one active child while the other prewarmed child
-    /// trees may remain at their idle shares. This keeps the worst case of
-    /// `workers` active children plus `workers - 1` idle prewarms within the
-    /// aggregate active budget.
+    /// Fail-closed share for one active child while the other prewarmed child trees
+    /// may remain at their idle shares. This keeps the worst case of `workers` active
+    /// children plus `workers - 1` idle prewarms within the aggregate active budget.
     pub fn share(self, workers: u64) -> io::Result<Self> {
         if workers == 0 {
             return Err(io::Error::new(
@@ -201,4 +200,3 @@ pub(crate) fn configure_command(
         format!("native process resource enforcement unsupported: {receipt:?}"),
     ))
 }
-

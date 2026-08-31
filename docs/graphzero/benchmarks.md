@@ -1,25 +1,21 @@
 # GraphZero benchmarks
 
-Current public latency claims come from committed, reproducible artifacts. Each artifact records binary digest, corpus, profile, host class, sample count, percentile estimator, and dropped-sample accounting.
+GraphZero benchmarks exercise internal domain libraries. Historical measurements from other execution surfaces are not product claims.
 
-## Current rebaseline
+Current benchmarks exercise typed domain crates directly:
 
-Source: [`benchmarks/rebaseline/latest.json`](../../benchmarks/graphzero/rebaseline/latest.json)
+- `graphzero-engine`: `query_surface`
+- `graphzero-store`: `budgets`, `query_warm`, `query_cold`, `branch_switch`
+- `graphzero-extract`: `extraction_bench`
+- `graphzero-reserve`: `reserve_check`
+- `graphzero-coverage`: `coverage_bench`
 
-| Operation | p50 | p95 | Runs |
-| --- | ---: | ---: | ---: |
-| Warm orient on a symbol | 24.172 ms | 24.532 ms | 20 |
-| Blast radius | 19.587 ms | 24.918 ms | 20 |
-| Warm re-index | 57.959 ms | 63.160 ms | 20 |
-
-Reference environment: release-perf binary on a dedicated macOS arm64 RCH runner, 365 Rust files, no samples dropped.
-
-Cold-index and verify latency remain unpublished until normalized fixtures meet the sample floor. Historical CodeMode and standalone-MCP artifacts do not describe the current ZeroKernel adapter and must not be compared with this table.
-
-## Reproduce
+Run one named target through RCH. Example:
 
 ```bash
-./scripts/benchmark.sh
+RCH_REQUIRE_REMOTE=1 CARGO_TARGET_DIR=/tmp/rch_target_zerostack \
+  rch exec -- cargo bench -p graphzero-store --bench budgets --features benchmarks
 ```
 
-A new number replaces a claim only when the method and corpus remain comparable or the semantic reason for the change is documented.
+Publish a number only with the exact command, source revision, profile, host class,
+corpus identity, sample count, percentile method, and complete dropped-sample record.

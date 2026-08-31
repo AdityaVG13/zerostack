@@ -1,27 +1,4 @@
-//! Out-of-process worker trust boundary (ZS-OPS-005 / V6-R14).
-//!
-//! Workers are untrusted producers. Output crosses the process boundary as
-//! a serialized [`WorkerTrustEnvelope`] (identity claim + frames + traces) and
-//! is admitted -- or refused -- by [`WorkerTrustBoundary`] against a
-//! digest-pinned [`TrustContext`]:
-//!
-//! - Identity must match the pinned engine/artifact/protocol digests
-//!   exactly (forged or stolen identity is refused).
-//! - Frames must be content-addressed: every frame's payload must hash to
-//!   its declared digest (a forged frame is refused by digest, never by
-//!   trust), frame indices must be unique (replayed frames refused), and
-//!   frame counts are bounded.
-//! - Traces must be well-typed and bounded (forged traces and token-budget
-//!   overruns refused).
-//! - Envelopes are ordered by `seq`; a replayed envelope is refused.
-//!
-//! Every refusal is fail-loud with a sealed [`WorkerRefusalRecord`] (the
-//! receipt), and acceptance yields a sealed [`WorkerAdmissionReceipt`].
-//! Admission is NOT authority: an admitted envelope still cannot acquire
-//! cache or commit authority -- cache admission requires
-//! [`CacheAdmissionGate`] over a rooted `PayloadFormationReceipt`, and
-//! commit requires [`ProjectRootGate`]'s verify -> authorize -> commit
-//! chain. Forged frames and traces acquire neither.
+//! Out-of-process worker trust boundary. Workers are untrusted producers.
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -38,12 +15,12 @@ pub const WORKER_TRUST_REFUSAL_DOMAIN: &[u8] = b"zerostack.worker-trust.refusal\
 /// Domain tag bound into admission receipt digests.
 pub const WORKER_TRUST_ADMISSION_DOMAIN: &[u8] = b"zerostack.worker-trust.admission\0";
 /// ABI tag carried by worker-trust artifacts.
-pub const WORKER_TRUST_ABI_VERSION: &str = "v6-r14";
+pub const WORKER_TRUST_ABI_VERSION: &str = "zerostack.worker-trust/1";
 
 fn now_unix_ns() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_nanos() as u64)
+        .map(|duration| u64::try_from(duration.as_nanos()).unwrap_or(u64::MAX))
         .unwrap_or(0)
 }
 
@@ -298,7 +275,11 @@ impl std::fmt::Display for WorkerTrustError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             WorkerTrustError::Refused { record } => {
-                write!(formatter, "worker trust refusal {:?}: {}", record.reason, record.detail)
+                write!(
+                    formatter,
+                    "worker trust refusal {:?}: {}",
+                    record.reason, record.detail
+                )
             }
             WorkerTrustError::InvalidEnvelope(detail) => {
                 write!(formatter, "invalid worker envelope: {detail}")
@@ -352,7 +333,7 @@ impl WorkerTrustBoundary {
         };
 
         // 1. Digest-pinned identity: the claim must match the context
-        //    exactly. A forged or stolen identity cannot pass.
+        // exactly. A forged or stolen identity cannot pass.
         if envelope.identity.engine != self.context.expected_engine
             || envelope.identity.artifact_digest != self.context.expected_artifact_digest
             || envelope.identity.protocol_digest != self.context.expected_protocol_digest
@@ -380,7 +361,7 @@ impl WorkerTrustBoundary {
         }
 
         // 3. Frames: bounded count, content-addressed payloads, unique
-        //    indices (no forged or replayed frames).
+        // indices (no forged or replayed frames).
         if envelope.frames.len() as u64 > self.context.max_frames {
             return Err(refusal(
                 WorkerRefusalReason::FrameBudgetExceeded,
@@ -482,7 +463,7 @@ impl WorkerTrustBoundary {
     }
 }
 
-/// The frozen contract manifest for the worker trust boundary (ZS-OPS-005).
+/// The frozen contract manifest for the worker trust boundary.
 pub fn worker_trust_contract() -> serde_json::Value {
     serde_json::json!({
         "schema_version": WORKER_TRUST_SCHEMA_VERSION,

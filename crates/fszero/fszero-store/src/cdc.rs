@@ -1,8 +1,6 @@
-//! Deterministic content-defined chunking for rendered and semantic segments.
-//!
-//! Boundaries depend on nearby bytes rather than absolute offsets, so small edits
-//! normally invalidate only the chunks around the edit.  The implementation is
-//! intentionally self-contained and deterministic on every target.
+//! Deterministic content-defined chunking for rendered and semantic segments. Boundaries depend on
+//! nearby bytes rather than absolute offsets, so small edits normally invalidate only the chunks
+//! around the edit.
 
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;

@@ -7,7 +7,7 @@
       "min_rust_files": 600
     },
     "inputs": {
-      "trials": 9,
+      "trials": 20,
       "wal_segments": 11,
       "entries_per_segment": 256
     },
@@ -22,10 +22,6 @@
     "before.wal_replay_open.p95_max_ms": 200.0,
     "after.post_compaction_cached_open.p50_max_ms": 0.1,
     "after.post_compaction_cached_open.p95_max_ms": 0.1
-  },
-  "published_fixture": {
-    "path": "benchmarks/latency/wal_open_compaction.json",
-    "immutable_measurement": true
   },
   "profile": "release"
 }

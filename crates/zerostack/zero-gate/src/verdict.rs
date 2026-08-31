@@ -1,19 +1,5 @@
-//! Unified verification verdict for protected scopes.
-//!
-//! Every protected-scope comparison resolves to one of four verdict kinds:
-//! `Equivalent`, `Dominates`, `Reject`, or `Unknown`. Only `Equivalent` and
-//! `Dominates` grant candidate authority. `Unknown` is terminal-epistemic:
-//! it always routes to the frozen raw-baseline fallback, and NOTHING in this
-//! crate promotes `Unknown` to `Equivalent` or `Dominates`. Disagreement,
-//! verifier timeout, uncovered protected dimensions, and distributional
-//! evidence all resolve to `Unknown`; the fallback decision is never laundered
-//! into a passing verdict.
-//!
-//! Subjective dimensions (ergonomics, taste, and other non-mechanical
-//! comparisons) cannot be admitted by evidence alone. A dimension without a
-//! declared evaluator forces a `DecisionRequired` admission before the
-//! underlying verdict is even consulted -- a dominating verdict cannot pass a
-//! subjective dimension that no declared evaluator attested.
+//! Unified verification verdict for protected scopes. Every protected-scope comparison resolves to
+//! one of four verdict kinds `Equivalent`, `Dominates`, `Reject`, or `Unknown`.
 
 use std::{collections::BTreeSet, error::Error, fmt};
 
@@ -69,24 +55,13 @@ impl fmt::Display for VerdictError {
 impl Error for VerdictError {}
 
 /// The unified verification verdict for one protected scope.
-///
-/// Wire shape:
-/// - `"equivalent"` and `"dominates"` are the only authority-granting kinds;
-/// - `"reject"` carries the rejection reasons;
-/// - `"unknown"` carries the epistemic reasons and is terminal: nothing in
-///   this crate ever promotes it, and callers must route it to the frozen
-///   raw-baseline fallback.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub enum VerifierVerdict {
     Equivalent,
     Dominates,
-    Reject {
-        reasons: Vec<String>,
-    },
-    Unknown {
-        reasons: Vec<String>,
-    },
+    Reject { reasons: Vec<String> },
+    Unknown { reasons: Vec<String> },
 }
 
 impl VerifierVerdict {
@@ -104,19 +79,13 @@ impl VerifierVerdict {
         Ok(Self::Unknown { reasons })
     }
 
-    /// Map raw quality-evidence classes onto the unified verdict.
-    ///
-    /// Exact-neutral evidence is `Equivalent`; pointwise and scoped-class
-    /// dominance evidence are `Dominates`. Distributional and unidentified
-    /// evidence are `Unknown` with a fixed reason: a population claim is never
-    /// laundered into an individual proof, and an unidentified class is never
-    /// silently treated as authority.
+    /// Map raw quality-evidence classes onto the unified verdict. Exact-neutral evidence is
+    /// `Equivalent`; pointwise and scoped-class dominance evidence are `Dominates`.
     pub fn from_quality_evidence(class: QualityEvidenceClass) -> Self {
         match class {
             QualityEvidenceClass::ExactNeutral => Self::Equivalent,
-            QualityEvidenceClass::PointwiseDominance | QualityEvidenceClass::ScopedClassDominance => {
-                Self::Dominates
-            }
+            QualityEvidenceClass::PointwiseDominance
+            | QualityEvidenceClass::ScopedClassDominance => Self::Dominates,
             QualityEvidenceClass::Distributional => Self::Unknown {
                 reasons: vec!["distributional_evidence_is_not_pointwise_proof".into()],
             },
@@ -133,17 +102,10 @@ impl VerifierVerdict {
         }
     }
 
-    /// Merge two verifier verdicts for the same protected scope.
-    ///
-    /// Agreeing verdicts are preserved. Two `Unknown` verdicts merge their
-    /// reasons. Two `Reject` verdicts merge their reasons and stay rejected.
-    /// Any other disagreement -- including `Equivalent` vs `Dominates` and
-    /// `Reject` vs any passing side -- is `Unknown`: the passing side is never
-    /// silently kept when another verifier disagrees.
-    pub fn from_verifier_disagreement(
-        a: &VerifierVerdict,
-        b: &VerifierVerdict,
-    ) -> VerifierVerdict {
+    /// Merge two verifier verdicts for the same protected scope. Agreeing verdicts are preserved. Two
+    /// `Unknown` verdicts merge their reasons. Two `Reject` verdicts merge their reasons and stay
+    /// rejected.
+    pub fn from_verifier_disagreement(a: &VerifierVerdict, b: &VerifierVerdict) -> VerifierVerdict {
         match (a, b) {
             (Self::Unknown { .. }, Self::Unknown { .. }) => {
                 let mut reasons = a.reasons().to_vec();
@@ -250,11 +212,9 @@ pub struct SubjectiveDimension {
 }
 
 impl SubjectiveDimension {
-    /// Validate only the dimension name: nonempty and free of control
-    /// characters. Evaluator validation is intentionally separate so the
-    /// subjective gate can distinguish `invalid_subjective_dimension` from
-    /// `invalid_declared_evaluator` (an invalid evaluator is not a malformed
-    /// dimension).
+    /// Validate only the dimension name: nonempty and free of control characters. Evaluator validation
+    /// is intentionally separate so the subjective gate can distinguish `invalid_subjective_dimension`
+    /// from `invalid_declared_evaluator` (an invalid evaluator is not a malformed dimension).
     pub fn validate_name(&self) -> Result<(), VerdictError> {
         if self.name.is_empty() || self.name.chars().any(char::is_control) {
             return Err(VerdictError::new(
@@ -281,29 +241,13 @@ impl SubjectiveDimension {
 pub enum GateAdmission {
     /// The subjective gate is satisfied; the verdict itself still gates
     /// authority via [`VerifierVerdict::grants_candidate_authority`].
-    Admitted {
-        verdict: VerifierVerdict,
-    },
+    Admitted { verdict: VerifierVerdict },
     /// A decision is required before this protected scope can be admitted.
-    DecisionRequired {
-        dimension: String,
-        reason: String,
-    },
+    DecisionRequired { dimension: String, reason: String },
 }
 
-/// Apply the subjective gate to a verification verdict.
-///
-/// Fail-closed law:
-/// 1. Duplicate dimension names yield `DecisionRequired`
-///    (`duplicate_subjective_dimension`) before anything else.
-/// 2. Any dimension with `declared_evaluator: None` yields `DecisionRequired`
-///    (`subjective_dimension_requires_declared_evaluator`) -- even a
-///    dominating verdict cannot pass an unattested subjective dimension.
-/// 3. Malformed dimensions or invalid declared evaluators fail closed with
-///    `invalid_subjective_dimension` / `invalid_declared_evaluator`.
-/// 4. With every dimension declared and valid, the admission preserves the
-///    verdict; authority still requires
-///    [`VerifierVerdict::grants_candidate_authority`].
+/// Apply the subjective gate to a verification verdict. Fail-closed law 1. Duplicate dimension
+/// names yield `DecisionRequired` (`duplicate_subjective_dimension`) before anything else. 2.
 pub fn admit_with_subjective_gate(
     verdict: VerifierVerdict,
     subjective_dimensions: &[SubjectiveDimension],
@@ -366,4 +310,3 @@ fn merge_reasons(mut reasons: Vec<String>) -> Vec<String> {
     reasons.dedup();
     reasons
 }
-

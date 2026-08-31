@@ -1,14 +1,12 @@
-//! Verifier-owned Effect IR acceptance and structured witness carriers.
-//!
-//! `EffectAccepted` has private fields and no deserializer or public
-//! constructor. The only constructor consumes `VerifiedEvidence`, so raw JSON,
-//! booleans, and prose cannot mint accepted authority.
+//! Verifier-owned Effect IR acceptance and structured witness carriers. `EffectAccepted`
+//! has private fields and no deserializer or public constructor. The only constructor
+//! consumes `VerifiedEvidence`, so raw JSON, booleans, and prose cannot mint accepted authority.
 
 use std::{error::Error, fmt};
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use zero_abi::{CwirVerifierClass, Sha256Digest, EffectProgram, canonical_json, sha256};
+use zero_abi::{CwirVerifierClass, EffectProgram, Sha256Digest, canonical_json, sha256};
 
 use crate::{CompletenessWitness, Query, VerifiedEvidence};
 
@@ -925,7 +923,10 @@ fn evidence_snapshot(evidence: &VerifiedEvidence<'_, '_>) -> Option<Sha256Digest
     }
 }
 
-fn require_snapshot(actual: Sha256Digest, expected: Sha256Digest) -> Result<(), EffectWitnessError> {
+fn require_snapshot(
+    actual: Sha256Digest,
+    expected: Sha256Digest,
+) -> Result<(), EffectWitnessError> {
     if actual == expected {
         Ok(())
     } else {

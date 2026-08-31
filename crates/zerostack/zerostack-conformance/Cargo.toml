@@ -1,13 +1,13 @@
 [package]
 name = "zerostack-conformance"
-version = "0.1.0"
+version.workspace = true
 edition.workspace = true
 license.workspace = true
 description = "Shared conformance suite: contract tests every engine must pass"
 
 [dependencies]
-zero-abi = { path = "../zero-abi" }
-tempfile = "3"
+zero-abi = { workspace = true }
+tempfile = { workspace = true }
 
 [lints]
 workspace = true

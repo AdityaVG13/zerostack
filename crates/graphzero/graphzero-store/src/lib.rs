@@ -1,9 +1,6 @@
-//! GraphZero P0.1 Snapshot Store.
-//!
-//! Content-addressed, mmap-native snapshot store: shard format v1 (GZSH),
-//! perfect-hash symbol table, CSR adjacency, trigram postings, coverage
-//! bitmaps, append-only delta log with tiered compaction, and the `gz://`
-//! ref scheme with a standalone expand resolution chain.
+//! Content-addressed, mmap-native snapshot storage for GraphZero.
+//! Stores perfect-hash symbols, CSR edges, trigram postings, coverage bitmaps,
+//! append-only deltas, bare domain refs, and portable `z://blob` evidence.
 
 use std::fmt;
 
@@ -17,10 +14,6 @@ pub use store::claim::{
 };
 pub use store::coverage::CoverageBitmap;
 pub use store::csr::{CsrAdjacency, CsrBuilder, EdgeKind, ReverseIndex};
-pub use store::daemon::{
-    DaemonMode, DaemonStatus, StemMetrics, daemon_status, disable_daemon, index_notification_count,
-    is_enabled, notify_index_change, run_stem, try_warm_snap,
-};
 pub use store::delta_log::{DeltaEntry, DeltaLog, SEGMENT_MAX_SIZE};
 pub use store::durability_receipt::{
     CanonicalSurfaceBytes, DURABILITY_RECEIPT_SCHEMA_VERSION, DurabilityEvidenceInput,
@@ -38,7 +31,7 @@ pub use store::entity::{
     lookup_entity_with_store, mint_symbol_span_entity, mint_symbol_spans, process_dedup_ledger,
     read_dedup_ledger, record_dedup_ledger, record_process_dedup_encounter,
     record_process_destination_hit, register_entity_records, repeat_bill, repeat_encounter_pct,
-    reset_entity_registry, slice_defining_bytes, try_load_published_entities, write_dedup_ledger,
+    slice_defining_bytes, try_load_published_entities, write_dedup_ledger,
     write_published_entities,
 };
 pub use store::entity_novelty_fusion::{
@@ -74,10 +67,6 @@ pub use store::indexer::{
 pub use store::intent_parse::{IntentParse, parse_intent};
 pub use store::manifest::{Manifest, SnapshotEntry};
 pub use store::mmr::{InclusionProof, TransparencyLog};
-pub use store::ordinals::{
-    ORDINAL_CAPACITY, ORDINAL_SCHEMA, OrdinalCounts, OrdinalSidecar, load_published,
-    ordinal_file_name, ordinal_sidecar_path,
-};
 pub use store::perf_profile::{
     PERF_PROFILE_ENV, PERF_PROFILE_SCHEMA, perf_profile_enabled, perf_profile_hypothesis_evaluated,
     perf_profile_run_complete, perf_profile_run_start, perf_profile_sample_collected,
@@ -96,9 +85,9 @@ pub use store::provenance::{
     read_provenance_record, why_for_evidence_ref, write_provenance_record,
 };
 pub use store::publish::{
-    MAX_BATCH_BYTES, MAX_EDGES, PublishAck, PublishError, PublishOptions, SCHEMA, capability_ok,
-    confidence_to_u8, install_capability_token, map_publish_kind, publish_batch, schema_v1_json,
-    validate_batch_json,
+    MAX_BATCH_BYTES, MAX_EDGES, PUBLISH_SCHEMA_VERSION, PublishAck, PublishError, PublishOptions,
+    capability_ok, confidence_to_u8, install_capability_token, map_publish_kind, publish_batch,
+    publish_schema_json, validate_batch_json,
 };
 pub use store::query::{
     BudgetLedger, DestinationRef, FileTargetHit, LocateCapsule, LocateKind, NAME_BIGRAM_MAGIC,
@@ -123,8 +112,7 @@ pub use store::session::{
     SeenStatus, SessionDedupStats, SessionLedger, SessionLedgerStats, TRACE_SCHEMA, TraceEvent,
     TraceProvider, apply_seen_to_destinations, clear_session_state, default_seen_provider,
     default_trace_provider, ingest_traces_and_reindex, ingest_traces_into_index,
-    reset_session_state, session_novelty_max, session_scopes_max, session_seen_max,
-    session_trace_events_max,
+    session_novelty_max, session_scopes_max, session_seen_max, session_trace_events_max,
 };
 pub use store::shard::{ShardBuilder, ShardReader};
 pub use store::shared_cas::{CAS_MAX_OBJECT_BYTES, CAS_TEMP_REAP_AGE, SharedCas};
@@ -146,28 +134,14 @@ pub use store::telemetry::{
 pub use store::tier_b;
 pub use store::usage_telemetry::{
     ExecutionPath, USAGE_TELEMETRY_REL, UsageRecord, UsageTelemetryError, UsageTelemetryInspection,
-    inspect_usage_telemetry, record_codemode_accounting, record_mcp_accounting, record_usage,
-    usage_telemetry_enabled, usage_telemetry_path_for_store,
+    inspect_usage_telemetry, record_usage, usage_telemetry_enabled, usage_telemetry_path_for_store,
 };
-pub use store::zeroref::{
-    ZEROREF_VERSION, ZeroFragment, ZeroRef, ZeroRefError, ZeroRefErrorClass, ZeroScheme,
-};
-pub use store::zeroref_capability::{
-    EffectiveState, PeerCompatibility, SharedInteropState, ZEROREF_CAPABILITY_SCHEMA,
-    ZeroRefDescriptor, validate_peer_descriptor,
-};
+pub use store::zeroref::{ZeroFragment, ZeroRef, ZeroRefError, ZeroRefErrorClass, ZeroScheme};
 
 pub use store::memory::{
     MemoryExport, MemoryFact, MemoryHint, MemoryIndex, MemoryKind, RememberInput,
     attach_memory_to_skeleton, export_memory, format_recall_budget_one, import_memory, load_fact,
     mem_dir, mem_ref, remember_fact,
-};
-pub use store::zerostack_store::{
-    SHARED_STORE_OPT_IN_ENVS, STORE_ROOT_ENVS, StoreResolutionReport, graphzero_index_present,
-    graphzero_subdir_for_store, project_store_key, resolve_graphzero_store_root,
-    resolve_graphzero_store_root_with_env, resolve_store_root_with_env,
-    shared_store_opt_in_from_env, store_is_under_project_root, store_resolution_json,
-    store_resolution_report, store_resolution_report_with_env, zerostack_store_or_detect,
 };
 /// Content-addressed blob identifier (sha256 hex digest).
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -238,8 +212,3 @@ impl fmt::Display for Tier {
         }
     }
 }
-
-/// Current on-disk GZSH shard format version (`ShardHeader.version`).
-/// Alias of [`FORMAT_VERSION`]; kept for external callers that historically
-/// imported this name. Do not hard-code a divergent value.
-pub const SHARD_FORMAT_VERSION: u8 = FORMAT_VERSION;

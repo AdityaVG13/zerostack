@@ -1,10 +1,6 @@
-//! Canonical cache-entry schema shared by GraphZero witness caches and FSZero memoization.
-//!
-//! The wire contract and validation rules are defined by this module.
-//!
-//! A cache hit can only be built from a key carrying a completeness witness.
-//! Constructors and deserializers validate that witness before accepting an
-//! entry, making the unsound direction (under-invalidation) fail closed.
+//! Canonical cache-entry schema shared by GraphZero witness caches and FSZero memoization. The wire
+//! contract and validation rules are defined by this module. A cache hit can only be built from a
+//! key carrying a completeness witness.
 
 use serde::de::Error;
 use serde::{Deserialize, Deserializer, Serialize};

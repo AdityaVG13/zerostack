@@ -1,15 +1,6 @@
-//! Store segment schema version stamps and version-skew rules.
-//!
-//! CacheZero / ZeroStack contract (shared across engines): every segment written
-//! into `.zerostack` stamps `{schema_major, schema_minor, writer_version}`.
-//!
-//! Skew rules:
-//! - **Newer major** (found > supported): refuse loudly; never guess.
-//! - **Older major** (found < supported): refuse loudly (incompatible layout).
-//! - **Same major, older minor**: admit with graceful degrade.
-//! - **Same major, equal or newer minor**: admit (minor bumps are additive).
-//!
-//! Writers never downgrade a segment in place; they emit the producer stamp.
+//! Store segment schema version stamps and version-skew rules. CacheZero / ZeroStack contract
+//! (shared across engines): every segment written into `.zerostack` stamps `{schema_major,
+//! schema_minor, writer_version}`.
 
 use std::fmt;
 
@@ -131,10 +122,7 @@ impl fmt::Display for SchemaVersionError {
 
 impl std::error::Error for SchemaVersionError {}
 
-/// Admit a found stamp against the local supported major/minor.
-///
-/// # Errors
-///
+/// Admit a found stamp against the local supported major/minor. # Errors
 /// Returns [`SchemaVersionError`] when majors differ (newer or older).
 pub fn admit_read(
     segment: StoreSegmentKind,

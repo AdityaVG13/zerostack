@@ -1,6 +1,6 @@
 //! Shared canonical operation dispatch metadata and fail-closed enforcement.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use std::fmt;
 
 use serde::{Deserialize, Serialize};
@@ -156,32 +156,15 @@ impl std::error::Error for DispatchContractError {}
 #[serde(deny_unknown_fields)]
 pub struct CanonicalOperation {
     pub canonical_id: String,
-    /// Engine-owned prose. Empty means no description was declared and is
-    /// omitted from legacy wire manifests.
+    /// Engine-owned operation description.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub description: String,
-    pub aliases: Vec<String>,
     pub args_schema: Value,
     /// Engine-owned JSON Schema for successful results.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output_schema: Option<Value>,
-    /// Primary name exposed by an MCP catalog. Dispatch still resolves the
-    /// canonical id and aliases independently.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub mcp_tool_name: Option<String>,
     pub effect_policy: EffectPolicy,
     pub errors: Vec<DispatchErrorClass>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct CanonicalResource {
-    pub uri: String,
-    pub name: String,
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    pub description: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub mime_type: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -190,8 +173,6 @@ pub struct CanonicalRegistry {
     pub version: String,
     pub engine: RegistryEngine,
     pub operations: Vec<CanonicalOperation>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub resources: Vec<CanonicalResource>,
 }
 
 impl CanonicalRegistry {
@@ -222,49 +203,26 @@ impl CanonicalRegistry {
             ));
         }
 
-        let mut names = BTreeMap::<&str, &str>::new();
+        let mut names = BTreeSet::new();
         for operation in &self.operations {
             validate_operation(operation)?;
-            register_name(&mut names, &operation.canonical_id, &operation.canonical_id)?;
-            for alias in &operation.aliases {
-                register_name(&mut names, alias, &operation.canonical_id)?;
-            }
-        }
-        for operation in &self.operations {
-            if let Some(tool_name) = operation.mcp_tool_name.as_deref() {
-                // The default primary MCP name is the canonical id. It is the
-                // only intentional duplicate in the shared name namespace.
-                if tool_name != operation.canonical_id {
-                    register_name(&mut names, tool_name, &operation.canonical_id)?;
-                }
-            }
-        }
-        let mut resources = BTreeSet::new();
-        for resource in &self.resources {
-            validate_resource(resource)?;
-            if !resources.insert(resource.uri.as_str()) {
+            if !names.insert(operation.canonical_id.as_str()) {
                 return Err(DispatchContractError::new(
                     DispatchErrorClass::InvalidRegistry,
-                    format!("duplicate resource URI {:?}", resource.uri),
+                    format!("duplicate canonical operation {:?}", operation.canonical_id),
                 ));
             }
         }
         Ok(())
     }
 
-    /// Canonical manifest for this registry's dispatch contract.
-    ///
-    /// Operation declaration order, aliases, declared error classes, and the
-    /// set-like parts of JSON Schema do not affect dispatch behavior. Sort and
-    /// normalize those fields before hashing, while preserving order inside
-    /// schema arrays whose order is semantically significant. Engine-specific
-    /// semantic manifests remain responsible for their additional fields.
+    /// Canonical manifest for this registry's dispatch contract. Operation order,
+    /// error order, and set-like JSON Schema fields do not affect the digest.
     pub fn canonical_manifest(&self) -> Result<Value, DispatchContractError> {
         self.validate()?;
 
         let mut registry = self.clone();
         for operation in &mut registry.operations {
-            operation.aliases.sort();
             operation.args_schema = normalize_schema(&operation.args_schema);
             if let Some(output_schema) = &mut operation.output_schema {
                 *output_schema = normalize_schema(output_schema);
@@ -274,9 +232,6 @@ impl CanonicalRegistry {
         registry
             .operations
             .sort_by(|left, right| left.canonical_id.cmp(&right.canonical_id));
-        registry
-            .resources
-            .sort_by(|left, right| left.uri.cmp(&right.uri));
 
         serde_json::to_value(registry).map_err(|error| {
             DispatchContractError::new(
@@ -302,14 +257,11 @@ impl CanonicalRegistry {
     ) -> Result<&CanonicalOperation, DispatchContractError> {
         self.operations
             .iter()
-            .find(|operation| {
-                operation.canonical_id == invoked_name
-                    || operation.aliases.iter().any(|alias| alias == invoked_name)
-            })
+            .find(|operation| operation.canonical_id == invoked_name)
             .ok_or_else(|| {
                 DispatchContractError::new(
                     DispatchErrorClass::UnknownOperation,
-                    format!("unknown canonical operation or alias {invoked_name:?}"),
+                    format!("unknown canonical operation {invoked_name:?}"),
                 )
             })
     }
@@ -329,9 +281,6 @@ fn classify_decode_error(error: serde_json::Error) -> DispatchContractError {
 
 fn validate_operation(operation: &CanonicalOperation) -> Result<(), DispatchContractError> {
     validate_name(&operation.canonical_id, "canonical operation id")?;
-    if let Some(tool_name) = operation.mcp_tool_name.as_deref() {
-        validate_name(tool_name, "MCP tool name")?;
-    }
     if let Some(output_schema) = &operation.output_schema
         && !output_schema.is_object()
     {
@@ -369,25 +318,6 @@ fn validate_operation(operation: &CanonicalOperation) -> Result<(), DispatchCont
             ),
         ));
     }
-    for alias in &operation.aliases {
-        validate_name(alias, "operation alias")?;
-    }
-    Ok(())
-}
-
-fn validate_resource(resource: &CanonicalResource) -> Result<(), DispatchContractError> {
-    validate_name(&resource.uri, "resource URI")?;
-    validate_display_name(&resource.name, "resource name")?;
-    Ok(())
-}
-
-fn validate_display_name(name: &str, label: &str) -> Result<(), DispatchContractError> {
-    if name.is_empty() || name.trim() != name {
-        return Err(DispatchContractError::new(
-            DispatchErrorClass::InvalidRegistry,
-            format!("invalid {label} {name:?}"),
-        ));
-    }
     Ok(())
 }
 
@@ -399,38 +329,6 @@ fn validate_name(name: &str, label: &str) -> Result<(), DispatchContractError> {
         ));
     }
     Ok(())
-}
-
-fn register_name<'a>(
-    names: &mut BTreeMap<&'a str, &'a str>,
-    name: &'a str,
-    canonical_id: &'a str,
-) -> Result<(), DispatchContractError> {
-    if let Some(previous) = names.insert(name, canonical_id) {
-        return Err(DispatchContractError::new(
-            DispatchErrorClass::InvalidRegistry,
-            format!("name {name:?} collides between {previous:?} and {canonical_id:?}"),
-        ));
-    }
-    Ok(())
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum SourceForm {
-    Canonical,
-    DirectAlias,
-    ComputedProperty,
-    ObfuscatedComma,
-}
-
-/// Source text is retained only for diagnostics. Resolution uses invoked_name.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct SourceDiagnostic {
-    pub form: SourceForm,
-    pub source_text: String,
-    pub invoked_name: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -469,7 +367,6 @@ pub struct DispatchMachine {
     registry: CanonicalRegistry,
     stage: DispatchStage,
     canonical_id: Option<String>,
-    diagnostic: Option<SourceDiagnostic>,
 }
 
 impl DispatchMachine {
@@ -479,7 +376,6 @@ impl DispatchMachine {
             registry,
             stage: DispatchStage::Resolve,
             canonical_id: None,
-            diagnostic: None,
         })
     }
 
@@ -493,32 +389,16 @@ impl DispatchMachine {
             .and_then(|canonical_id| self.registry.resolve(canonical_id).ok())
     }
 
-    pub fn diagnostic(&self) -> Option<&SourceDiagnostic> {
-        self.diagnostic.as_ref()
-    }
-
     pub fn resolve(
         &mut self,
         invoked_name: &str,
     ) -> Result<&CanonicalOperation, DispatchContractError> {
-        self.resolve_with_diagnostic(SourceDiagnostic {
-            form: SourceForm::Canonical,
-            source_text: invoked_name.to_owned(),
-            invoked_name: invoked_name.to_owned(),
-        })
-    }
-
-    pub fn resolve_with_diagnostic(
-        &mut self,
-        diagnostic: SourceDiagnostic,
-    ) -> Result<&CanonicalOperation, DispatchContractError> {
         self.require_stage(DispatchStage::Resolve)?;
-        let canonical_id = match self.registry.resolve(&diagnostic.invoked_name) {
+        let canonical_id = match self.registry.resolve(invoked_name) {
             Ok(operation) => operation.canonical_id.clone(),
             Err(error) => return Err(self.poison(error)),
         };
         self.canonical_id = Some(canonical_id);
-        self.diagnostic = Some(diagnostic);
         self.stage = DispatchStage::ValidateArguments;
         if self.operation().is_none() {
             return Err(self.poison(DispatchContractError::new(

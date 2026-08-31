@@ -1,27 +1,5 @@
-//! ZS-METRIC-001 completion: typed resource ledger classes and provider-bill
-//! reconciliation.
-//!
-//! The token classes in [`crate::ChargeClass`] and the causal classes in
-//! [`crate::CausalWorkClass`] account for model-visible tokens. This module
-//! adds the non-token resource coordinates the complete resource vector
-//! requires: tool args/returns bytes, wire/disk bytes, CPU/GPU time, storage,
-//! maintenance, and uncached input.
-//!
-//! Invariants enforced here:
-//!
-//! - **Typed classes only.** Every [`ResourceRow`] carries a
-//!   [`ResourceClass`]; an unknown class is a parse/serde refusal, never a
-//!   silent bucket.
-//! - **Honest exactness labeling.** Every row carries a
-//!   [`MeasurementSource`]. A derived total (per-class or grand) is labeled
-//!   `Exact` only when every contributing row is `Exact`; any `Estimate`
-//!   input demotes the derived label to `Estimate`. There is no public
-//!   constructor for [`ResourceTotal`], so a derived number cannot be forged
-//!   as Exact.
-//! - **Reconciliation within declared tolerances.** A provider bill line
-//!   declares its tolerance; the ledger reconciles exactly when the tolerance
-//!   is zero, and refuses out-of-tolerance deviation and billed coordinates
-//!   with no ledger rows (hidden uncharged work).
+//! Resource ledger classes and provider-bill reconciliation.
+//! `ChargeClass` and `CausalWorkClass` account for model-visible tokens.
 
 use std::fmt;
 use std::str::FromStr;
@@ -33,10 +11,8 @@ use crate::{LedgerError, PPM_ONE};
 /// The maximum length of a class string on the wire.
 pub const MAX_RESOURCE_CLASS_STRING_BYTES: usize = 64;
 
-/// Closed set of non-token resource coordinates a ledger row can charge.
-///
-/// Unknown classes are refused by [`ResourceClass::from_str`] and by
-/// deserialization: there is no catch-all bucket.
+/// Closed set of non-token resource coordinates a ledger row can charge. Unknown classes are
+/// refused by [`ResourceClass::from_str`] and by deserialization: there is no catch-all bucket.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ResourceClass {
@@ -133,10 +109,8 @@ impl FromStr for ResourceClass {
     }
 }
 
-/// How a row's amount was obtained.
-///
-/// Ordering is `Estimate < Bounded < Exact`; a derived total takes the
-/// minimum (strongest honest label): Exact only when every input was Exact.
+/// How a row's amount was obtained. Ordering is `Estimate < Bounded < Exact`; a derived
+/// total takes the minimum (strongest honest label): Exact only when every input was Exact.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum MeasurementSource {
@@ -149,11 +123,9 @@ pub enum MeasurementSource {
 }
 
 impl MeasurementSource {
-    /// The honest derived label over a set of input sources.
-    ///
-    /// `Exact` only when every input is `Exact`; otherwise `Estimate` when
-    /// any input is `Estimate`, else `Bounded`. The empty fold is `Exact`: an
-    /// empty sum is exactly zero.
+    /// The honest derived label over a set of input sources. `Exact` only when
+    /// every input is `Exact`; otherwise `Estimate` when any input is
+    /// `Estimate`, else `Bounded`. The empty fold is `Exact`: an empty sum is exactly zero.
     pub fn derive<I>(sources: I) -> Self
     where
         I: IntoIterator<Item = MeasurementSource>,
@@ -187,12 +159,9 @@ impl ResourceRow {
     }
 }
 
-/// A derived per-class or grand total.
-///
-/// The fields are private and there is no public constructor: totals are
-/// computed by the ledger from rows, and the derived source honors the
-/// labeling law (Exact only when every input row was Exact). A wire value
-/// therefore can never present itself as a measured exact total.
+/// A derived per-class or grand total. The fields are private and there is no public constructor:
+/// totals are computed by the ledger from rows, and the derived source honors the labeling law
+/// (Exact only when every input row was Exact).
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 pub struct ResourceTotal {
     amount: u128,
@@ -238,10 +207,8 @@ impl ResourceLedger {
         &self.rows
     }
 
-    /// Derived total for one class; `None` when no row charged that class.
-    ///
-    /// A class with no rows is absent, not zero: absence is how a hidden
-    /// uncharged coordinate stays visible to reconciliation.
+    /// Derived total for one class; `None` when no row charged that class. A class with no rows is
+    /// absent, not zero: absence is how a hidden uncharged coordinate stays visible to reconciliation.
     pub fn total_for(&self, class: ResourceClass) -> Option<ResourceTotal> {
         let mut amount = 0u128;
         let mut sources = Vec::new();
@@ -339,12 +306,9 @@ pub struct BillLineReconciliation {
     pub status: BillLineStatus,
 }
 
-/// Overall reconciliation state.
-///
-/// `Exact` is reserved for the strongest case: every line reconciles exactly
-/// and every contributing ledger row was measured `Exact`. Any inexact row
-/// source or any nonzero tolerance demotes the overall state, so the label
-/// law holds for the whole report.
+/// Overall reconciliation state. `Exact` is reserved for the strongest case: every line reconciles
+/// exactly and every contributing ledger row was measured `Exact`. Any inexact row source or any
+/// nonzero tolerance demotes the overall state, so the label law holds for the whole report.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ReconciliationState {
@@ -365,15 +329,7 @@ pub struct ProviderBillReconciliation {
 }
 
 impl ResourceLedger {
-    /// Reconciles every bill line against this ledger within each line's
-    /// declared tolerance.
-    ///
-    /// Refusals: an empty provider or out-of-range tolerance (at line
-    /// construction), a billed coordinate with no ledger rows and a nonzero
-    /// bill (`HiddenUnchargedWork`), and a deviation beyond the declared
-    /// tolerance (`OutOfTolerance`). Tolerance is exact rational arithmetic:
-    /// the line reconciles iff
-    /// `deviation * 1_000_000 <= billed_amount * tolerance_ppm`.
+    /// Reconciles every bill line against this ledger within each line's declared tolerance.
     pub fn reconcile(
         &self,
         bills: &[ProviderBillLine],
@@ -463,8 +419,12 @@ impl<'de> Deserialize<'de> for ProviderBillLine {
             tolerance_ppm: u32,
         }
         let wire = Wire::deserialize(deserializer)?;
-        Self::new(wire.provider, wire.class, wire.billed_amount, wire.tolerance_ppm)
-            .map_err(de::Error::custom)
+        Self::new(
+            wire.provider,
+            wire.class,
+            wire.billed_amount,
+            wire.tolerance_ppm,
+        )
+        .map_err(de::Error::custom)
     }
 }
-

@@ -1,6 +1,5 @@
-//! Exact fixed-point multiplier and prepared-coverage calculations.
-//!
-//! A verified Hundredfold claim binds task and ledger roots, recomputes the
+//! Exact fixed-point multiplier and prepared-coverage calculations. A
+//! verified Hundredfold claim binds ledger roots, recomputes the
 //! reported ratio, and rejects protected regressions or weak sliding windows.
 
 use serde::{Deserialize, Serialize};

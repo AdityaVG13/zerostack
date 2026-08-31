@@ -1,17 +1,5 @@
-//! Release claim gate (ZS-BENCH-009, ZS-RELEASE-001).
-//!
-//! Every public claim must pass the nine release gates and must cite a
-//! CURRENT formulation. A claim citing a superseded formulation as current
-//! authority is rejected even when all gates pass (V6 lineage discipline:
-//! Draft 4 rewrite formula, model-internal one-token framing, and ambiguous
-//! Q99 percentage are the known superseded formulations).
-//!
-//! Fail-closed laws:
-//! - A claim is approved only when ALL nine gates are satisfied AND its
-//!   formulation is current authority AND its required artifacts, claim
-//!   scope, and provider-fact date are present.
-//! - Any missing gate, artifact, scope, or date fails the release with a
-//!   deterministic reason list; nothing is inferred or defaulted.
+//! Release claim gate. Every public claim must pass the nine release
+//! gates and must cite a CURRENT formulation.
 
 use std::{error::Error, fmt};
 
@@ -19,7 +7,7 @@ use serde::{Deserialize, Serialize};
 
 pub const RELEASE_CONTRACT_VERSION: u16 = 1;
 
-/// The nine public-claim gates (Draft 5 public-release gates, BENCH-009).
+/// The nine public-claim gates.
 pub const PUBLIC_CLAIM_GATES: [&str; 9] = [
     "theorem_status_current",
     "provider_fact_date_current",
@@ -139,12 +127,17 @@ impl SupersessionTable {
             .unwrap_or(true)
     }
 
-    /// The reason a formulation is superseded, when it is.
+    /// Returns the supersession reason, if present.
     pub fn supersession_reason(&self, formulation_id: &str) -> Option<&str> {
         self.records
             .iter()
             .find(|record| record.formulation_id == formulation_id)
-            .and_then(|record| record.superseded_by.as_ref().map(|_| record.reason.as_str()))
+            .and_then(|record| {
+                record
+                    .superseded_by
+                    .as_ref()
+                    .map(|_| record.reason.as_str())
+            })
     }
 }
 
@@ -209,16 +202,12 @@ impl PublicClaim {
     pub fn gate_names(&self) -> Result<(), ReleaseError> {
         for gate in PUBLIC_CLAIM_GATES {
             if !self.gates.contains_key(gate) {
-                return Err(ReleaseError::InvalidClaim(format!(
-                    "missing gate {gate}"
-                )));
+                return Err(ReleaseError::InvalidClaim(format!("missing gate {gate}")));
             }
         }
         for name in self.gates.keys() {
             if !PUBLIC_CLAIM_GATES.contains(&name.as_str()) {
-                return Err(ReleaseError::InvalidClaim(format!(
-                    "unknown gate {name}"
-                )));
+                return Err(ReleaseError::InvalidClaim(format!("unknown gate {name}")));
             }
         }
         Ok(())
@@ -272,4 +261,3 @@ impl ReleaseChecker {
         })
     }
 }
-

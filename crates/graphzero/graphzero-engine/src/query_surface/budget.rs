@@ -40,7 +40,7 @@ impl QuerySurfaceRouter {
             // Fail closed: never advertise a full_ref for bytes that were not persisted.
             return;
         };
-        resp.full_ref = Some(format!("gz://query/{id}"));
+        resp.full_ref = Some(format!("query/{id}"));
         resp.edges.clear();
         resp.hits.clear();
         resp.outline.clear();
@@ -192,7 +192,7 @@ impl QuerySurfaceRouter {
             return;
         }
         if let Some(id) = Self::spill_query_id(store_root, &spill) {
-            resp.full_ref = Some(format!("gz://query/{id}"));
+            resp.full_ref = Some(format!("query/{id}"));
             resp.truncated = Some(true);
             Self::compact_visible_after_spill(resp);
         } else {
@@ -215,7 +215,7 @@ impl QuerySurfaceRouter {
         let Some(id) = Self::spill_query_id(Some(root), &spill) else {
             return;
         };
-        resp.full_ref = Some(format!("gz://query/{id}"));
+        resp.full_ref = Some(format!("query/{id}"));
         resp.truncated = Some(true);
         Self::compact_visible_after_spill(resp);
     }
@@ -294,11 +294,9 @@ impl QuerySurfaceRouter {
         Self::serialize_with_accounting(&r, budget)
     }
 
-    /// Budgeted domain payload as `Value` without string→parse round-trip.
-    ///
-    /// Prefer this on the dispatcher path: budget>1 uses `to_value` once;
-    /// budget-1 shells that are non-JSON become `{"raw": ...}` without a failed parse.
-    /// Success budget-1 envelopes also carry additive `next` expand/capsule/export hints.
+    /// Budgeted domain payload as `Value` without string→parse round-trip. Prefer this on the
+    /// dispatcher path: budget>1 uses `to_value` once; budget-1 shells that are non-JSON become
+    /// `{"raw":...}` without a failed parse.
     pub fn to_json_value_with_budget(
         resp: &QuerySurfaceResponse,
         budget: usize,
@@ -376,7 +374,12 @@ impl QuerySurfaceRouter {
             return Some(r.to_string());
         }
         let trimmed = shell.trim();
-        if trimmed.starts_with("q:") || trimmed.starts_with("g:") || trimmed.starts_with("gz://") {
+        if trimmed.starts_with("q:")
+            || trimmed.starts_with("g:")
+            || trimmed.starts_with("query/")
+            || trimmed.starts_with("node/")
+            || trimmed.starts_with("z://blob/")
+        {
             return Some(trimmed.to_string());
         }
         None
@@ -401,8 +404,7 @@ impl QuerySurfaceRouter {
     }
 
     /// Wrap a budget-1 shell string as JSON Value, attaching additive `next` hints.
-    ///
-    /// Non-JSON shells become `{"raw": ...}`. JSON objects keep existing keys and gain `next`.
+    /// Non-JSON shells become `{"raw":...}`. JSON objects keep existing keys and gain `next`.
     fn wrap_budget_one_shell_value(shell: &str, next: Vec<String>) -> Value {
         match serde_json::from_str::<Value>(shell) {
             Ok(Value::Object(mut map)) => {
@@ -478,7 +480,7 @@ impl QuerySurfaceRouter {
                 let text = row.get("text").and_then(|v| v.as_str()).unwrap_or("");
                 let id = row.get("id").and_then(|v| v.as_str()).unwrap_or("");
                 let preview: String = text.chars().take(80).collect();
-                lines.push(format!("  {kind}: {preview} (gz://mem/{id})"));
+                lines.push(format!("  {kind}: {preview} (mem/{id})"));
             }
             return Some(lines.join("\n"));
         }
@@ -497,9 +499,6 @@ impl QuerySurfaceRouter {
 
     fn query_id_from_ref(reference: Option<&str>) -> Option<String> {
         let reference = reference?;
-        let id = reference
-            .strip_prefix("gz://query/")
-            .or_else(|| reference.strip_prefix("gz://q/"))?;
-        Some(id.to_string())
+        super::page::query_cursor_id(reference).map(str::to_string)
     }
 }

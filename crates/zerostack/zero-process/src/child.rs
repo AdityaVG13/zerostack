@@ -1,54 +1,6 @@
-//! Verified child identity for every process-signal cancellation site.
-//!
-//! # Why this exists
-//!
-//! A bare numeric `kill(pid, ...)` is a TOCTOU hazard: the pid can be recycled
-//! between reading a pid file and signaling, so a cancellation can terminate an
-//! unrelated replacement process. The canonical start identity primitive comes
-//! from this hub-owned crate ([`ProcessIdentity`]): pid plus a native start identity captured at spawn.
-//!
-//! # Exactness model
-//!
-//! A `ProcessIdentity::is_live()` check followed by a numeric `kill(pid, ...)`
-//! is still TOCTOU (the process can exit and the pid be recycled between the
-//! two calls). This module therefore never combines a detached identity check
-//! with a numeric kill:
-//!
-//! - **Same-process owned child** ([`VerifiedChild::capture`]): the owned,
-//!   unreaped [`std::process::Child`] pins the pid on Unix (a pid cannot be
-//!   recycled while an unreaped child owns it) and holds a real OS handle on
-//!   Windows. Signaling through the owned handle is exact by construction;
-//!   identity capture is defense-in-depth against state bugs.
-//! - **Process tree** ([`VerifiedChild::spawn_tree`]): Unix spawns the root in
-//!   its own process group (`process_group(0)`), so the root and every
-//!   descendant that inherits the group form one exact tree signaled with a
-//!   negative pid. Windows creates a Job Object with
-//!   `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` and assigns the exact owned child
-//!   handle to it immediately after spawn, so every descendant dies with the
-//!   job. Neither path ever authorizes a numeric PID from a detached identity
-//!   record followed by `kill`.
-//! - **Owner death** ([`VerifiedChild::spawn_tree`]): Linux binds
-//!   `PR_SET_PDEATHSIG(SIGKILL)` to the spawning owner on every tree root, so
-//!   a tree built by construction (each level spawn-tree spawned) collapses on
-//!   owner death: the root dies with its owner, and each descendant dies with
-//!   its parent. Darwin binds a forked kqueue watcher that SIGKILLs the tree
-//!   group instead (macOS has no PDEATHSIG). A Linux root whose owner died
-//!   before its pre-exec binding refuses to exec rather than run unbound
-//!   (zerostack-5bei).
-//! - **Detached process** (warm daemon stem): the primary teardown path is an
-//!   authenticated `Shutdown` RPC over the owned Unix socket. Escalation when
-//!   the RPC is unavailable uses a Linux `pidfd` (kernel-pinned to the captured
-//!   process) via `pidfd_send_signal`. On platforms without an exact signal
-//!   handle (macOS, other), escalation **fails closed** rather than sending a
-//!   PID-only signal.
-//! - **Status liveness** binds the identity record (`is_live` against the
-//!   captured start identity); it never probes with `kill(pid, 0)`.
-//!
-//! # Fail-closed rule
-//!
-//! When the identity record is missing, unparseable, stale, or the platform
-//! cannot capture proof, every signaling entry point returns a typed
-//! [`IdentityError`] and no signal is delivered.
+//! Verified child identity for every process-signal cancellation site. # Why this exists A bare
+//! numeric `kill(pid,...)` is a TOCTOU hazard: the pid can be recycled between reading a pid file
+//! and signaling, so a cancellation can terminate an unrelated replacement process.
 
 use std::fmt;
 use std::io;
@@ -306,11 +258,9 @@ struct VerifiedChildInner {
     #[cfg(windows)]
     job: Mutex<Option<JobHandle>>,
     revoked: AtomicBool,
-    /// Set only after a Unix tree teardown successfully swept the whole group
-    /// while the root still pinned the numeric PGID. Gates [`revoke`] (Unix
-    /// trees) and the abandonment [`Drop`]: reaping or signaling before settle
-    /// would release the PGID pin or strand descendants. Single-process
-    /// capture and Windows never read it.
+    /// Set only after a Unix tree teardown successfully swept the whole group while the root still
+    /// pinned the numeric PGID. Gates [`revoke`] (Unix trees) and the abandonment [`Drop`]: reaping or
+    /// signaling before settle would release the PGID pin or strand descendants.
     #[cfg(unix)]
     settled: AtomicBool,
     /// Exit status observed at reap time (std caches it in the owned
@@ -320,22 +270,13 @@ struct VerifiedChildInner {
 }
 
 /// A same-process owned child whose identity was captured at spawn.
-///
-/// Signaling goes through the owned, unreaped [`Child`] handle, which is exact
-/// by construction (the pid cannot be recycled while the child is unreaped on
-/// Unix; Windows keeps a real process handle). `Clone` shares one underlying
-/// handle so duplicate/concurrent cancel and reap settle exactly once.
 #[derive(Clone)]
 pub struct VerifiedChild(Arc<VerifiedChildInner>);
 
 impl VerifiedChild {
-    /// Capture identity at spawn (before work is accepted). Start-identity
-    /// capture is best-effort: on platforms that cannot provide one, the owned
-    /// unreaped handle remains the exactness proof.
-    ///
-    /// Single-process ownership: signaling stays on the exact owned child
-    /// handle. Use [`Self::spawn_tree`] when descendants must die with the
-    /// root.
+    /// Capture identity at spawn (before work is accepted). Start-identity capture is best-effort: on
+    /// platforms that cannot provide one, the owned unreaped handle remains the exactness proof.
+    /// Single-process ownership: signaling stays on the exact owned child handle.
     pub fn capture(child: Child, owner_session: &str, generation: u64) -> Self {
         let pid = child.id();
         let start_key = ProcessIdentity::capture(pid)
@@ -360,23 +301,9 @@ impl VerifiedChild {
         }))
     }
 
-    /// Spawn `command` as the root of an isolated process tree and capture its
-    /// identity before any work is accepted.
-    ///
-    /// - Unix: the child is spawned in its own process group
-    ///   (`process_group(0)`), so the root and every descendant that inherits
-    ///   the group can be signaled as one exact tree. The caller's process
-    ///   group is never touched.
-    /// - Windows: a Job Object with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` is
-    ///   created and the exact owned child handle is assigned to it right
-    ///   after spawn, before this function returns. Descendants inherit job
-    ///   membership, so they die with the job.
-    /// - If job creation/assignment fails, the exact owned child is terminated
-    ///   and reaped and the error is returned (fail closed; nothing is left
-    ///   behind).
-    ///
-    /// The returned pipes are the child's stdin/stdout; the owned child stays
-    /// intact inside `Self`.
+    /// Spawn `command` as the root of an isolated process tree and capture its identity before any work
+    /// is accepted. Unix: the child is spawned in its own process group (`process_group(0)`), so the
+    /// root and every descendant that inherits the group can be signaled as one exact tree.
     pub fn spawn_tree(
         command: Command,
         owner_session: &str,
@@ -386,8 +313,7 @@ impl VerifiedChild {
         Ok((owned, pipes.stdin, pipes.stdout))
     }
 
-    /// Like [`Self::spawn_tree`] but returns stdin, stdout, and stderr so the
-    /// caller can own all three raw-worker pipes.
+    /// Like [`Self::spawn_tree`] but returns all three child pipes.
     pub fn spawn_tree_with_pipes(
         command: Command,
         owner_session: &str,
@@ -423,12 +349,8 @@ impl VerifiedChild {
             // group id equals the child's pid and is pinned by the unreaped
             // owned Child until reap.
             command.process_group(0);
-            // Linux: PR_SET_PDEATHSIG, fail-closed if prctl returns nonzero
-            // (xk4c). The hook also proves the owner that forked us is still
-            // alive (zerostack-5bei): a child reparented to init or a
-            // subreaper before exec would carry a binding that can never fire.
-            // Darwin: kqueue watcher (hgni). macOS has no PDEATHSIG; the owner
-            // path remains that watcher plus kill_and_reap.
+            // Bind `PR_SET_PDEATHSIG` and reject a failed `prctl`. The hook also verifies
+            // the forking parent is still alive before exec.
             #[cfg(target_os = "linux")]
             {
                 let expected_parent = std::process::id() as libc::pid_t;
@@ -446,10 +368,9 @@ impl VerifiedChild {
         #[cfg(windows)]
         {
             use std::os::windows::process::CommandExt;
-            // Suspend the primary thread before exec so the root cannot spawn
-            // descendants until job assignment completed (closes the
-            // pre-assignment escape race). The thread is resumed before this
-            // function returns; a suspended root is never handed back.
+            // Suspend the primary thread before exec so the root cannot spawn descendants
+            // until job assignment completed (closes the pre-assignment escape race). The
+            // thread is resumed before this function returns; a suspended root is never handed back.
             command.creation_flags(0x0000_0004); // CREATE_SUSPENDED
         }
         let mut child = command.spawn()?;
@@ -460,10 +381,9 @@ impl VerifiedChild {
         #[cfg(windows)]
         let job = match JobHandle::assign(&child, _policy) {
             Ok(job) => {
-                // Resume the primary thread now that the exact child handle is
-                // inside the kill-on-close job. Never return while suspended.
-                // The thread id comes from a Toolhelp snapshot (stable API);
-                // `main_thread_handle` is still unstable on nightly.
+                // Resume the primary thread now that the exact child handle is inside the
+                // kill-on-close job. Never return while suspended. The thread id comes from a
+                // Toolhelp snapshot (stable API); `main_thread_handle` is still unstable on nightly.
                 if let Err(error) = resume_primary_thread(pid) {
                     // Fail closed: kill and reap the exact root, then drop the
                     // job so KILL_ON_JOB_CLOSE sweeps any job member.
@@ -523,14 +443,9 @@ impl VerifiedChild {
         self.binding().pid
     }
 
-    /// Full precondition check before any signal: not revoked, not reaped, the
-    /// owned child has not exited, and (when captured) the native start
-    /// identity is still live. Exited-anytime is fail-closed: once the owned
-    /// handle no longer pins a live process, no signal entry point proceeds.
-    ///
-    /// Tree mode observes the root's exit **without reaping** (Unix `waitid`
-    /// with `WNOWAIT`) so the root keeps pinning the numeric PGID for any later
-    /// group signal; single-process capture may reap, since it owns no group.
+    /// Full precondition check before any signal: not revoked, not reaped, the owned child has not
+    /// exited, and (when captured) the native start identity is still live. Exited-anytime is
+    /// fail-closed: once the owned handle no longer pins a live process, no signal entry point proceeds.
     pub fn verify(&self) -> Result<(), IdentityError> {
         if self.is_revoked() {
             return Err(IdentityError::Revoked);
@@ -588,14 +503,9 @@ impl VerifiedChild {
         self.binding().verify_owner(owner_session, generation)
     }
 
-    /// Bounded graceful termination, gated on the caller's expected owner
-    /// session and worker generation: the check is part of the signal action
-    /// itself, so no caller can signal without binding both.
-    ///
-    /// Tree mode terminates the exact owned tree -- the Unix process group or
-    /// the Windows Job Object -- never the caller's group. Single-process mode
-    /// signals through the owned, unreaped child handle. No path authorizes a
-    /// numeric PID from a detached identity record.
+    /// Bounded graceful termination, gated on the caller's expected owner session and worker
+    /// generation: the check is part of the signal action itself, so no caller can signal without
+    /// binding both.
     #[allow(
         clippy::needless_return,
         reason = "each cfg-selected platform block is the function tail"
@@ -678,14 +588,9 @@ impl VerifiedChild {
         false
     }
 
-    /// Signal preconditions. Mandatory for every mode: the immutable
-    /// owner-session and worker-generation binding, not revoked, and the owned
-    /// child slot still present. Single-process capture additionally requires
-    /// a live unreaped root/start identity -- a bare PID must never be
-    /// signaled. Tree ownership (Unix group / Windows job) remains authorized
-    /// for cleanup even if the root already exited, because the exact tree
-    /// primitive is still owned: sweeping it cannot touch an unrelated
-    /// process. This is not permission to signal a detached PID.
+    /// Signal preconditions. Mandatory for every mode: the immutable owner-session and
+    /// worker-generation binding, not revoked, and the owned child slot still present. Single-process
+    /// capture additionally requires a live unreaped root/start identity -- a bare PID must never be signaled.
     fn verify_signal_preconditions(
         &self,
         expected_owner: &str,
@@ -713,17 +618,9 @@ impl VerifiedChild {
         Ok(())
     }
 
-    /// Revoke exactly once after the child is reaped. Duplicate or concurrent
-    /// revokes are harmless. A premature revoke fails immediately instead of
-    /// waiting on a live child without a bound; callers must complete bounded
-    /// teardown first.
-    ///
-    /// Unix trees additionally require a successful tree teardown (the `settled`
-    /// flag) before reaping: reaping the root early would release the numeric
-    /// PGID pin and could strand descendants. A revoke on an unsettled Unix
-    /// tree returns [`IdentityError::StillRunning`] **without** reaping or
-    /// signaling, so the root keeps pinning the PGID. Windows keeps its
-    /// kill-on-close job semantics.
+    /// Revoke exactly once after the child is reaped. Duplicate or concurrent revokes are harmless. A
+    /// premature revoke fails immediately instead of waiting on a live child without a bound; callers
+    /// must complete bounded teardown first.
     pub fn revoke(&self) -> Result<(), IdentityError> {
         if self.is_revoked() {
             return Ok(());
@@ -768,11 +665,8 @@ impl VerifiedChild {
         Ok(())
     }
 
-    /// Poll whether the owned child has exited. Tree mode observes without
-    /// reaping (Unix `waitid` with `WNOWAIT`) so the root keeps pinning the
-    /// numeric PGID; single-process capture may reap. Used by tests and by
-    /// callers that must wait for a tree root to exit before teardown without
-    /// releasing the PGID pin.
+    /// Poll whether the owned child has exited. Tree mode observes without reaping (Unix `waitid` with
+    /// `WNOWAIT`) so the root keeps pinning the numeric PGID; single-process capture may reap.
     pub fn poll_exited(&self) -> bool {
         let mut guard = self
             .0
@@ -845,10 +739,9 @@ impl VerifiedChild {
                 if self.terminal_status().is_some() {
                     return true;
                 }
-                // poll_exited observes the owned Child directly. In Unix tree mode
-                // waitid(WNOWAIT) intentionally leaves an exited root as a zombie
-                // to pin its PGID; /proc-based identity remains live for that zombie,
-                // so gating on binding liveness turns every successful child into a timeout.
+                // poll_exited observes the owned Child directly. In Unix tree mode waitid(WNOWAIT) intentionally
+                // leaves an exited root as a zombie to pin its PGID; /proc-based identity remains live for that
+                // zombie, so gating on binding liveness turns every successful child into a timeout.
                 if self.poll_exited() {
                     return true;
                 }
@@ -870,16 +763,9 @@ impl VerifiedChild {
             .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
-    /// Wait up to `timeout` for the owned root to exit, then settle the exact
-    /// tree within `grace` and reap it. A live root at the deadline returns
-    /// [`IdentityError::StillRunning`] without signaling or releasing the
-    /// owned tree primitive.
-    ///
-    /// - Tree mode: after the root exits, the group (Unix) or job (Windows)
-    ///   is swept so no descendant survives, then the root is reaped.
-    /// - Single-process capture: reaps directly.
-    ///
-    /// The returned status is also available via [`Self::terminal_status`].
+    /// Wait up to `timeout` for the owned root to exit, then settle the exact tree within `grace` and
+    /// reap it. A live root at the deadline returns [`IdentityError::StillRunning`] without signaling
+    /// or releasing the owned tree primitive.
     pub fn wait(
         &self,
         expected_owner: &str,
@@ -891,8 +777,8 @@ impl VerifiedChild {
             return Err(IdentityError::StillRunning);
         }
         if self.is_tree() {
-            // The root has exited; sweeping the still-owned tree primitive
-            // cannot touch an unrelated process (the job/group is ours).
+            // The exited root still owns the tree primitive, so sweeping cannot target
+            // an unrelated process.
             self.signal_graceful_for(expected_owner, expected_generation, grace)?;
         }
         self.revoke()?;
@@ -913,15 +799,8 @@ fn linux_set_pdeathsig(signal: libc::c_int) -> io::Result<()> {
     }
 }
 
-/// Linux pre-exec owner-death binding for a spawn-tree root.
-///
-/// Binds `PR_SET_PDEATHSIG(SIGKILL)` to the process that forked us, verifies
-/// the bit stuck (xk4c), and refuses exec when `expected_parent` no longer
-/// names that process. A reparented child -- owner died between fork and this
-/// hook -- would hold a dead binding (the signal only fires on a future
-/// parent death), silently orphaning the whole tree. `getppid() == 1` alone
-/// cannot detect the orphan: init is not the only reparent target, any
-/// ancestor subreaper (systemd, session sidecar) adopts it. Fail closed.
+/// Bind `PR_SET_PDEATHSIG(SIGKILL)` to the forking process before exec.
+/// Refuse exec when the signal binding fails or `expected_parent` changed.
 #[cfg(target_os = "linux")]
 fn linux_bind_pdeathsig(expected_parent: libc::pid_t) -> io::Result<()> {
     linux_set_pdeathsig(libc::SIGKILL)?;
@@ -942,11 +821,10 @@ fn linux_bind_pdeathsig(expected_parent: libc::pid_t) -> io::Result<()> {
     Ok(())
 }
 
-/// Darwin kqueue handshake: the tree root may Ok() only after the watcher
+/// Darwin kqueue handshake: the tree root may Ok only after the watcher
 /// writes this ready byte (EVFILT_PROC registered). Any other read is
-/// fail-closed (zerostack-sq32). Compiled on Linux tests so the rule is
-/// not Darwin-only dead code.
-#[cfg(any(test, target_os = "macos"))]
+/// fail-closed. Compiled on Linux tests so the rule is not Darwin-only dead code.
+#[cfg(target_os = "macos")]
 fn darwin_kqueue_registration_ready(n: isize, byte: u8) -> bool {
     n == 1 && byte == 1
 }
@@ -957,9 +835,8 @@ fn darwin_kqueue_registration_ready(n: isize, byte: u8) -> bool {
 #[cfg(target_os = "macos")]
 fn darwin_bind_tree_to_owner() -> io::Result<()> {
     // SAFETY: pre_exec is async-signal-safe. getppid/getpid/fork/setpgid
-    // pipe/read/write/close are AS-safe. The watcher process never returns
-    // into Rust. The tree root does not Ok() until the watcher has
-    // registered EVFILT_PROC (zerostack-sq32).
+    // pipe/read/write/close are AS-safe. The watcher process never returns into
+    // Rust. The tree root does not Ok until the watcher has registered EVFILT_PROC.
     unsafe {
         let owner = libc::getppid();
         let tree_root = libc::getpid();
@@ -978,12 +855,8 @@ fn darwin_bind_tree_to_owner() -> io::Result<()> {
                 Err(io::Error::last_os_error())
             }
             0 => {
-                // The watcher never execs, so every inherited fd -- including
-                // std's internal spawn error pipe whose EOF is what makes
-                // Command::spawn return -- would stay open for the watcher's
-                // whole lifetime and block spawn until the tree root exited
-                // (pc_45b6d2d66fee family). Close everything above stderr
-                // except the ready-byte fd before becoming the watcher.
+                // The watcher never execs. Close inherited descriptors so the spawn error
+                // pipe reaches EOF and `Command::spawn` can return.
                 let table_size = libc::getdtablesize();
                 let mut closed = 0usize;
                 for fd in 3..table_size {
@@ -1095,13 +968,8 @@ fn darwin_watch_owner_then_kill(
     }
 }
 
-/// Last-owner abandonment cleanup. A Unix tree that was never torn down
-/// would otherwise strand its descendants: the owned `Child` drops without
-/// killing anything (std does not kill on drop). If an unsettled Unix tree
-/// still owns a child, send SIGKILL to its pinned group (root still unreaped,
-/// so the PGID cannot have been recycled) then reap best-effort. Single-process
-/// capture and detached daemon bindings are unaffected (no group, no signal).
-/// Windows relies on the kill-on-close job handle dropped as a field below.
+/// Last-owner abandonment cleanup. A Unix tree that was never torn down would otherwise strand its
+/// descendants: the owned `Child` drops without killing anything (std does not kill on drop).
 impl Drop for VerifiedChildInner {
     fn drop(&mut self) {
         #[cfg(unix)]
@@ -1122,17 +990,16 @@ impl Drop for VerifiedChildInner {
                     .as_ref()
                     .map(|child| child_exited_no_reap(child).is_ok())
                     .unwrap_or(false);
-                // Only signal the numeric group when the waitable root pin is
-                // provably still ours; otherwise the PGID may be recycled and a
-                // stale signal would risk an unrelated tree.
+                // Signal the numeric group only while the waitable root pin proves ownership.
+                // A recycled PGID could otherwise target an unrelated tree.
                 if child_pin_ok {
                     let pgid = *self
                         .group_pgid
                         .lock()
                         .unwrap_or_else(|poisoned| poisoned.into_inner());
                     if let Some(pgid) = pgid {
-                        // SAFETY: the waitable root pin is proved, so the numeric
-                        // PGID is still pinned to our tree.
+                        // SAFETY: the waitable root pin proves that the numeric PGID still
+                        // identifies the owned process tree.
                         let _ = unsafe { libc::kill(-pgid, libc::SIGKILL) };
                         // Bounded best-effort root reap: never strand a zombie.
                         if let Some(child) = self
@@ -1180,8 +1047,8 @@ fn terminate_owned_child(child: &mut Child, grace: Duration) -> io::Result<Signa
         }
         std::thread::sleep(Duration::from_millis(10));
     }
-    // SAFETY: still our unreaped child after the grace window; SIGKILL
-    // targets the same pinned pid.
+    // SAFETY: the child remains unreaped after the grace window; SIGKILL targets
+    // the same pinned pid.
     if unsafe { libc::kill(pid as i32, libc::SIGKILL) } == -1 {
         return Err(io::Error::last_os_error());
     }
@@ -1204,14 +1071,11 @@ fn terminate_owned_child(child: &mut Child, grace: Duration) -> io::Result<Signa
     Ok(SignalOutcome::EscalatedToKill)
 }
 
-// ---------------------------------------------------------------------------
 // Process-tree ownership
-// ---------------------------------------------------------------------------
 
-/// Bounded wait for the owned child to exit (reaping it), polling `try_wait`
-/// until `grace` elapses. A child that still runs at the deadline is a loud
-/// timeout error; the owned [`Child`] and its tree primitive are retained and
-/// never silently revoked or dropped, so the caller can report or escalate.
+/// Bounded wait for the owned child to exit (reaping it), polling `try_wait` until `grace` elapses. A
+/// child that still runs at the deadline is a loud timeout error; the owned [`Child`] and its tree
+/// primitive are retained and never silently revoked or dropped, so the caller can report or escalate.
 fn wait_child_exit(child: &mut Child, grace: Duration) -> io::Result<()> {
     let deadline = Instant::now() + grace;
     loop {
@@ -1282,7 +1146,7 @@ impl JobHandle {
         };
         if rc == 0 {
             let error = io::Error::last_os_error();
-            // SAFETY: closing our own job handle.
+            // SAFETY: closing the owned job handle.
             unsafe {
                 CloseHandle(job);
             }
@@ -1314,18 +1178,16 @@ unsafe impl Sync for JobHandle {} // ubs:ignore — FFI wrapper, invariants: uni
 #[cfg(windows)]
 impl Drop for JobHandle {
     fn drop(&mut self) {
-        // SAFETY: `self.0` is our own job handle; Drop runs exactly once.
+        // SAFETY: `self.0` is the owned job handle; Drop runs exactly once.
         unsafe {
             CloseHandle(self.0);
         }
     }
 }
 
-/// Terminate the owned Windows job (every member dies), then wait and reap the
-/// root through the owned handle. `job_slot` is the tree's job field: on any
-/// path where the job must no longer be held, it is taken so the
-/// KILL_ON_JOB_CLOSE sweep terminates every remaining descendant (never leave
-/// descendants silently).
+/// Terminate the owned Windows job (every member dies), then wait and reap the root through the
+/// owned handle. `job_slot` is the tree's job field: on any path where the job must no longer be
+/// held, it is taken so the KILL_ON_JOB_CLOSE sweep terminates every remaining descendant.
 #[cfg(windows)]
 fn terminate_tree_job(
     child: &mut Child,
@@ -1363,24 +1225,9 @@ fn terminate_tree_job(
     }
 }
 
-/// SIGTERM to the whole owned process group (while the root is unreaped and
-/// still pins the PGID), the **full** bounded grace window so descendants get
-/// their graceful window even if the root exits early, then a final SIGKILL to
-/// the same exact pinned group. Only after every group signal is complete is
-/// the root reaped (`wait_child_exit`), after which a non-signaling
-/// `kill(-pgid, 0)` sweep confirms the descendants died. The root's numeric
-/// PGID is pinned through every nonzero group signal, so a recycled group id
-/// can never be hit.
-///
-/// Before any group signal, the waitable root pin is proved once via
-/// [`child_exited_no_reap`]; if that pin is lost (`ECHILD`) no group signal is
-/// sent (a recycled PGID must never be signaled). The final SIGKILL is issued
-/// while the root is still unreaped; its ESRCH/EPERM is recorded (not fatal)
-/// because a SIGTERM-drained group may leave only unsignalable reparented
-/// zombies -- the non-signaling post-reap poll is the real proof. The outcome
-/// is `ExitedBeforeSignal` if the group was already gone, `TerminatedGracefully`
-/// if SIGKILL found no live member (the group drained on SIGTERM), and
-/// `EscalatedToKill` if SIGKILL delivered to live survivors.
+/// SIGTERM to the whole owned process group (while the root is unreaped and still pins the PGID),
+/// the **full** bounded grace window so descendants get their graceful window even if the root
+/// exits early, then a final SIGKILL to the same exact pinned group.
 #[cfg(unix)]
 fn terminate_tree_child(
     child: &mut Child,
@@ -1389,32 +1236,28 @@ fn terminate_tree_child(
 ) -> io::Result<SignalOutcome> {
     debug_assert!(pgid > 1, "process group must be our own spawned child's");
     let group = -pgid;
-    // 0. Prove the waitable root pin still exists before any numeric group
-    //    signal: the PGID is only provably ours while the root is waitable. A
-    //    running root or a WNOWAIT-retained zombie are both safe (pin holds).
-    //    On any error (ECHILD = pin lost) send no group signal and fail loud.
+    // A waitable root pins PGID ownership for numeric group signals. A running root or
+    // WNOWAIT-retained zombie is safe; ECHILD forbids signaling.
     let root_already_exited = child_exited_no_reap(child)?;
     // 1. SIGTERM to the exact group while the root is unreaped (pins the PGID).
-    // SAFETY: `pgid` is our own spawned tree's group id; a negative pid signals
-    // the whole group.
+    // SAFETY: `pgid` identifies the owned spawned process group; a negative pid
+    // signals the whole group.
     let already_gone = if unsafe { libc::kill(group, libc::SIGTERM) } == -1 {
         let error = io::Error::last_os_error();
         match error.raw_os_error() {
             Some(libc::ESRCH) => true,
-            // A group whose only members are zombies (root exited, no live
-            // descendant) reports EPERM on macOS: no live member received the
-            // signal. With the pin proving the root already exited, the group
-            // is drained; reaping the zombie root is then exact.
+            // A group whose only members are zombies (root exited, no live descendant) reports
+            // EPERM on macOS: no live member received the signal. With the pin proving the
+            // root already exited, the group is drained; reaping the zombie root is then exact.
             Some(libc::EPERM) if root_already_exited => true,
             _ => return Err(error),
         }
     } else {
         false
     };
-    // 2. Bounded grace: keep the root unreaped (observe without reaping) so the
-    //    PGID pin survives every later group signal. The full grace interval
-    //    is preserved so descendants receive their graceful window even if the
-    //    root exits early; only a lost pin (ECHILD) aborts loud.
+    // 2. Bounded grace: keep the root unreaped (observe without reaping) so the PGID pin
+    // survives every later group signal. The full grace interval is preserved so descendants
+    // receive their graceful window even if the root exits early; only a lost pin (ECHILD) aborts loud.
     if !already_gone {
         let deadline = Instant::now() + grace;
         while Instant::now() < deadline {
@@ -1423,13 +1266,8 @@ fn terminate_tree_child(
             std::thread::sleep(Duration::from_millis(10));
         }
     }
-    // 3. Final SIGKILL to the same pinned group. The root is still unreaped, so
-    //    the numeric PGID cannot have been recycled. Record ESRCH/EPERM instead
-    //    of returning: a SIGTERM-drained group may leave only unsignalable
-    //    members (EPERM) or be fully gone (ESRCH), and the
-    //    non-signaling poll below is the real proof. Other errors are real
-    //    failures. No signal is sent after this point.
-    // SAFETY: as above; the root still pins the PGID.
+    // 3. Final SIGKILL to the same pinned group. The root is still unreaped, so the numeric PGID
+    // cannot have been recycled.
     let mut sigkill_err: Option<io::Error> = None;
     if unsafe { libc::kill(group, libc::SIGKILL) } == -1 {
         let error = io::Error::last_os_error();
@@ -1439,13 +1277,10 @@ fn terminate_tree_child(
         }
     }
     // 4. Every group signal is complete: reap the root now. Releasing the pin
-    //    here is safe because no later group signal is issued.
+    // here is safe because no later group signal is issued.
     wait_child_exit(child, grace)?;
-    // 5. Non-signaling group-gone polling. `kill(-pgid, 0)` delivers no signal;
-    //    it only probes whether the group still has members, so it cannot harm
-    //    a group that recycled the id after reap. Descendants received SIGKILL
-    //    and must die; a group that survives is a loud error (root reaped,
-    //    artifact retained, never silent success).
+    // 5. Non-signaling group-gone polling. `kill(-pgid, 0)` delivers no signal; it only probes whether
+    // the group still has members, so it cannot harm a group that recycled the id after reap.
     match wait_for_group_gone(pgid, grace) {
         Ok(()) => {
             if already_gone {
@@ -1473,12 +1308,9 @@ fn child_exited_no_reap(child: &Child) -> io::Result<bool> {
 
 #[cfg(target_os = "macos")]
 fn macos_child_exited(pid: u32, timeout: Duration) -> io::Result<bool> {
-    // Race guard: if the child exited BEFORE this poll began, a fresh
-    // EVFILT_PROC NOTE_EXIT registration on XNU never fires and the caller
-    // would spin forever. waitid(WNOHANG|WNOWAIT|WEXITED) observes exit state
-    // without reaping, preserving the waitable root pin for the final wait().
-    // SAFETY: P_PID targets only our owned child's pid; the out-param is a
-    // fully zeroed siginfo_t that waitid fills on success.
+    // Race guard: if the child exited BEFORE this poll began, a fresh EVFILT_PROC NOTE_EXIT
+    // registration on XNU never fires and the caller would spin forever.
+    // waitid(WNOHANG|WNOWAIT|WEXITED) observes exit state without reaping, preserving the waitable root pin for the final wait.
     let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
     let probe = unsafe {
         libc::waitid(
@@ -1550,7 +1382,7 @@ fn macos_child_exited(pid: u32, timeout: Duration) -> io::Result<bool> {
 #[cfg(all(unix, not(target_os = "macos")))]
 fn child_exited_no_reap(child: &Child) -> io::Result<bool> {
     let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() }; // ubs:ignore — FFI wrapper, invariants: siginfo_t is a C union; waitid requires a zeroed out-param and writes every field later read via si_pid()
-    // SAFETY: `P_PID` targets only our owned child's pid; `WNOWAIT` observes
+    // SAFETY: `P_PID` targets only the owned child's pid; `WNOWAIT` observes
     // without reaping; `WNOHANG` returns immediately when no state changed.
     let rc = unsafe {
         libc::waitid(
@@ -1561,10 +1393,9 @@ fn child_exited_no_reap(child: &Child) -> io::Result<bool> {
         )
     };
     if rc == 0 {
-        // WNOHANG leaves the status discriminator zero when no child changed
-        // state. Darwin's libc si_pid() accessor can report a nonzero union
-        // field for that zero-status result, causing false exits and defeating
-        // shell deadlines. si_code is the stable discriminator there.
+        // WNOHANG leaves the status discriminator zero when no child changed state. Darwin's libc
+        // si_pid accessor can report a nonzero union field for that zero-status result, causing
+        // false exits and defeating shell deadlines. si_code is the stable discriminator there.
         #[cfg(target_os = "macos")]
         {
             Ok(info.si_code != 0)
@@ -1575,9 +1406,8 @@ fn child_exited_no_reap(child: &Child) -> io::Result<bool> {
             Ok(unsafe { info.si_pid() } != 0)
         }
     } else {
-        // ECHILD means the waitable root pin is already gone: the numeric
-        // PGID is no longer provably ours, so the caller must send no group
-        // signal. Fail loud rather than pretending the child exited.
+        // ECHILD means the waitable root pin is gone and PGID ownership is unproved.
+        // Fail instead of signaling or reporting a false exit.
         Err(io::Error::last_os_error())
     }
 }
@@ -1613,12 +1443,8 @@ fn wait_for_group_gone(pgid: i32, grace: Duration) -> io::Result<()> {
     ))
 }
 
-/// Exact escalation for a detached process (warm daemon stem) when the
-/// authenticated socket RPC is unavailable.
-///
-/// Linux: opens a `pidfd` pinned to the process, verifies the captured start
-/// identity against the process the fd names, then uses `pidfd_send_signal`
-/// (kernel-pinned, never a numeric pid). Every other platform fails closed.
+/// Exact escalation for a detached process (warm daemon stem) when the authenticated socket RPC is
+/// unavailable.
 #[cfg(any(target_os = "linux", target_os = "android"))]
 pub fn escalate_detached(
     binding: &ChildBinding,
@@ -1740,8 +1566,7 @@ pub fn escalate_detached(
 
 /// Resume the primary thread of a `CREATE_SUSPENDED` child by looking up its
 /// thread id through a Toolhelp snapshot (stable API; `main_thread_handle` is
-/// still unstable). The snapshot and the thread handle are both RAII/closed on
-/// every path.
+/// still unstable). The snapshot and the thread handle are both RAII/closed on every path.
 #[cfg(windows)]
 fn resume_primary_thread(pid: u32) -> io::Result<()> {
     // SAFETY: TH32CS_SNAPTHREAD with pid 0 snapshots all threads; Handle owns
@@ -1762,7 +1587,7 @@ fn resume_primary_thread(pid: u32) -> io::Result<()> {
     }
     loop {
         if entry.th32OwnerProcessID == pid {
-            // SAFETY: the thread id belongs to our CREATE_SUSPENDED child;
+            // SAFETY: the thread id belongs to the owned CREATE_SUSPENDED child;
             // Handle owns the fresh THREAD_SUSPEND_RESUME handle.
             let thread =
                 Handle::new(unsafe { OpenThread(THREAD_SUSPEND_RESUME, 0, entry.th32ThreadID) })?;
@@ -1773,7 +1598,7 @@ fn resume_primary_thread(pid: u32) -> io::Result<()> {
             }
             return Ok(());
         }
-        // SAFETY: iterating our valid snapshot; zero means no more entries.
+        // SAFETY: the snapshot is valid; zero means no more entries.
         if unsafe { Thread32Next(snapshot.raw(), &mut entry) } == 0 {
             return Err(io::Error::new(
                 io::ErrorKind::NotFound,

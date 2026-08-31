@@ -1,25 +1,12 @@
-//! V7 shadow checker tests (bead `zerostack-3cdn`, program `zerostack-vcqk`).
-//!
-//! Acceptance coverage:
-//! - Positive, `Unsafe`, and `Unknown` fixtures for the certificate-chain
-//!   (W7-T03), causal-closure (W7-T11), and savings-provenance (W7-T13)
-//!   checkers, including root/scope/contract mismatches and missing
-//!   transcript segments.
-//! - Checker totality: no panic and no error on arbitrary untrusted bytes
-//!   (property-tested over raw bytes and arbitrary JSON values).
-//! - Shadow results never alter runtime routing or permits: no gate field
-//!   appears in any emitted document, and no report deserializes as a
-//!   write/permit grant.
-//! - Resource cost is recorded (ledger) and the baseline remains available
-//!   (explicit frozen-raw-baseline fallback on every verdict).
+//! Tests for ETNF certificate checkers.
 
 use proptest::prelude::*;
 use proptest::test_runner::Config;
 use serde_json::{Value, json};
 use zero_abi::{
-    ApprovalGrant, CheckerIdentity, EvidenceItem, ExplicitFallback, FallbackKind, Falsifier,
-    FiniteWitness, KillMetrics, PermitGrant, ResourceLedger, RootedEvidence, SafetyVerdict,
-    SavingsCategory, V7ShadowReport, VCQK_CHECKER_CAUSAL_ID, VCQK_CHECKER_CHAIN_ID,
+    ApprovalGrant, CheckerIdentity, EtnfShadowReport, EvidenceItem, ExplicitFallback, FallbackKind,
+    Falsifier, FiniteWitness, KillMetrics, PermitGrant, ResourceLedger, RootedEvidence,
+    SafetyVerdict, SavingsCategory, VCQK_CHECKER_CAUSAL_ID, VCQK_CHECKER_CHAIN_ID,
     VCQK_CHECKER_SAVINGS_ID, VCQK_CONTRACT_CAUSAL, VCQK_CONTRACT_CHAIN, VCQK_CONTRACT_SAVINGS,
     VCQK_KILL_NONCONVERGENCE_MAX_ISSUES, VCQK_LEARNING_REFINEMENT_PUBLISH_AUTHORITY,
     VCQK_MAX_BASELINE_SEGMENTS, VCQK_MAX_CHAIN_LINKS, VCQK_MAX_CLOSURE_EDGES,
@@ -33,9 +20,7 @@ const ROOT_A: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 const ROOT_B: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 const DIGEST_1: &str = "1111111111111111111111111111111111111111111111111111111111111111";
 
-// ---------------------------------------------------------------------------
 // Helpers
-// ---------------------------------------------------------------------------
 
 fn fallback() -> ExplicitFallback {
     ExplicitFallback::new(
@@ -46,10 +31,10 @@ fn fallback() -> ExplicitFallback {
 }
 
 /// A validated Safe report usable as a certificate-chain link.
-fn link(anchor: &str, scope: &str, contract: &str, version: &str) -> V7ShadowReport {
-    V7ShadowReport::new(
+fn link(anchor: &str, scope: &str, contract: &str, version: &str) -> EtnfShadowReport {
+    EtnfShadowReport::new(
         SafetyVerdict::Safe,
-        CheckerIdentity::new("w7/chain_v1", version).unwrap(),
+        CheckerIdentity::new("etnf/chain", version).unwrap(),
         scope,
         contract,
         RootedEvidence::new(
@@ -67,7 +52,7 @@ fn link(anchor: &str, scope: &str, contract: &str, version: &str) -> V7ShadowRep
 }
 
 /// Canonical chain document: a JSON array of canonical report documents.
-fn chain_bytes(links: &[V7ShadowReport]) -> Vec<u8> {
+fn chain_bytes(links: &[EtnfShadowReport]) -> Vec<u8> {
     let mut out = String::from("[");
     for (index, link) in links.iter().enumerate() {
         if index > 0 {
@@ -96,7 +81,7 @@ fn savings_bytes(baseline: &[(&str, &str)], savings: &[(&str, &str)]) -> Vec<u8>
     .unwrap()
 }
 
-fn assert_no_gate_fields(report: &V7ShadowReport) {
+fn assert_no_gate_fields(report: &EtnfShadowReport) {
     let text = String::from_utf8(report.to_canonical_bytes().unwrap()).unwrap();
     for key in [
         "grant_id",
@@ -123,7 +108,7 @@ fn assert_no_gate_fields(report: &V7ShadowReport) {
     assert!(serde_json::from_value::<PermitGrant>(value).is_err());
 }
 
-fn assert_baseline_available(report: &V7ShadowReport, input_len: usize) {
+fn assert_baseline_available(report: &EtnfShadowReport, input_len: usize) {
     // Explicit fallback names the frozen raw baseline on every verdict.
     assert_eq!(report.fallback.kind, FallbackKind::FrozenRawBaseline);
     assert_eq!(report.fallback.obligation, "run the frozen raw baseline");
@@ -137,25 +122,23 @@ fn assert_baseline_available(report: &V7ShadowReport, input_len: usize) {
     );
 }
 
-// ---------------------------------------------------------------------------
-// Certificate chain (W7-T03): positive, Unsafe, Unknown fixtures
-// ---------------------------------------------------------------------------
+// Certificate chain: positive, Unsafe, Unknown fixtures
 
 #[test]
 fn chain_positive_fixture_is_safe_and_round_trips() {
-    let first = link(ROOT_A, "scope:project/main", "zero.contract/v1", "1.0.0");
+    let first = link(ROOT_A, "scope:project/main", "zero.contract/base", "1.0.0");
     let root1 = first.certificate.as_ref().unwrap().root.clone();
     let second = link(
         &root1,
         "scope:project/main/child",
-        "zero.contract/v1",
+        "zero.contract/base",
         "1.0.0",
     );
     let root2 = second.certificate.as_ref().unwrap().root.clone();
     let third = link(
         &root2,
         "scope:project/main/child/grandchild",
-        "zero.contract/v1/chain",
+        "zero.contract/base/chain",
         "1.0.0",
     );
     let root3 = third.certificate.as_ref().unwrap().root.clone();
@@ -178,7 +161,7 @@ fn chain_positive_fixture_is_safe_and_round_trips() {
     assert_eq!(report.transition.as_ref().unwrap().target, root3);
     // Canonical round-trip.
     assert_eq!(
-        V7ShadowReport::from_canonical_bytes(&report.to_canonical_bytes().unwrap()).unwrap(),
+        EtnfShadowReport::from_canonical_bytes(&report.to_canonical_bytes().unwrap()).unwrap(),
         report
     );
     // Determinism: same bytes, same report.
@@ -197,7 +180,7 @@ fn chain_single_link_is_a_well_formed_chain() {
     let report = check_certificate_chain(&chain_bytes(&[link(
         ROOT_A,
         "scope:project/main",
-        "zero.contract/v1",
+        "zero.contract/base",
         "1.0.0",
     )]))
     .unwrap();
@@ -247,11 +230,11 @@ fn chain_unparseable_document_is_unknown() {
 fn chain_adjacent_root_mismatch_is_unsafe() {
     // Successor evidence anchors on an unrelated root, not the predecessor
     // certificate root.
-    let first = link(ROOT_A, "scope:project/main", "zero.contract/v1", "1.0.0");
+    let first = link(ROOT_A, "scope:project/main", "zero.contract/base", "1.0.0");
     let second = link(
         ROOT_B,
         "scope:project/main/child",
-        "zero.contract/v1",
+        "zero.contract/base",
         "1.0.0",
     );
     let input = chain_bytes(&[first, second]);
@@ -271,10 +254,10 @@ fn chain_adjacent_root_mismatch_is_unsafe() {
 
 #[test]
 fn chain_scope_mismatch_is_unsafe() {
-    let first = link(ROOT_A, "scope:project/main", "zero.contract/v1", "1.0.0");
+    let first = link(ROOT_A, "scope:project/main", "zero.contract/base", "1.0.0");
     let root1 = first.certificate.as_ref().unwrap().root.clone();
     // Sibling scope, not a descendant of scope:project/main.
-    let second = link(&root1, "scope:project/other", "zero.contract/v1", "1.0.0");
+    let second = link(&root1, "scope:project/other", "zero.contract/base", "1.0.0");
     let report = check_certificate_chain(&chain_bytes(&[first, second])).unwrap();
     assert_eq!(
         report.verdict,
@@ -287,13 +270,13 @@ fn chain_scope_mismatch_is_unsafe() {
 
 #[test]
 fn chain_contract_mismatch_is_unsafe() {
-    let first = link(ROOT_A, "scope:project/main", "zero.contract/v1", "1.0.0");
+    let first = link(ROOT_A, "scope:project/main", "zero.contract/base", "1.0.0");
     let root1 = first.certificate.as_ref().unwrap().root.clone();
-    // Contract v2 does not extend v1 as a path descendant.
+    // The other contract does not extend the base contract as a path descendant.
     let second = link(
         &root1,
         "scope:project/main/child",
-        "zero.contract/v2",
+        "zero.contract/other",
         "1.0.0",
     );
     let report = check_certificate_chain(&chain_bytes(&[first, second])).unwrap();
@@ -308,14 +291,14 @@ fn chain_contract_mismatch_is_unsafe() {
 
 #[test]
 fn chain_checker_identity_mismatch_is_unsafe() {
-    let first = link(ROOT_A, "scope:project/main", "zero.contract/v1", "1.0.0");
+    let first = link(ROOT_A, "scope:project/main", "zero.contract/base", "1.0.0");
     let root1 = first.certificate.as_ref().unwrap().root.clone();
     // An upgraded checker invalidates every prior certificate: the chain
     // cannot span versions.
     let second = link(
         &root1,
         "scope:project/main/child",
-        "zero.contract/v1",
+        "zero.contract/base",
         "2.0.0",
     );
     let report = check_certificate_chain(&chain_bytes(&[first, second])).unwrap();
@@ -330,14 +313,14 @@ fn chain_checker_identity_mismatch_is_unsafe() {
 
 #[test]
 fn chain_non_certificate_link_is_unsafe() {
-    let first = link(ROOT_A, "scope:project/main", "zero.contract/v1", "1.0.0");
-    let unknown_link = V7ShadowReport::new(
+    let first = link(ROOT_A, "scope:project/main", "zero.contract/base", "1.0.0");
+    let unknown_link = EtnfShadowReport::new(
         SafetyVerdict::Unknown {
             reasons: vec!["missing_evidence".into()],
         },
-        CheckerIdentity::new("w7/chain_v1", "1.0.0").unwrap(),
+        CheckerIdentity::new("etnf/chain", "1.0.0").unwrap(),
         "scope:project/main/child",
-        "zero.contract/v1",
+        "zero.contract/base",
         RootedEvidence::new(ROOT_B, vec![]).unwrap(),
         FiniteWitness::new(vec!["incomplete".to_string()]).unwrap(),
         None,
@@ -363,7 +346,7 @@ fn chain_non_certificate_link_is_unsafe() {
 
 #[test]
 fn chain_unparseable_link_is_unknown() {
-    let first = link(ROOT_A, "scope:project/main", "zero.contract/v1", "1.0.0");
+    let first = link(ROOT_A, "scope:project/main", "zero.contract/base", "1.0.0");
     let mut bytes = chain_bytes(&[first]);
     bytes.pop();
     bytes.extend_from_slice(b",{\"bogus\":true}]");
@@ -382,11 +365,11 @@ fn chain_unparseable_link_is_unknown() {
 fn chain_mismatch_dominates_missing_link_evidence() {
     // An adjacent mismatch (Unsafe) plus a gap (Unknown) must yield Unsafe:
     // the lattice law is Unsafe > Unknown > Safe.
-    let first = link(ROOT_A, "scope:project/main", "zero.contract/v1", "1.0.0");
+    let first = link(ROOT_A, "scope:project/main", "zero.contract/base", "1.0.0");
     let second = link(
         ROOT_B,
         "scope:project/main/child",
-        "zero.contract/v1",
+        "zero.contract/base",
         "1.0.0",
     );
     let mut bytes = chain_bytes(&[first, second]);
@@ -416,9 +399,7 @@ fn chain_oversized_chain_is_unknown() {
     assert!(!report.ledger.complete);
 }
 
-// ---------------------------------------------------------------------------
-// Causal closure (W7-T11): positive, Unsafe, Unknown fixtures
-// ---------------------------------------------------------------------------
+// Causal closure: positive, Unsafe, Unknown fixtures
 
 #[test]
 fn causal_positive_fixture_is_safe() {
@@ -613,9 +594,7 @@ fn causal_oversized_identifier_is_unknown() {
     assert!(!report.grants_authority());
 }
 
-// ---------------------------------------------------------------------------
-// Savings provenance (W7-T13): positive, Unsafe, Unknown fixtures
-// ---------------------------------------------------------------------------
+// Savings provenance: positive, Unsafe, Unknown fixtures
 
 #[test]
 fn savings_positive_fixture_is_safe_with_all_categories() {
@@ -851,9 +830,7 @@ fn savings_classify_is_total() {
     assert_eq!(SavingsCategory::ALL.len(), 6);
 }
 
-// ---------------------------------------------------------------------------
 // Kill metrics
-// ---------------------------------------------------------------------------
 
 #[test]
 fn kill_false_authority_counts_refuted_safe_roots() {
@@ -1001,9 +978,7 @@ fn learning_and_refinement_have_no_publish_authority() {
     assert!(!VCQK_LEARNING_REFINEMENT_PUBLISH_AUTHORITY);
 }
 
-// ---------------------------------------------------------------------------
 // Totality on untrusted bytes
-// ---------------------------------------------------------------------------
 
 fn config() -> Config {
     Config {
@@ -1048,9 +1023,9 @@ proptest! {
         let causal = check_causal_closure(&bytes).unwrap();
         let savings = check_savings_provenance(&bytes).unwrap();
         // Every emitted document is canonical and revalidates.
-        assert!(V7ShadowReport::from_canonical_bytes(&chain.to_canonical_bytes().unwrap()).is_ok());
-        assert!(V7ShadowReport::from_canonical_bytes(&causal.to_canonical_bytes().unwrap()).is_ok());
-        assert!(V7ShadowReport::from_canonical_bytes(&savings.to_canonical_bytes().unwrap()).is_ok());
+        assert!(EtnfShadowReport::from_canonical_bytes(&chain.to_canonical_bytes().unwrap()).is_ok());
+        assert!(EtnfShadowReport::from_canonical_bytes(&causal.to_canonical_bytes().unwrap()).is_ok());
+        assert!(EtnfShadowReport::from_canonical_bytes(&savings.to_canonical_bytes().unwrap()).is_ok());
         // Non-Safe verdicts never serialize a certificate. The JSON key
         // (with quotes) cannot appear inside string values, so this is exact
         // even though falsifier descriptions mention "certificate".
@@ -1109,6 +1084,6 @@ fn checkers_are_versioned() {
         check_savings_provenance(b"[]").unwrap(),
     ] {
         assert_eq!(report.checker.version, "1.0.0");
-        assert_eq!(report.schema, "zerostack/v7-shadow-report/1");
+        assert_eq!(report.schema, "zerostack/etnf-shadow-report/1");
     }
 }

@@ -2,7 +2,7 @@ use crate::accounting::PreventedReadAccounting;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-/// MCP/CLI tool names (FR-016).
+/// Query surface names.
 pub const SURFACE_NAMES: &[&str] = &[
     "symbol",
     "callers",
@@ -24,12 +24,9 @@ pub const SURFACE_NAMES: &[&str] = &[
     "rg_l4",
 ];
 
-/// Nearest valid surface to `input`, if one is close enough to suggest.
-///
-/// Case and separator confusions are the common agent mistakes (`reading-set`,
-/// `Callers`), so those normalize to an exact hit. Otherwise this falls back to
-/// edit distance with a conservative cutoff: suggesting a wrong surface is worse
-/// than suggesting none, because the agent spends a round trip on the guess.
+/// Nearest valid surface to `input`, if one is close enough to suggest. Case and separator
+/// confusions are the common caller mistakes (`reading-set`, `Callers`), so those normalize to an
+/// exact hit.
 pub fn nearest_surface(input: &str) -> Option<&'static str> {
     let norm = |s: &str| s.to_ascii_lowercase().replace(['-', '_', ' '], "");
     let target = norm(input);
@@ -65,22 +62,15 @@ fn edit_distance(a: &str, b: &str) -> usize {
     previous[b_chars.len()]
 }
 
-/// The one unknown-surface message every surface should emit.
-///
-/// It is built FROM `SURFACE_NAMES` rather than spelled out, because the previous
-/// hand-written list was a second source of truth that could silently drift from
-/// the real surface set. It also names a nearest match when there is one, so an
-/// agent can self-correct in a single round trip (graphzero-npso).
+/// Build the canonical unknown-surface message from [`SURFACE_NAMES`].
 pub fn unknown_surface_message(input: &str) -> String {
     let valid = SURFACE_NAMES.join(",");
     match nearest_surface(input) {
         Some(hit) => format!(
-            "unknown surface {input}; valid: {valid}; did you mean {hit}? \
-             agent: graphzero orient --surface {hit} --name <TARGET>"
+            "unknown surface {input}; valid: {valid}; retry orient with surface={hit} and a canonical target"
         ),
         None => format!(
-            "unknown surface {input}; valid: {valid}; \
-             agent: graphzero orient --surface reading_set --name <TARGET>"
+            "unknown surface {input}; valid: {valid}; retry orient with surface=reading_set and a canonical target"
         ),
     }
 }
@@ -171,7 +161,7 @@ pub struct QuerySurfaceRequest {
     pub budget: Option<usize>,
     #[serde(default)]
     pub session: Option<String>,
-    /// Durable `gz://query/<id>` page cursor (graphzero-gtub). Not a RAM token.
+    /// Durable `query/<id>` page cursor. Never a RAM token.
     #[serde(default)]
     pub cursor: Option<String>,
 }
@@ -202,7 +192,7 @@ pub struct OutlineItem {
 pub struct SearchHit {
     pub label: String,
     /// Matched line(s) plus ~1 line of context; full payload stays behind
-    /// `evidence_ref` (A-RAG snippet rule: never inline whole nodes).
+    /// `evidence_ref` (snippet rule: never inline whole nodes).
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub snippet: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
@@ -292,11 +282,11 @@ pub struct QuerySurfaceResponse {
     pub accounting: Option<PreventedReadAccounting>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
-    /// Agent next-step hints on budget=1 success envelopes (expand / capsule / export).
-    /// Empty on spilled/expand payloads; never part of expand exact-bytes documents.
+    /// caller next-step hints on budget=1 success envelopes (expand / capsule /
+    /// export). Empty on spilled/expand payloads; never part of expand exact-bytes documents.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub next: Vec<String>,
-    /// Next page of a truncated result set (`gz://query/<id>`). Durable across restart.
+    /// Next page of a truncated result set (`query/<id>`). Durable across restart.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub next_cursor: Option<String>,
 }

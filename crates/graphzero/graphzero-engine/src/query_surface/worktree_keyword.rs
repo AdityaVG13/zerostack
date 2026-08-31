@@ -1,7 +1,5 @@
-//! Pre-index keyword matching over the worktree (graphzero-rle1).
-//!
-//! Graph structure queries still need a snapshot. Plain keyword locate/search
-//! answers from exact text match at query time so cold clones are usable.
+//! Pre-index keyword matching over the worktree. Graph structure queries still need a snapshot.
+//! Plain keyword locate/search answers from exact text match at query time so cold clones are usable.
 
 use std::fs;
 use std::path::Path;
@@ -110,7 +108,7 @@ fn path_hits(
                 label: rel.clone(),
                 snippet: rel.clone(),
                 content_sha256: String::new(),
-                evidence_ref: format!("gz://path/{rel}#L1-1"),
+                evidence_ref: format!("path/{rel}#L1-1"),
                 source: "worktree".into(),
             });
             if hits.len() >= MAX_HITS {
@@ -157,7 +155,7 @@ fn text_hits(
                 label: format!("{rel}:{line_no}"),
                 snippet: line.chars().take(200).collect(),
                 content_sha256: String::new(),
-                evidence_ref: format!("gz://path/{rel}#L{line_no}-{line_no}"),
+                evidence_ref: format!("path/{rel}#L{line_no}-{line_no}"),
                 source: "worktree".into(),
             });
             if hits.len() >= MAX_HITS {

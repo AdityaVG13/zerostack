@@ -9,7 +9,7 @@ use super::super::session::{
 };
 use super::super::symbol_table::SymbolTable;
 use super::budget::tokens_for_str;
-use super::capsule_json::render_query_capsule_json;
+use super::capsule_json::{full_query_capsule_json, render_query_capsule_json};
 use super::file_target::{TARGET_INLINE_TOP_HITS, file_target_for_evidence};
 use super::lexical::graph_proximity_boost;
 use super::snapshot::Snapshot;
@@ -30,7 +30,7 @@ pub fn clear_snap_session_cache() {
 }
 
 fn canonical_source_ref(snapshot: &Snapshot, def: &CapsuleDef) -> Option<String> {
-    let raw = def.evidence_ref.strip_prefix("gz://blob/")?;
+    let raw = def.evidence_ref.strip_prefix("z://blob/")?;
     let (hash, span) = raw.split_once("#B")?;
     let (start, end) = span.split_once('-')?;
     let start = start.parse::<usize>().ok()?;
@@ -47,7 +47,7 @@ fn canonical_source_ref(snapshot: &Snapshot, def: &CapsuleDef) -> Option<String>
         .iter()
         .position(|&byte| byte == b'\n')
         .map_or(bytes.len(), |offset| end + offset + 1);
-    Some(format!("gz://blob/{hash}#B{line_start}-{line_end}"))
+    Some(format!("z://blob/{hash}#B{line_start}-{line_end}"))
 }
 
 fn destinations_from_capsule_matches(
@@ -68,7 +68,7 @@ fn destinations_from_capsule_matches(
             let evidence = first_def
                 .and_then(|d| canonical_source_ref(snapshot, d))
                 .or_else(|| first_def.map(|d| d.evidence_ref.clone()))
-                .unwrap_or_else(|| format!("gz://node/{}", m.name));
+                .unwrap_or_else(|| format!("node/{}", m.name));
             let node = evidence.clone();
             let _ = link_emitted_symbol_view(EntityViewKind::Read, &m.name, &evidence);
             let _ = link_emitted_symbol_view(EntityViewKind::Node, &m.name, &node);
@@ -185,7 +185,7 @@ pub fn probe_snap_route(snapshot: &Snapshot, query: &str) -> Result<(SnapRoute, 
     Ok((route, symbol))
 }
 
-/// `snap(query, budget)` library entry (P1.1 G-001).
+/// Library entry for `snap(query, budget)`.
 pub fn snap(
     snapshot: &Snapshot,
     query: &str,
@@ -325,7 +325,7 @@ fn semantic_route_destinations(
     // Verify round-trip honesty: every destination's evidence span must
     // exist in the snapshot's blob store. Drop any that don't.
     destinations.retain(|d| {
-        if let Some(raw) = d.evidence_ref.strip_prefix("gz://blob/") {
+        if let Some(raw) = d.evidence_ref.strip_prefix("z://blob/") {
             if let Some((hash, span)) = raw.split_once("#B") {
                 if let Some((start, end)) = span.split_once('-') {
                     if let (Ok(s), Ok(e)) = (start.parse::<usize>(), end.parse::<usize>()) {
@@ -346,64 +346,23 @@ fn semantic_route_destinations(
     Some((destinations, diagnostics))
 }
 
-// --- snap --to-file / export support (perf-focused, reuse spill/expand, atomic write) ---
-
 use anyhow::Context;
-use std::fs;
-use std::io::Write;
 use std::path::Path;
 
-/// Pure-std atomic write: mkdir + write .tmp next to target + rename. Minimal overhead.
-/// No extra deps; safe for CLI/MCP concurrent-ish use (tmp name per-pid).
+/// Atomically publish bytes through the collision-safe shared store writer.
 fn atomic_write(path: &Path, bytes: &[u8]) -> Result<()> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)
-            .with_context(|| format!("mkdir for export {}", parent.display()))?;
-    }
-    let fname = path
-        .file_name()
-        .map(|n| n.to_string_lossy().into_owned())
-        .unwrap_or_else(|| "export".into());
-    // pid + nanos for lower collision (inspired CBM cross-plat atomic + graphify tmp)
-    let pid = std::process::id();
-    let uniq = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_nanos() % 1_000_000)
-        .unwrap_or(0);
-    let tmp = path
-        .parent()
-        .unwrap_or_else(|| Path::new("."))
-        .join(format!(".{}.{}.{}.tmp", fname, pid, uniq));
-    {
-        let mut f = fs::File::create(&tmp)
-            .with_context(|| format!("create tmp for export {}", path.display()))?;
-        f.write_all(bytes)?;
-        f.sync_all()?; // durability for handoff / committed artifacts (CBM-style)
-    }
-    fs::rename(&tmp, path).with_context(|| format!("atomic rename export {}", path.display()))?;
-    // best-effort cleanup ignored on success path
-    Ok(())
+    zero_store::atomic_write_file(path, bytes)
+        .with_context(|| format!("atomic write export {}", path.display()))
 }
 
-/// Render tiny minimal export (ref-first, reuse spill id if low budget).
-/// Goal: <1ms + <512B for budget=1. Carries enough for handoff + expand.
-fn render_minimal(capsule: &QueryCapsule, store_root: Option<&Path>) -> String {
-    let ref_str = if capsule.budget <= 1 {
-        // force spill side effect via existing path for ref (cheap)
-        let full = capsule.to_json(store_root);
-        // extract or rebuild q: from spill logic
-        let id = super::budget::spill_id_for_json(store_root, &full);
-        format!("q:{}", id)
-    } else {
-        format!("q:cap-{}", capsule.snapshot_id)
-    };
-    let canonical = format!("gz://query/{}", ref_str.trim_start_matches("q:"));
+/// Render a ref-first minimal export whose reference resolves the full capsule.
+fn render_minimal(capsule: &QueryCapsule, full: &str, id: &str, ref_str: &str) -> String {
+    let canonical = format!("query/{id}");
     let meta = serde_json::json!({
         "budget": capsule.budget,
         "route": capsule.route.as_str(),
-        "created_ts": "now", // filled at export time; no chrono dep for perf/min deps
         "visible_tokens": capsule.ledger.used_budget,
-        "full_tokens": capsule.ledger.requested_budget * 4, // rough
+        "full_tokens": tokens_for_str(full),
         "coverage": {
             "tier_a": capsule.coverage.tier_a,
             "tier_b": capsule.coverage.tier_b,
@@ -413,9 +372,8 @@ fn render_minimal(capsule: &QueryCapsule, store_root: Option<&Path>) -> String {
         },
         "snapshot_id": capsule.snapshot_id,
     });
-    // Note: chrono may not be dep; for skeleton use a static ts if compile issue.
     serde_json::json!({
-        "schema": "gz-snap/v1",
+        "schema": "gz-snap",
         "ref": ref_str,
         "canonical_ref": canonical,
         "query": capsule.query,
@@ -430,15 +388,15 @@ fn render_minimal(capsule: &QueryCapsule, store_root: Option<&Path>) -> String {
     .to_string()
 }
 
-/// Render handoff MD (human+agent readable).
-fn render_md(capsule: &QueryCapsule, _store_root: Option<&Path>) -> String {
+/// Render handoff MD (human+caller readable).
+fn render_md(capsule: &QueryCapsule, ref_str: &str) -> String {
     let mut s = String::new();
     s.push_str(&format!(
         "# GraphZero Snap Handoff\n\n**Query**: {}\n",
         capsule.query
     ));
     s.push_str(&format!(
-        "**Ref**: q: (expand for full)\n**Snapshot**: {}\n**Budget**: {} | Route: {}\n",
+        "**Ref**: {ref_str}\n**Snapshot**: {}\n**Budget**: {} | Route: {}\n",
         capsule.snapshot_id,
         capsule.budget,
         capsule.route.as_str()
@@ -453,59 +411,39 @@ fn render_md(capsule: &QueryCapsule, _store_root: Option<&Path>) -> String {
             s.push_str(&format!("- {} (evidence {})\n", d.label, d.evidence_ref));
         }
     }
-    s.push_str("\n## Next\n- expand <ref> | blast ... | reserve\n");
+    s.push_str(&format!(
+        "\n## Next\n- expand {ref_str} | blast ... | reserve\n"
+    ));
     s
 }
 
-/// Export the (already-budgeted) capsule to path using chosen format.
-/// Atomic, reuses spill/expand paths, minimal added CPU when not exporting.
-/// Returns artifact meta for CLI/MCP stdout (no full content).
+/// Export an already-budgeted capsule atomically and return artifact metadata.
 pub fn export_capsule(
     capsule: &QueryCapsule,
     store_root: Option<&Path>,
     export_path: &Path,
     format: ExportFormat,
 ) -> Result<ExportArtifact> {
-    let (bytes, ref_str) = match format {
-        ExportFormat::Minimal => {
-            let j = render_minimal(capsule, store_root);
-            (j.into_bytes(), format!("q:{}", capsule.snapshot_id)) // placeholder refined later
-        }
-        ExportFormat::Capsule => {
-            let j = capsule.to_json(store_root);
-            (j.into_bytes(), format!("q:cap-{}", capsule.snapshot_id))
-        }
-        ExportFormat::Md => {
-            let m = render_md(capsule, store_root);
-            (m.into_bytes(), format!("md-snap-{}", capsule.snapshot_id))
-        }
+    let full = full_query_capsule_json(capsule);
+    let id = match store_root {
+        Some(root) => super::budget::persist_query_json(root, &full)
+            .with_context(|| format!("persist full capsule in {}", root.display()))?,
+        None => super::budget::spill_id_for_json(None, &full),
+    };
+    let ref_str = format!("q:{id}");
+    let bytes = match format {
+        ExportFormat::Minimal => render_minimal(capsule, &full, &id, &ref_str).into_bytes(),
+        ExportFormat::Capsule => full.into_bytes(),
+        ExportFormat::Md => render_md(capsule, &ref_str).into_bytes(),
         ExportFormat::Zst => {
-            let j = capsule.to_json(store_root);
-            // real zstd for committed portable (inspired CBM .zst)
-            let compressed =
-                zstd::encode_all(j.as_bytes(), 3).with_context(|| "zstd compress for export")?;
-            (compressed, format!("zst-cap-{}", capsule.snapshot_id))
+            zstd::encode_all(full.as_bytes(), 3).with_context(|| "zstd compress for export")?
         }
     };
     atomic_write(export_path, &bytes)?;
-    let size = bytes.len() as u64;
-    // improve ref_str for minimal using spill
-    let final_ref = if matches!(format, ExportFormat::Minimal) {
-        // re-compute using spill helper for accurate q:id
-        let full_preview = capsule.to_json(store_root);
-        format!(
-            "q:{}",
-            super::budget::spill_id_for_json(store_root, &full_preview)
-        )
-    } else {
-        ref_str
-    };
     Ok(ExportArtifact {
         path: export_path.to_path_buf(),
-        size_bytes: size,
-        ref_str: final_ref,
+        size_bytes: bytes.len() as u64,
+        ref_str,
         format,
     })
 }
-
-// end snap-to-file export skeleton (compilable; perf: spill reuse + direct write path)

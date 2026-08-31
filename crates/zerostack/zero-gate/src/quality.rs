@@ -1,15 +1,6 @@
-//! Proof-carrying protected-quality envelope for strict candidate admission.
-//!
-//! The envelope keeps exact, pointwise, scoped-class, and distributional evidence
-//! distinct with disjoint typed prerequisites. Strict publication admits only
-//! evidence that protects the current task pointwise via comparable
-//! task/candidate identities, live paired outcomes, declared Pareto vector,
-//! live protected predicate, and locked verifier. Stale, missing,
-//! incomparable, or unrooted evidence returns a typed unknown/refusal and
-//! never upgrades partial evidence into a dominance claim. Distributional and
-//! unidentified candidates select the frozen raw baseline instead of
-//! laundering a population claim into an individual one. Protected outcomes
-//! never regress and deterministic evidence yields deterministic proof roots.
+//! Proof-carrying protected-quality envelope for strict candidate admission. The envelope keeps
+//! exact, pointwise, scoped-class, and distributional evidence distinct with disjoint typed
+//! prerequisites.
 
 use std::{error::Error, fmt};
 
@@ -1228,9 +1219,9 @@ impl QualityAdmission {
                     Some(certificate.protected_outcome_digest),
                     Some(certificate.candidate_identity_digest),
                     Some(certificate.protected_outcome_digest),
-                    domain_digest(ADMISSION_DOMAIN, b"exact-continuation-pairing-v1"),
-                    domain_digest(ADMISSION_DOMAIN, b"exact-protected-identity-v1"),
-                    domain_digest(ADMISSION_DOMAIN, b"builtin-exact-verifier-v1"),
+                    domain_digest(ADMISSION_DOMAIN, b"exact-continuation-pairing"),
+                    domain_digest(ADMISSION_DOMAIN, b"exact-protected-identity"),
+                    domain_digest(ADMISSION_DOMAIN, b"builtin-exact-verifier"),
                     None,
                     None,
                     QualityEvidenceClass::ExactNeutral,
@@ -1321,9 +1312,9 @@ impl QualityAdmission {
                 Some(baseline.protected_outcome_digest),
                 Some(candidate_identity_digest),
                 None,
-                domain_digest(ADMISSION_DOMAIN, b"unidentified-pairing-v1"),
-                domain_digest(ADMISSION_DOMAIN, b"unidentified-protected-predicate-v1"),
-                domain_digest(ADMISSION_DOMAIN, b"builtin-fallback-verifier-v1"),
+                domain_digest(ADMISSION_DOMAIN, b"unidentified-pairing"),
+                domain_digest(ADMISSION_DOMAIN, b"unidentified-protected-predicate"),
+                domain_digest(ADMISSION_DOMAIN, b"builtin-fallback-verifier"),
                 None,
                 None,
                 QualityEvidenceClass::Unidentified,
@@ -1758,10 +1749,8 @@ fn require_distinct(
 fn require_locked_verifier(
     evidence: &VerifiedEvidence<'_, '_>,
 ) -> Result<(), QualityEnvelopeError> {
-    // VerifiedEvidence is already rooted and freshness-checked at verification time.
-    // We enforce that the provenance binds a non-empty, non-stale verifier identity
-    // and that the evidence payload is non-empty (rooted). Any empty provenance
-    // is treated as stale/missing and must not upgrade to dominance.
+    // VerifiedEvidence is already rooted and freshness-checked. Require non-empty, current
+    // verifier provenance and a non-empty evidence payload.
     let provenance = &evidence.certificate().provenance;
     if provenance.operator_id.trim().is_empty()
         || provenance.operator_version.trim().is_empty()

@@ -1,8 +1,6 @@
-//! Ultra-compact file/symbol locate: 1-token shell (`g:<id>`), lossless expand.
-//!
-//! Stable loc ids are assigned at snapshot open from sorted path/symbol tables.
-//! Expanding `g:N` resolves to the same bytes as the canonical `gz://blob/...` ref.
-//! Ambiguous queries spill the full candidate capsule to `gz://query/` (search still works).
+//! Ultra-compact file/symbol locate: 1-token shell (`g:<id>`), lossless expand. Stable loc ids are
+//! assigned at snapshot open from sorted path/symbol tables. Expanding `g:N` resolves to the same
+//! bytes as the canonical `z://blob/...` ref.
 
 use std::collections::HashMap;
 
@@ -73,7 +71,7 @@ impl LocateIndex {
             let loc_id = next_id;
             next_id = next_id.saturating_add(1);
             let hash_hex = hash.to_hex();
-            let canonical_ref = format!("gz://blob/{hash_hex}");
+            let canonical_ref = format!("z://blob/{hash_hex}");
             path_to_loc.insert(rec.path.clone(), loc_id);
             by_id.insert(
                 loc_id,
@@ -96,7 +94,7 @@ impl LocateIndex {
             let loc_id = next_id;
             next_id = next_id.saturating_add(1);
             let canonical_ref = symbol_canonical_ref(id, &spans, blob_hashes, &table)?
-                .unwrap_or_else(|| format!("gz://node/{name}"));
+                .unwrap_or_else(|| format!("node/{name}"));
             let path = hex_for_symbol_def(id, &spans, blob_hashes)?
                 .and_then(|h| snapshot.path_for_blob(&h).map(|r| r.path.clone()));
             symbol_to_loc.insert(name.to_string(), loc_id);
@@ -153,7 +151,7 @@ fn symbol_canonical_ref(
     };
     let evidence_ref = blob_span_ref(&hash_hex, span.start, span.end);
     if evidence_ref.is_empty() {
-        return Ok(Some(format!("gz://node/{name}")));
+        return Ok(Some(format!("node/{name}")));
     }
     Ok(Some(evidence_ref))
 }
@@ -218,7 +216,7 @@ pub fn locate(snapshot: &Snapshot, query: &str, kind: LocateKind) -> Result<Loca
     if candidates.len() > 1 {
         let detail_json = serde_json::to_string(&capsule)?;
         if let Ok(id) = persist_query_json(&snapshot.store_root, &detail_json) {
-            capsule.detail_ref = Some(format!("gz://query/{id}"));
+            capsule.detail_ref = Some(format!("query/{id}"));
         }
     }
 
@@ -254,8 +252,8 @@ fn path_locate(
             let loc_id = index.path_to_loc.get(path).copied();
             let loc_ref = loc_id
                 .map(LocateIndex::loc_ref)
-                .unwrap_or_else(|| format!("gz://blob/{hash_hex}"));
-            let canonical_ref = format!("gz://blob/{hash_hex}");
+                .unwrap_or_else(|| format!("z://blob/{hash_hex}"));
+            let canonical_ref = format!("z://blob/{hash_hex}");
             LocateHit {
                 loc_ref,
                 canonical_ref,
@@ -293,12 +291,9 @@ fn entry_to_hit(entry: &LocateEntry, rank: usize) -> LocateHit {
 
 /// 1-token wire form for a symbol name when present in the locate index.
 pub fn locate_shell_for_name(snapshot: &Snapshot, name: &str) -> Option<String> {
-    // Fast path: the published symbol table is built from a BTreeMap, so its
-    // entries are already in lexicographic name order — the same order
-    // LocateIndex::build uses when assigning symbol loc ids after path
-    // records. Binary-search the rank of one exact name instead of building
-    // the whole index (full sort with per-key String keys + canonical-ref
-    // derivation for every symbol) just to answer this lookup.
+    // Fast path: the published symbol table is built from a BTreeMap, so its entries are already in
+    // lexicographic name order — the same order LocateIndex::build uses when assigning symbol loc ids
+    // after path records.
     if let Some(loc_id) = locate_loc_id_for_name(snapshot, name) {
         return Some(LocateIndex::loc_ref(loc_id));
     }
@@ -339,7 +334,7 @@ pub fn locate_shell_tokens(capsule: &LocateCapsule) -> usize {
     tokens_for_str(&locate_shell(capsule))
 }
 
-/// Resolve `g:<id>` to canonical `gz://` ref (lossless pointer).
+/// Resolve `g:<id>` to its canonical bare ref.
 pub fn canonical_ref_for_loc(snapshot: &Snapshot, loc_id: u32) -> Result<String> {
     let index = snapshot.locate_index()?;
     let entry = index

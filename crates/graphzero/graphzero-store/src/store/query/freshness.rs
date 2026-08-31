@@ -1,4 +1,4 @@
-//! Blob freshness verification against on-disk repo files (INV-001).
+//! Blob freshness verification against on-disk repo files.
 
 use std::collections::{BTreeSet, HashMap};
 use std::fs;
@@ -37,12 +37,8 @@ pub fn blob_staleness_verdict(
         return StalenessVerdict::Missing;
     };
     let mtime = file_mtime_nanos(&meta);
-    // Stat fast path: when mtime AND size are byte-identical to the indexed
-    // record, the file is the one that was hashed at index time. Reading and
-    // re-hashing every indexed file on every freshness probe turned each warm
-    // query into a full-repo scan (orient p50 regression); stat metadata is
-    // the same evidence `git status` uses. Only a stat mismatch falls through
-    // to the authoritative read+hash check.
+    // Stat fast path: when mtime AND size are byte-identical to the indexed record, the file is the
+    // one that was hashed at index time.
     if mtime == rec.mtime_nanos && meta.len() == rec.size {
         return StalenessVerdict::Fresh;
     }
@@ -192,10 +188,9 @@ pub fn snapshot_staleness_diagnostic(
     if let Some(path) = Snapshot::first_unindexed_source_path(repo, indexed) {
         return Some(format!("unindexed_source:{path}"));
     }
-    // Sequential stat scan (graphzero perf note): rayon `find_first` was tried
-    // and measured slower — rayon pool/task overhead exceeds the ~0.9ms the
-    // 930 per-file stats cost at this corpus size. Revisit if typical repos
-    // grow 10x.
+    // Sequential stat scan (graphzero perf note): rayon `find_first` was
+    // tried and measured slower — rayon pool/ exceeds the ~0.9ms the 930
+    // per-file stats cost at this corpus size. Revisit if typical repos grow 10x.
     for (hash, rec) in indexed {
         let hash_hex = hash.to_hex();
         let verdict = blob_staleness_verdict(repo, &rec.path, &hash_hex, rec);

@@ -3,25 +3,16 @@ use fsqlite::Connection;
 use std::path::Path;
 use std::time::Instant;
 
-/// Payloads at or above this size go to the append-only pack sidecar instead
-/// of the sqlite btree. Large cells overflow into chained pages and every
-/// insert churns the btree cursor's slot cache (profiled: 32% of a fresh
-/// 208MB index inside CellSlotCache::insert_slow even after sorted, batched
-/// writes). The pack file turns those into sequential appends; sqlite keeps
-/// only a fixed-size locator row.
+/// Payloads at or above this size go to the append-only pack sidecar instead of the sqlite btree.
 pub const PACK_MIN_BYTES: usize = 4096;
 /// Row-format tags (first byte of `payloads.value`). Rows written before the
 /// pack existed carry neither tag and are treated as legacy inline bytes.
 pub const PAYLOAD_TAG_INLINE: u8 = 0x01;
 pub const PAYLOAD_TAG_PACKED: u8 = 0x00;
 
-/// Append-only blob sidecar. Locators live in SQLite; bytes live here.
-/// Durable stores call `PackFile::sync_all` (via `path::full_sync_file`)
-/// before the SQLite row that points at the new extent is committed, so a
-/// crash cannot leave a locator at
-/// short/zeroed bytes. An orphaned pack tail (append without a committed
-/// locator) is harmless garbage. Deleted payloads leave holes; generation
-/// compaction reclaims them.
+/// Append-only blob sidecar. Locators live in SQLite; bytes live here. Durable stores call
+/// `PackFile::sync_all` (via `path::full_sync_file`) before the SQLite row that points at the new
+/// extent is committed, so a crash cannot leave a locator at short/zeroed bytes.
 pub struct PackFile {
     file: std::fs::File,
     pub len: u64,
@@ -66,15 +57,9 @@ impl PackFile {
         )
     }
 
-    /// Take exclusive pack flock (blocking).
-    ///
-    /// **Policy (fszero-pack-lock-unbounded-qgpd):** blocking forever is intentional.
-    /// Multi-process durable writers serialize pack appends/rotations on this lock
-    /// while already holding SQLite write order (SQLite → pack). A try_lock +
-    /// deadline would force callers to invent a second busy class next to store
-    /// busy_timeout; the pack generation must not tear mid-append. Wait cost is
-    /// available via `runtime_metrics::lock_wait_snapshot` (wall of `File::lock`, including
-    /// uncontended acquires so dual-writer off-CPU wait is visible as elevated us).
+    /// Take exclusive pack flock (blocking). **Policy:** blocking forever is intentional. Multi-process
+    /// durable writers serialize pack appends/rotations on this lock while already holding SQLite write
+    /// order (SQLite → pack).
     pub fn lock_exclusive(&self) -> Result<(), String> {
         let t0 = Instant::now();
         std::fs::File::lock(&self.file).map_err(|e| format!("pack lock failed: {e}"))?;
@@ -111,11 +96,8 @@ impl PackFile {
         appended
     }
 
-    /// Durability barrier: pack bytes + metadata must hit stable storage
-    /// before any SQLite locator that references them is committed.
-    /// Uses [`crate::path::full_sync_file`] (`sync_all` + macOS
-    /// `F_FULLFSYNC`) so the barrier matches the absolute-durable class
-    /// marketed in `docs/durability.md`. `sync_data` alone is insufficient.
+    /// Durability barrier: pack bytes + metadata must hit stable storage before any SQLite locator that
+    /// references them is committed.
     pub fn sync_all(&mut self) -> Result<(), String> {
         crate::path::full_sync_file(&self.file).map_err(|e| format!("pack sync_all failed: {e}"))
     }
@@ -189,7 +171,7 @@ pub fn pack_path_for_db(db_path: &Path) -> std::path::PathBuf {
     std::path::PathBuf::from(os)
 }
 
-/// Pack GC (fszero-qzt): compaction writes a NEW pack generation and
+/// Pack GC: compaction writes a NEW pack generation and
 /// switches to it atomically inside the locator-update txn (meta key
 /// `pack_gen`). Gen 0 is the legacy unsuffixed file.
 pub fn pack_gen_path(db_path: &Path, generation: i64) -> std::path::PathBuf {

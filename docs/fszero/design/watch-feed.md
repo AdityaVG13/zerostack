@@ -1,14 +1,10 @@
-# Watch change feed v1 (fszero-lau)
+# Watch change feed
 
-The subscribable, replayable change feed sibling engines key off (graphzero
-incremental graph updates, cachezero invalidation). Producer:
-`publish_watch_feed` in `src/core/watch.rs`, emitted at the end of every
-watch drain that applied at least one change.
+FSZero publishes a bounded, replayable change feed after a watch drain applies at least one real index change. ZeroStack may use the feed to repair derived structure and caches without making one engine import another.
 
-## Contract (v1)
+## Contract
 
-Store key `watch/feed` (expand it like any recovery key; in a unified
-`.zerostack` store layout, sibling engines read the same store):
+The feed is stored under `watch/feed`:
 
 ```json
 {
@@ -21,19 +17,13 @@ Store key `watch/feed` (expand it like any recovery key; in a unified
 }
 ```
 
-- `seq` is strictly monotonic, persisted, and survives session restarts
-  (resumed from the stored `last_seq`).
-- `kind`: `changed` (created or modified -- consumers re-read the file) |
-  `removed` (also covers moved-away; a rename is removed+changed pairs).
-- `generation`: the index generation the event was applied under.
-- Ring of the newest 1024 events. Snapshot+catchup semantics: a consumer
-  stores its cursor (last consumed seq); if cursor >= events[0].seq it
-  replays the tail; if its cursor is OLDER than the ring head it must full
-  resync (walk the tree / re-derive) -- the feed says so via the gap.
-- Ordering within one drain: all `changed` before all `removed`, each
-  alphabetical; cross-drain ordering is drain order.
-- Only real index changes are published: coalesced no-op events (same
-  (mtime,len) sig) never appear.
+- `seq` is strictly monotonic, persisted, and resumes from `last_seq` after restart.
+- `changed` covers creation and modification. Consumers re-read the file.
+- `removed` also covers a path moved away. A rename appears as one removal and one change.
+- `generation` identifies the file-index generation that accepted the event.
+- The feed retains the newest 1,024 events.
+- A consumer replays events after its stored sequence. If its sequence predates the retained ring, it performs a full rescan.
+- Within one drain, changed paths precede removed paths and each group is sorted. Drains retain arrival order.
+- Coalesced no-op events do not appear.
 
-Verified by `watch_feed_is_ordered_replayable_and_persistent` in
-tests/watch_mode.rs.
+The feed is domain state, not a model-facing API. ZeroKernel exposes fresh structural results through `z.find` after ZeroStack settles the required repair.

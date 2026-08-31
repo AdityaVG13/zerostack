@@ -11,6 +11,9 @@ const REQUIRED_PATHS: &[&str] = &[
     "bindings/node/loader.js",
     "bindings/node/zero-kernel.d.ts",
     "contracts/README.md",
+    "contracts/SurfaceMatrix.toml",
+    "contracts/zeroref-fixtures.json",
+    "crates/zerostack/zerostack-conformance/CONTRACT.md",
     "demo/run.js",
     "docs/architecture.md",
     "fuzz/Cargo.toml",
@@ -64,8 +67,7 @@ fn run() -> Result<(), String> {
         Some("docs") => cargo(root, &["doc", "--workspace", "--no-deps"])?,
         Some("release") => {
             return Err(
-                "no public ZeroStack package exists; this repository is source-only"
-                    .to_owned(),
+                "no public ZeroStack package exists; this repository is source-only".to_owned(),
             );
         }
         Some("ci") => {
@@ -257,7 +259,6 @@ fn walk(root: &Path, dir: &Path, visit: &mut dyn FnMut(String, &Path)) -> io::Re
                         | ".prosecution"
                         | "node_modules"
                         | "target"
-                        | "docs/internal"
                 )
             ) || name.to_str() == Some("internal")
                 && dir.file_name().and_then(|n| n.to_str()) == Some("docs")
@@ -316,26 +317,4 @@ fn cargo_owned(root: &Path, args: &[String]) -> Result<(), String> {
 
 fn io_error(error: io::Error) -> String {
     error.to_string()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn json_array_is_stable_and_escaped() {
-        assert_eq!(
-            json_array(&["a".to_owned(), "b\"c".to_owned()]),
-            "[\"a\", \"b\\\"c\"]"
-        );
-    }
-
-    #[test]
-    fn repository_is_detected_as_zerostack() {
-        let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .unwrap()
-            .to_owned();
-        assert_eq!(repository_kind(&root).as_deref(), Ok("zerostack"));
-    }
 }

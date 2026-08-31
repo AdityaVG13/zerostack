@@ -265,13 +265,13 @@ pub(super) fn empty_capsule(query: &str, snapshot: &Snapshot) -> Capsule {
 /// Byte cap for hit snippets; matched lines plus one context line each side.
 const SNIPPET_MAX_BYTES: usize = 240;
 
-/// A-RAG snippet rule: hits carry only the matched line(s) plus ~1 line of
+/// Snippet rule: hits carry only the matched lines plus about one line of
 /// context; the full payload stays behind `evidence_ref`. Whole-blob refs
-/// (#B0-0, path hits) return an empty snippet — the label is the match.
+/// (path hits) return an empty snippet — the label is the match.
 fn snippet_for_evidence_ref(snapshot: &Snapshot, evidence_ref: &str) -> String {
     use super::skeleton::byte_span_to_lines;
 
-    let Some(rest) = evidence_ref.strip_prefix("gz://blob/") else {
+    let Some(rest) = evidence_ref.strip_prefix("z://blob/") else {
         return String::new();
     };
     let (hash_hex, span) = rest.split_once("#B").unwrap_or((rest, "0-0"));
@@ -314,7 +314,7 @@ fn snippet_for_evidence_ref(snapshot: &Snapshot, evidence_ref: &str) -> String {
 }
 
 fn content_sha256_for_evidence_ref(snapshot: &Snapshot, evidence_ref: &str) -> Option<String> {
-    let rest = evidence_ref.strip_prefix("gz://blob/")?;
+    let rest = evidence_ref.strip_prefix("z://blob/")?;
     let (hash_hex, span) = rest.split_once("#B").unwrap_or((rest, "0-0"));
     let (start, end) = span.split_once('-').unwrap_or(("0", "0"));
     let start = start.parse::<usize>().ok()?;
@@ -417,7 +417,7 @@ fn push_search_hit(
     evidence_ref: String,
 ) -> Result<(), QuerySurfaceError> {
     // Soft-skip unresolvable evidence: empty search results must not become
-    // EVIDENCE_MISSING (agent-ergo R-015). Corrupt individual spans drop out.
+    // Corrupt individual spans drop out as `EVIDENCE_MISSING`.
     if evidence_ref.is_empty() {
         return Ok(());
     }
@@ -538,7 +538,7 @@ fn path_search_hits(
         if !rec.path.contains(needle) {
             continue;
         }
-        let evidence_ref = format!("gz://blob/{hash_hex}#B0-0");
+        let evidence_ref = format!("z://blob/{hash_hex}#B0-0");
         push_search_hit(snapshot, hits, seen, rec.path.clone(), evidence_ref)?;
     }
     Ok(())

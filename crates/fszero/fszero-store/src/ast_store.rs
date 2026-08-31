@@ -1,14 +1,4 @@
-//! AST persistence sidecar on real SQLite (rusqlite).
-//!
-//! ast_nodes / call_edges used to live in the fsqlite recovery store.
-//! Profiled at 10k files (fszero-v5n / fszero-1zi): fsqlite's btree insert
-//! path (balance_for_insert, GatheredCell churn) made AST persistence 65%
-//! of a cold index, and its CREATE INDEX backfill cost another ~5s, capping
-//! cold indexing far above the 100k-under-5s northstar. Real SQLite
-//! bulk-inserts the same row volume inside one transaction in tens of
-//! milliseconds. The recovery store keeps everything durable-critical
-//! (payloads, refs, mutation journal); this sidecar holds only rebuildable
-//! index rows — losing it costs one cold rebuild, never data.
+//! SQLite persistence for AST nodes and call edges.
 
 use rusqlite::{Connection, params};
 use std::collections::HashSet;
@@ -60,14 +50,6 @@ pub struct AstSpanDiffStats {
     pub kept: u64,
     pub deleted: u64,
     pub inserted: u64,
-}
-
-impl AstSpanDiffStats {
-    /// Total DELETE+INSERT statements issued (excludes kept rows).
-    #[cfg_attr(not(test), allow(dead_code))]
-    pub fn writes(self) -> u64 {
-        self.deleted.saturating_add(self.inserted)
-    }
 }
 
 fn init_schema(conn: &Connection) {

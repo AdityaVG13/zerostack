@@ -3,11 +3,13 @@ name = "graphzero-coverage"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+publish = false
+description = "Coverage and freshness certification for GraphZero structural evidence"
 autotests = false
 
 [dependencies]
 zero-abi.workspace = true
-graphzero-store = { workspace = true, features = ["tokenzero"] }
+graphzero-store = { workspace = true }
 graphzero-extract = { workspace = true }
 sha2 = { workspace = true }
 

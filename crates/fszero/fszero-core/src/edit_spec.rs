@@ -50,13 +50,18 @@ fn split_escaped_pipe(s: &str) -> Option<(String, &str)> {
 }
 
 pub fn parse_edit_spec(spec: &str) -> Result<EditSpec, &'static str> {
-    let parts: Vec<&str> = spec.splitn(2, ':').collect();
-    if parts.len() != 2 {
-        return Err("bad spec");
+    if spec.starts_with("fz://") || spec.starts_with("gz://") || spec.starts_with("tz://") {
+        return Err("retired product scheme; live content refs are z://blob/ or unprefixed keys");
     }
-    let (old, new) = split_escaped_pipe(parts[1]).ok_or("bad repl")?;
-    let first = parts[0];
-    let target = if first.starts_with("fz://") {
+    let (first, repl) = if let Some(rest) = spec.strip_prefix("z://") {
+        let idx = rest.find(':').ok_or("bad spec")?;
+        (&spec[..5 + idx], &rest[idx + 1..])
+    } else {
+        let idx = spec.find(':').ok_or("bad spec")?;
+        (&spec[..idx], &spec[idx + 1..])
+    };
+    let (old, new) = split_escaped_pipe(repl).ok_or("bad repl")?;
+    let target = if first.starts_with("z://") {
         EditTarget::ContentRef(first.to_string())
     } else if first == "last" || first == "lastR" {
         EditTarget::LastView

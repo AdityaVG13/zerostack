@@ -1,28 +1,4 @@
-//! Canonical ZeroRef v1 content-addressed store (docs/adr/002-zeroref-v1.md §7).
-//!
-//! Layout, publish protocol, size policy, and layout constants are owned by
-//! the canonical hub crate `zero_store` (pinned at
-//! `bd721f7fc4866b24dec0c552da3d96bd8d816fbc`); GraphZero no longer duplicates
-//! that authority. This module keeps only:
-//! - the GraphZero [`SharedCas`] handle: a thin wrapper over
-//!   `zero_store::SharedCas` preserving the local API, the `ExternalStore`
-//!   adapter, and GraphZero's `ExternalResolveError` taxonomy;
-//! - the batch-durability extension `put_nosync` / `put_nosync_prehashed`
-//!   (no per-object fsync; pending paths are drained by
-//!   `BlobStore::sync_all`).
-//!
-//! Layout: `<cas_root>/blobs/sha256/<first-two-hex>/<64-lowercase-hex>`,
-//! immutable complete objects only. Graph facts, indexes, provenance, and
-//! mutable metadata never live in this namespace. A project-local root is the
-//! default; a user/team-shared root requires explicit configuration
-//! (`GRAPHZERO_SHARED_STORE`/`ZEROSTACK_SHARED_STORE` truthy plus
-//! `ZEROSTACK_STORE_ROOT`), and even then only blob bytes are shared — facts
-//! stay project-keyed per `store::zerostack_store`.
-//!
-//! Resolution precedence is deterministic (see `ExpandResolver::resolve_blob`):
-//! legacy local `BlobStore` → git OID → project-local CAS → shared CAS
-//! (opt-in) → other externals → ref-index. Corruption at any tier is terminal
-//! and never falls through.
+//! Canonical content-addressed storage for GraphZero blob references.
 
 use std::fs;
 use std::io::Write;
@@ -33,10 +9,8 @@ use super::expand::{BlobRequest, ExternalResolveError, ExternalStore};
 use graphzero_types::ContentHash;
 use zero_store::SharedCas as ZeroSharedCas;
 
-/// Canonical layout template, layout version, size policy, and temp-reap age,
-/// re-exported from the pinned `zero_store` crate so capability output and
-/// runtime behavior cannot drift from the hub contract (each value is pinned
-/// by `zero_store`'s own tests).
+/// Re-exports the canonical layout, version, size limit, and temporary-file age
+/// from `zero_store` so advertised capabilities match runtime behavior.
 pub use zero_store::{CAS_LAYOUT, CAS_LAYOUT_VERSION, CAS_MAX_OBJECT_BYTES, CAS_TEMP_REAP_AGE};
 
 const TEMP_PREFIX: &str = ".tmp-";
@@ -96,8 +70,7 @@ impl SharedCas {
 
     /// Publish complete bytes at their canonical path and return the full
     /// identity. Delegated to the canonical publish protocol: dedup,
-    /// corruption-is-loud, shared store-coordination lock, fsync + directory
-    /// sync.
+    /// corruption-is-loud, shared store-coordination lock, fsync + directory sync.
     pub fn put(&self, bytes: &[u8]) -> Result<String, ExternalResolveError> {
         self.inner.put(bytes).map_err(cas_err)
     }
@@ -133,9 +106,8 @@ impl SharedCas {
         self.put_nosync_prehashed(ContentHash::of(bytes), bytes)
     }
 
-    /// Like [`Self::put_nosync`] with a caller-supplied digest. The digest is
-    /// **not** re-derived here (caller pre-verified identity, graphzero-qf9y5);
-    /// full verification stays on the `get_verified` read path.
+    /// Like [`Self::put_nosync`] with a caller-supplied, preverified digest.
+    /// This path does not rederive the digest; `get_verified` verifies reads.
     pub fn put_nosync_prehashed(
         &self,
         hash: ContentHash,
@@ -150,11 +122,9 @@ impl SharedCas {
         let hash_hex = hash.to_hex();
         let dest = self.object_path(&hash_hex);
 
-        // Same publish-side coordination as the canonical protocol, acquired
-        // BEFORE the existence check and held through publish: a concurrent
-        // sweeper cannot unlink between publish and reference. Fail closed —
-        // a wedged holder surfaces as a typed error rather than an
-        // uncoordinated write.
+        // Same publish-side coordination as the canonical protocol, acquired BEFORE the existence
+        // check and held through publish: a concurrent sweeper cannot unlink between publish and
+        // reference. Fail closed a wedged holder surfaces as a typed error rather than an uncoordinated write.
         let _publish_guard = self.inner.lock_for_publish().map_err(cas_err)?;
 
         if let Some(existing_hash) = self.try_reuse_existing(&dest, &hash_hex, bytes)? {
@@ -172,11 +142,11 @@ impl SharedCas {
             .open(&tmp)
             .map_err(|e| io_err("create temp object", e))?;
         if let Err(e) = self.publish_temp_object(&mut file, bytes, &tmp, &dest, &hash_hex) {
-            // The temp is ours (create_new succeeded), so removal races no one.
+            // create_new grants exclusive ownership, so removal cannot race another writer.
             let _ = fs::remove_file(&tmp);
             return Err(e);
         }
-        // Converged-on-existing leaves our temp behind; clean it up.
+        // Remove the losing writer's temporary file after convergence.
         let _ = fs::remove_file(&tmp);
         Ok((hash_hex, Some(dest)))
     }
@@ -209,10 +179,9 @@ impl SharedCas {
                         meta.len()
                     )));
                 }
-                // Put-path reuse: size + regular-file check only. Full
-                // `read_verified_at` re-read+rehash stays on get (qf9y5).
-                // CAS objects are immutable once published; length mismatch
-                // is treated as corruption, not silent overwrite.
+                // Put-path reuse: size + regular-file check only. Full `read_verified_at`
+                // re-read+rehash stays on get (qf9y5). CAS objects are immutable once
+                // published; length mismatch is treated as corruption, not silent overwrite.
                 if meta.len() != bytes.len() as u64 {
                     return Err(ExternalResolveError::DigestMismatch {
                         expected: hash.to_string(),
@@ -228,7 +197,7 @@ impl SharedCas {
 
     fn ensure_object_dirs(&self, parent: &Path) -> Result<(), ExternalResolveError> {
         fs::create_dir_all(parent).map_err(|e| io_err("create object directory", e))?;
-        // Refuse symlink substitutions on the directories we publish into.
+        // Refuse symlink substitutions in publication directories.
         for level in [parent, parent.parent().expect("sha256 level")] {
             let meta =
                 fs::symlink_metadata(level).map_err(|e| io_err("stat object directory", e))?;
@@ -252,11 +221,9 @@ impl SharedCas {
     ) -> Result<(), ExternalResolveError> {
         file.write_all(bytes)
             .map_err(|e| io_err("write temp object", e))?;
-        // No per-object fsync: the durability barrier is BlobStore::sync_all.
-        // Concurrent identical writers may rename over each other; both
-        // orders leave one valid object with these exact bytes. On Windows,
-        // transient sharing violations are retried with bounded backoff inside
-        // replace_file.
+        // No per-object fsync: the durability barrier is BlobStore::sync_all. Concurrent identical writers
+        // may rename over each other; both orders leave one valid object with these exact bytes. On
+        // Windows, transient sharing violations are retried with bounded backoff inside replace_file.
         if let Err(e) = super::replace_file(tmp, dest) {
             // Destination contention: if a concurrent writer already
             // published a verifying object, converge on it.
@@ -283,9 +250,8 @@ impl ExternalStore for SharedCas {
 /// fan-out directory, and only when older than `max_age`. Best-effort; never
 /// errors, never touches younger files, so it cannot race active writers.
 fn unique_cas_temp(parent: &Path, hash: &str) -> PathBuf {
-    // Unique sibling temp file (pid + process-wide sequence, so
-    // concurrent writers in one process can never collide), then atomic
-    // publish. Only a temp we created ourselves is ever cleaned up.
+    // A PID plus process-wide sequence makes sibling temporary names unique.
+    // Cleanup applies only to temporary files created by this process.
     static TEMP_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     parent.join(format!(
         "{TEMP_PREFIX}{}-{}-{}",

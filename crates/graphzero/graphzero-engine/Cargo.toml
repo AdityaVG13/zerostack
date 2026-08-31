@@ -3,8 +3,14 @@ name = "graphzero-engine"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+publish = false
+description = "GraphZero structural query, impact, and evidence domain library"
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
 autotests = false
 autobins = false
+autoexamples = false
 
 
 [features]
@@ -12,44 +18,27 @@ autobins = false
 default = []
 
 [dependencies]
-blake3.workspace = true
-ast-sgrep-core.workspace = true
-ast-sgrep-lang.workspace = true
 zero-abi = { workspace = true }
-zero-store = { workspace = true }
 anyhow = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-tracing = { workspace = true }
 sha2 = { workspace = true }
-graphzero-store = { workspace = true, features = ["tokenzero"] }
-graphzero-core = { path = "../graphzero-core" }
+graphzero-store = { workspace = true }
+graphzero-core = { workspace = true }
 graphzero-types = { workspace = true }
-libc = "0.2"
-graphzero-coverage = { path = "../graphzero-coverage" }
+graphzero-coverage = { workspace = true }
 graphzero-reserve = { workspace = true }
-rayon = "1.12"
+rayon = { workspace = true }
+tracing = { workspace = true }
 
 [dev-dependencies]
-graphzero-test-support = { workspace = true }
 tempfile = { workspace = true }
 criterion = { workspace = true }
 proptest = { workspace = true }
-git2 = { workspace = true }
-sha2 = { workspace = true }
-serial_test = { workspace = true }
+zerostack-test-support = { workspace = true, features = ["graph"] }
 
 [[bench]]
 name = "query_surface"
-harness = false
-
-[[bin]]
-name = "gz-surface-bench-worker"
-path = "src/bin/gz_surface_bench_worker.rs"
-
-
-[[bench]]
-name = "codemode"
 harness = false
 
 [lints]
@@ -57,27 +46,5 @@ workspace = true
 
 [[test]]
 name = "query_blast_proptest"
-path = "../../../tests/graphzero/engine/blast_proptest.rs"
+path = "../../../tests/graphzero/query_blast_proptest.rs"
 
-[[test]]
-name = "query_conformance_corpus"
-path = "../../../tests/graphzero/engine/conformance_corpus.rs"
-
-[[test]]
-name = "query_operation_abi_contract"
-path = "../../../tests/graphzero/engine/operation_abi_contract.rs"
-
-[[test]]
-name = "query_perf_profile_contract"
-path = "../../../tests/graphzero/engine/perf_profile_contract.rs"
-
-[[test]]
-name = "zero_kernel_scoped"
-path = "../../../tests/graphzero/engine/zero_kernel_scoped.rs"
-
-[[test]]
-name = "zero_kernel_cpu_bound"
-path = "../../../tests/graphzero/engine/zero_kernel_cpu_bound.rs"
-[[test]]
-name = "zero_kernel_task_lens"
-path = "../../../tests/graphzero/engine/zero_kernel_task_lens.rs"

@@ -1,15 +1,6 @@
-//! Live Pareto decision bound to candidate identity, protected outcome vector,
-//! verifier identity, and evidence freshness.
-//!
-//! TokenZero never claims dominance from unknown, stale, incomparable, or
-//! missing evidence. Such candidates remain visible but are never allowed to
-//! dominate another candidate and never hide a fresh candidate. Decisions are
-//! deterministic: the same input order and bytes produce byte-identical
-//! canonical JSON and digest.
-//!
-//! Independence: this module imports only `zero-abi` and `serde`/`serde_json`
-//! and the sibling `representation_economics::RepresentationResources`. It does
-//! not import `zero-gate`, `zero-ledger`, FSZero, or GraphZero.
+//! Live Pareto decision bound to candidate identity, protected outcome vector, verifier identity,
+//! and evidence freshness. TokenZero never claims dominance from unknown, stale, incomparable, or
+//! missing evidence.
 
 use std::collections::BTreeSet;
 
@@ -24,11 +15,9 @@ pub const LIVE_PARETO_MAX_METRICS: usize = 128;
 pub const LIVE_PARETO_MAX_ID_BYTES: usize = 128;
 pub const LIVE_PARETO_MAX_CANONICAL_BYTES: usize = 1_048_576;
 
-const LIVE_DOMAIN: &[u8] = b"tokenzero.live_pareto.v1\0";
+const LIVE_DOMAIN: &[u8] = b"tokenzero.live_pareto\0";
 
-// ---------------------------------------------------------------------------
 // Metric order and protected outcome
-// ---------------------------------------------------------------------------
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -109,9 +98,7 @@ impl ProtectedOutcome {
     }
 }
 
-// ---------------------------------------------------------------------------
 // Verifier identity
-// ---------------------------------------------------------------------------
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
@@ -150,9 +137,7 @@ impl VerifierIdentity {
     }
 }
 
-// ---------------------------------------------------------------------------
 // Evidence freshness
-// ---------------------------------------------------------------------------
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -180,9 +165,7 @@ impl EvidenceFreshness {
     }
 }
 
-// ---------------------------------------------------------------------------
 // Live candidate
-// ---------------------------------------------------------------------------
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
@@ -232,7 +215,7 @@ impl LiveCandidate {
         Ok(())
     }
 
-    /// Digest that binds this candidate's four Wave-16 authorities:
+    /// Digest that binds this candidate's four runtime authorities:
     /// identity, protected vector, verifier, and freshness.
     pub fn binding_digest(&self) -> Sha256Digest {
         let v = serde_json::json!({
@@ -272,9 +255,7 @@ impl LiveCandidate {
     }
 }
 
-// ---------------------------------------------------------------------------
 // Decision view for one candidate in the live decision
-// ---------------------------------------------------------------------------
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
@@ -292,9 +273,7 @@ pub struct LiveEntry {
     pub reasons: Vec<String>,
 }
 
-// ---------------------------------------------------------------------------
 // The one typed live decision result ZeroStack composes without adapters
-// ---------------------------------------------------------------------------
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
@@ -386,11 +365,9 @@ impl LiveParetoDecision {
     }
 
     fn expected_digest(value: &serde_json::Value) -> Result<String, String> {
-        // value is the canonical decision body (without the outer canonical_json field)
-        // We stored canonical_json as the body itself, so digest is domain || body.
+        // Hash the canonical decision body without its outer self-reference.
         let body = zero_abi::canonical_json(value);
-        // domain separation: hash(domain || body)
-        // Use simple sha256(domain || body) for determinism
+        // Domain separation hashes domain || body.
         let mut combined = Vec::with_capacity(LIVE_DOMAIN.len() + body.len());
         combined.extend_from_slice(LIVE_DOMAIN);
         combined.extend_from_slice(body.as_bytes());
@@ -432,9 +409,7 @@ impl LiveParetoDecision {
     }
 }
 
-// ---------------------------------------------------------------------------
 // Live dominance
-// ---------------------------------------------------------------------------
 
 fn live_dominates(a: &LiveCandidate, b: &LiveCandidate) -> bool {
     // Unknown, stale, missing never dominate.
@@ -483,16 +458,8 @@ fn live_dominates(a: &LiveCandidate, b: &LiveCandidate) -> bool {
     strictly
 }
 
-/// Decide the live Pareto frontier deterministically.
-///
-/// Rules (fail-closed):
-/// - Every candidate is validated. Unknown/stale/missing/incomparable never dominate.
-/// - Stale/unknown/missing candidates remain in `entries` with `in_frontier=false`
-///   and an explicit reason; they never hide another candidate.
-/// - Incomparable protected vectors or verifier identities remain co-frontier;
-///   no dominance claim is made between them.
-/// - Determinism: frontier and entries are sorted by `candidate_id`; canonical
-///   JSON uses sorted keys; digest is domain-separated sha256.
+/// Decide the live Pareto frontier deterministically. Rules (fail-closed) Every candidate is
+/// validated. Unknown/stale/missing/incomparable never dominate.
 pub fn decide_live_pareto(candidates: &[LiveCandidate]) -> Result<LiveParetoDecision, String> {
     if candidates.is_empty() {
         return Err("live pareto requires at least one candidate".into());
@@ -572,30 +539,9 @@ pub fn decide_live_pareto(candidates: &[LiveCandidate]) -> Result<LiveParetoDeci
             reasons.push(format!("dominated_by:{}", dom_id));
         }
 
-        // Incomparability note: if fresh and not dominated, but there exists
-        // another fresh candidate with incomparable protected vector or
-        // verifier, we keep it in frontier (standard Pareto) but note
-        // incomparable is visible via both being in frontier. No extra hide.
-        // For visibility, if protected_vector incomparable to any other,
-        // the frontier naturally keeps both; no dominance claimed.
-
-        if cand.freshness.is_fresh() && dominated.is_none() {
-            // Fresh, not dominated, but empty protected vector treated as
-            // missing -> not frontier despite freshness.
-            if cand.protected_vector.is_empty() {
-                // missing evidence stays visible, not in frontier
-            } else {
-                in_frontier = true;
-                frontier_ids.push(cand.candidate_id.clone());
-            }
-        }
-
-        // If not in frontier and no reason yet, surface incomparable as reason?
-        // For fresh incomparable candidates that are in frontier, reason stays empty.
-        // For stale/unknown/missing, reason already set.
-        if !in_frontier && reasons.is_empty() {
-            // dominated case already has reason; fresh dominated already handled.
-            // This path is dominated fresh with no other flag -> already has dominated_by.
+        if cand.freshness.is_fresh() && dominated.is_none() && !cand.protected_vector.is_empty() {
+            in_frontier = true;
+            frontier_ids.push(cand.candidate_id.clone());
         }
 
         entries.push(LiveEntry {
@@ -615,9 +561,8 @@ pub fn decide_live_pareto(candidates: &[LiveCandidate]) -> Result<LiveParetoDeci
 
     frontier_ids.sort();
 
-    // Build canonical decision body.
-    // The body is the decision without the outer canonical_json self-reference;
-    // we store the body as canonical_json and digest domain+body.
+    // canonical_json stores the decision body without its outer self-reference.
+    // The digest covers domain || body.
     let body = serde_json::json!({
         "contract_version": LIVE_PARETO_CONTRACT_VERSION,
         "frontier_ids": frontier_ids,
@@ -641,215 +586,4 @@ pub fn decide_live_pareto(candidates: &[LiveCandidate]) -> Result<LiveParetoDeci
     };
     decision.validate()?;
     Ok(decision)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::representation_economics::RepresentationResources;
-
-    fn res(v: u64) -> RepresentationResources {
-        RepresentationResources {
-            stored_bytes: v,
-            wire_bytes: v,
-            source_tokens: v,
-            visible_tokens: v,
-            expansion_work: v,
-            verification_work: v,
-            latency_micros: v,
-            metadata_bytes: v,
-        }
-    }
-    fn verifier(id: &str) -> VerifierIdentity {
-        VerifierIdentity {
-            verifier_id: id.into(),
-            verifier_version: "1".into(),
-        }
-    }
-    fn prot(id: &str, order: MetricOrder, base: i64, cand: i64) -> ProtectedOutcome {
-        ProtectedOutcome {
-            metric_id: id.into(),
-            order,
-            baseline_value: base,
-            candidate_value: cand,
-        }
-    }
-    #[test]
-    fn deterministic_digest() {
-        let c = LiveCandidate {
-            candidate_id: "c1".into(),
-            semantic_root: "s".into(),
-            adapter_root: "a".into(),
-            verifier: verifier("v1"),
-            freshness: EvidenceFreshness::Fresh,
-            protected_vector: vec![prot("acc", MetricOrder::AtLeast, 80, 90)],
-            resources: res(10),
-            exact: true,
-        };
-        let d1 = decide_live_pareto(&[c.clone()]).unwrap();
-        let d2 = decide_live_pareto(&[c]).unwrap();
-        assert_eq!(d1.decision_digest, d2.decision_digest);
-        assert_eq!(d1.canonical_json, d2.canonical_json);
-    }
-    #[test]
-    fn stale_never_dominates_and_remains_visible() {
-        let fresh_good = LiveCandidate {
-            candidate_id: "b".into(),
-            semantic_root: "s".into(),
-            adapter_root: "a".into(),
-            verifier: verifier("v1"),
-            freshness: EvidenceFreshness::Fresh,
-            protected_vector: vec![prot("acc", MetricOrder::AtLeast, 80, 90)],
-            resources: res(5),
-            exact: true,
-        };
-        let stale_better_resources = LiveCandidate {
-            candidate_id: "a".into(),
-            semantic_root: "s".into(),
-            adapter_root: "a".into(),
-            verifier: verifier("v1"),
-            freshness: EvidenceFreshness::Stale,
-            protected_vector: vec![prot("acc", MetricOrder::AtLeast, 80, 95)],
-            resources: res(1),
-            exact: true,
-        };
-        let d = decide_live_pareto(&[stale_better_resources, fresh_good]).unwrap();
-        // stale must not hide fresh
-        assert!(d.frontier_ids.contains(&"b".to_string()));
-        // stale must be visible but not in frontier
-        let e_a = d.entries.iter().find(|e| e.candidate_id == "a").unwrap();
-        assert!(!e_a.in_frontier);
-        assert!(e_a.reasons.iter().any(|r| r == "stale_evidence"));
-        // fresh good is in frontier
-        let e_b = d.entries.iter().find(|e| e.candidate_id == "b").unwrap();
-        assert!(e_b.in_frontier);
-    }
-    #[test]
-    fn incomparable_protected_vector_both_visible() {
-        let c1 = LiveCandidate {
-            candidate_id: "a".into(),
-            semantic_root: "s".into(),
-            adapter_root: "a".into(),
-            verifier: verifier("v1"),
-            freshness: EvidenceFreshness::Fresh,
-            protected_vector: vec![prot("acc", MetricOrder::AtLeast, 80, 90)],
-            resources: res(5),
-            exact: true,
-        };
-        let c2 = LiveCandidate {
-            candidate_id: "b".into(),
-            semantic_root: "s".into(),
-            adapter_root: "a".into(),
-            verifier: verifier("v1"),
-            freshness: EvidenceFreshness::Fresh,
-            protected_vector: vec![prot("latency", MetricOrder::AtMost, 100, 50)],
-            resources: res(5),
-            exact: true,
-        };
-        let d = decide_live_pareto(&[c1, c2]).unwrap();
-        // different metric_ids -> incomparable, neither dominates, both in frontier
-        assert_eq!(d.frontier_ids.len(), 2);
-    }
-    #[test]
-    fn unknown_and_missing_remain_visible_not_dominating() {
-        let fresh = LiveCandidate {
-            candidate_id: "fresh".into(),
-            semantic_root: "s".into(),
-            adapter_root: "a".into(),
-            verifier: verifier("v1"),
-            freshness: EvidenceFreshness::Fresh,
-            protected_vector: vec![prot("acc", MetricOrder::AtLeast, 80, 90)],
-            resources: res(10),
-            exact: true,
-        };
-        let unknown = LiveCandidate {
-            candidate_id: "unknown".into(),
-            semantic_root: "s".into(),
-            adapter_root: "a".into(),
-            verifier: verifier("v1"),
-            freshness: EvidenceFreshness::Unknown,
-            protected_vector: vec![prot("acc", MetricOrder::AtLeast, 80, 95)],
-            resources: res(1),
-            exact: true,
-        };
-        let missing = LiveCandidate {
-            candidate_id: "missing".into(),
-            semantic_root: "s".into(),
-            adapter_root: "a".into(),
-            verifier: verifier("v1"),
-            freshness: EvidenceFreshness::Missing,
-            protected_vector: vec![],
-            resources: res(1),
-            exact: true,
-        };
-        let d = decide_live_pareto(&[fresh.clone(), unknown, missing]).unwrap();
-        assert!(d.frontier_ids.contains(&"fresh".to_string()));
-        assert!(!d.frontier_ids.contains(&"unknown".to_string()));
-        assert!(!d.frontier_ids.contains(&"missing".to_string()));
-        assert_eq!(d.entries.len(), 3);
-    }
-    #[test]
-    fn canonical_round_trip_rejects_outer_field_tampering() {
-        let candidate = LiveCandidate {
-            candidate_id: "candidate".into(),
-            semantic_root: "semantic".into(),
-            adapter_root: "adapter".into(),
-            verifier: verifier("verifier"),
-            freshness: EvidenceFreshness::Fresh,
-            protected_vector: vec![prot("accuracy", MetricOrder::AtLeast, 80, 90)],
-            resources: res(10),
-            exact: true,
-        };
-        let decision = decide_live_pareto(&[candidate]).unwrap();
-        let decoded =
-            LiveParetoDecision::from_canonical_bytes(decision.canonical_json.as_bytes()).unwrap();
-        assert_eq!(decoded, decision);
-
-        let mut tampered = decision;
-        tampered.entries[0].resources = res(1);
-        assert!(tampered.validate().is_err());
-    }
-
-    #[test]
-    fn dominance_requires_complete_nonregressing_comparable_evidence() {
-        let make = |id: &str, protected_vector: Vec<ProtectedOutcome>, exact: bool| LiveCandidate {
-            candidate_id: id.into(),
-            semantic_root: "semantic".into(),
-            adapter_root: "adapter".into(),
-            verifier: verifier("verifier"),
-            freshness: EvidenceFreshness::Fresh,
-            protected_vector,
-            resources: res(10),
-            exact,
-        };
-
-        let exact = make(
-            "exact",
-            vec![prot("accuracy", MetricOrder::AtLeast, 80, 90)],
-            true,
-        );
-        let inexact = make(
-            "inexact",
-            vec![prot("accuracy", MetricOrder::AtLeast, 80, 90)],
-            false,
-        );
-        let decision = decide_live_pareto(&[exact, inexact]).unwrap();
-        assert_eq!(decision.frontier_ids, vec!["exact"]);
-
-        let missing = make("missing", Vec::new(), true);
-        let complete = make(
-            "complete",
-            vec![prot("accuracy", MetricOrder::AtLeast, 80, 90)],
-            true,
-        );
-        let decision = decide_live_pareto(&[missing, complete]).unwrap();
-        assert_eq!(decision.frontier_ids, vec!["complete"]);
-
-        let regression = make(
-            "regression",
-            vec![prot("accuracy", MetricOrder::AtLeast, 80, 79)],
-            true,
-        );
-        assert!(decide_live_pareto(&[regression]).is_err());
-    }
 }

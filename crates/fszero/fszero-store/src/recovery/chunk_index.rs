@@ -71,7 +71,7 @@ impl RecoveryStore {
                     .digest
                     .bytes()
                     .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
-                || chunk.content_ref != format!("fz://blob/{}", chunk.digest)
+                || chunk.content_ref != format!("z://blob/{}", chunk.digest)
             {
                 return Err("chunk manifest invariant violation".to_string());
             }

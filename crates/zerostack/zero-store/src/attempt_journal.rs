@@ -1,60 +1,5 @@
-//! Durable per-effect attempt journal with an explicit dispatch boundary.
-//!
-//! One attempt journal tracks a single effect attempt across admission,
-//! dispatch, and terminal outcome. It is deliberately separate from
-//! [crate::durable_journal], which journals multi-record publication
-//! transactions: attempts are admitted, crossed, and resolved one at a time,
-//! and the recovery law is stricter.
-//!
-//! State machine (every edge is a persisted entry):
-//!
-//! ```text
-//! Prepared ──dispatch──▶ DispatchCrossed ──▶ Succeeded | Failed | Indeterminate
-//! Prepared ──abort─────▶ Aborted            (explicit user abort only)
-//! Prepared ──retry─────▶ SafeToRetry        (recovery: never dispatched ⇒ safe to retry)
-//! ```
-//!
-//! The caller owns the ordering contract:
-//!
-//! 1. `prepare_attempt` persists the write-once Prepared entry.
-//! 2. Effect admission happens only after prepare returns.
-//! 3. `mark_dispatch_crossed` persists the dispatch boundary immediately
-//!    before the effect is dispatched.
-//! 4. The effect runs; the caller persists `mark_succeeded`,
-//!    `mark_failed`, or `mark_indeterminate`, or crashes.
-//!
-//! Entries are immutable: each sequence number is a distinct write-once file
-//! (`attempt-<sequence>.json`) inside the caller-supplied directory, so a
-//! terminal entry can never be replaced. Terminal entries carry canonical
-//! evidence: completion receipts, failure receipts, or an abort reason.
-//! Receipt bodies live in higher layers — zero-gate depends on zero-store, so
-//! this crate cannot name gate receipt types — and the journal binds their
-//! canonical digests, which are authoritative once persisted.
-//!
-//! Recovery law (`recover_attempt`):
-//!
-//! - Succeeded | Failed | Indeterminate | Aborted | SafeToRetry: returned
-//!   unchanged.
-//! - Prepared: classified SafeToRetry — the journal proves the effect never
-//!   ran (dispatch never crossed), so a fresh attempt may be admitted. It is
-//!   never executed and never silently aborted.
-//! - DispatchCrossed: classified Succeeded only when authoritative evidence
-//!   proves completion, Failed only when authoritative evidence proves safe
-//!   rollback, and Indeterminate otherwise.
-//!
-//! Aborted is produced only by an explicit caller abort (`abort_attempt`);
-//! recovery never writes an Aborted entry.
-//!
-//! Recovery never writes a DispatchCrossed entry and no API can redispatch a
-//! recovered journal, so a crash can never cause an effect to run twice
-//! through this journal. Supplied evidence is consulted only when the journal
-//! is DispatchCrossed; for a Prepared or terminal journal the outcome is
-//! already determined and the evidence is ignored.
-//!
-//! Concurrency: one writer per journal. Writes are unique-sibling temp +
-//! fsync + atomic rename + directory fsync through `fs_replace` primitives.
-//! A torn entry can never be observed; a crashed transition leaves either the
-//! old or the new entry, never a mixture.
+//! Durable per-effect attempt journal with an explicit dispatch boundary. One attempt journal
+//! tracks a single effect attempt across admission, dispatch, and terminal outcome.
 
 use std::ffi::OsString;
 use std::fs::{self, File, OpenOptions};
@@ -65,10 +10,11 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use zero_abi::{EffectClass, Sha256Digest, canonical_json, sha256};
+use zero_abi::{
+    DurableProfile, DurableProfileId, EffectClass, Sha256Digest, canonical_json, sha256,
+};
 
 use crate::fs_replace::{replace_file, sync_dir};
-use crate::{DurableProfile, DurableProfileId};
 
 pub const ATTEMPT_JOURNAL_SCHEMA_VERSION: u16 = 1;
 pub const ATTEMPT_BINDING_SCHEMA_VERSION: u16 = 1;
@@ -79,17 +25,6 @@ pub const ATTEMPT_JOURNAL_MAX_ENTRIES: u64 = 8;
 const ATTEMPT_BINDING_DOMAIN: &[u8] = b"zerostack.attempt_journal.binding\0";
 const ATTEMPT_ENTRY_DOMAIN: &[u8] = b"zerostack.attempt_journal.entry\0";
 const ATTEMPT_RECOVERY_DOMAIN: &[u8] = b"zerostack.attempt_journal.recovery\0";
-const LEGACY_ZBF_PROFILE_DOMAIN: &[u8] = b"zerostack.zbf_profile.v1\0";
-const ATTEMPT_BINDING_DOMAIN_V1: &[u8] = b"zerostack.attempt_journal.binding.v1\0";
-const ATTEMPT_ENTRY_DOMAIN_V1: &[u8] = b"zerostack.attempt_journal.entry.v1\0";
-
-fn legacy_profile_digest(profile_id: DurableProfileId) -> Sha256Digest {
-    let bytes = DurableProfile::new(profile_id).canonical_bytes();
-    let mut bound = Vec::with_capacity(LEGACY_ZBF_PROFILE_DOMAIN.len() + bytes.len());
-    bound.extend_from_slice(LEGACY_ZBF_PROFILE_DOMAIN);
-    bound.extend_from_slice(&bytes);
-    Sha256Digest::from_bytes(sha256(&bound))
-}
 static ATTEMPT_TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -337,30 +272,24 @@ impl AttemptBinding {
                 "attempt binding digests must be nonzero",
             ));
         }
-        let current = DurableProfile::new(self.durable_profile_id).digest();
-        let legacy = legacy_profile_digest(self.durable_profile_id);
-        if self.durable_profile_digest != current && self.durable_profile_digest != legacy {
+        let canonical = DurableProfile::new(self.durable_profile_id).digest();
+        if self.durable_profile_digest != canonical {
             return Err(AttemptJournalError::new(
                 AttemptFailureCode::ProfileSubstitution,
-                "durable profile identity does not match a known frozen digest",
+                "durable profile identity does not match the canonical digest",
             ));
         }
         Ok(())
-    }
-    fn uses_legacy_domains(&self) -> bool {
-        self.durable_profile_digest == legacy_profile_digest(self.durable_profile_id)
     }
     pub fn canonical_bytes(&self) -> Result<Vec<u8>, AttemptJournalError> {
         self.validate()?;
         canonical_bytes(self)
     }
     pub fn digest(&self) -> Result<Sha256Digest, AttemptJournalError> {
-        let domain = if self.uses_legacy_domains() {
-            ATTEMPT_BINDING_DOMAIN_V1
-        } else {
-            ATTEMPT_BINDING_DOMAIN
-        };
-        Ok(domain_digest(domain, &self.canonical_bytes()?))
+        Ok(domain_digest(
+            ATTEMPT_BINDING_DOMAIN,
+            &self.canonical_bytes()?,
+        ))
     }
 }
 
@@ -586,12 +515,10 @@ impl AttemptEntry {
         canonical_bytes(self)
     }
     pub fn digest(&self) -> Result<Sha256Digest, AttemptJournalError> {
-        let domain = if self.binding.uses_legacy_domains() {
-            ATTEMPT_ENTRY_DOMAIN_V1
-        } else {
-            ATTEMPT_ENTRY_DOMAIN
-        };
-        Ok(domain_digest(domain, &self.canonical_bytes()?))
+        Ok(domain_digest(
+            ATTEMPT_ENTRY_DOMAIN,
+            &self.canonical_bytes()?,
+        ))
     }
 }
 
@@ -1118,15 +1045,9 @@ pub fn abort_attempt_with_fault(
     }
 }
 
-/// Recover an attempt journal.
-///
-/// Terminals are returned unchanged. A Prepared journal is classified
-/// SafeToRetry: the journal proves the effect never ran (dispatch never
-/// crossed), so a fresh attempt may be admitted but this journal can never
-/// dispatch. A DispatchCrossed journal is classified Succeeded or Failed
-/// only when authoritative evidence proves completion or safe rollback, and
-/// Indeterminate otherwise. Recovery never writes a DispatchCrossed entry,
-/// so no recovered attempt can be redispatched.
+/// Recover an attempt journal. Terminals are returned unchanged. A Prepared journal is classified
+/// SafeToRetry: the journal proves the effect never ran (dispatch never crossed), so a fresh
+/// attempt may be admitted but this journal can never dispatch.
 pub fn recover_attempt(
     paths: &AttemptJournalPaths,
     expected: &AttemptBinding,
@@ -1182,11 +1103,9 @@ pub fn recover_attempt_with_fault(
             &current.value,
         ),
         AttemptState::Prepared => {
-            // Dispatch never crossed, so the journal proves the effect never
-            // ran: classify SafeToRetry and terminate the journal. A fresh
-            // attempt may be admitted elsewhere; this journal can never
-            // dispatch. Supplied evidence is ignored — an attempt that never
-            // ran has no outcome evidence.
+            // Dispatch never crossed, so the journal proves the effect never ran: classify SafeToRetry
+            // and terminate the journal. A fresh attempt may be admitted elsewhere; this journal can
+            // never dispatch. Supplied evidence is ignored — an attempt that never ran has no outcome evidence.
             let sequence = chain.len() as u64 + 1;
             let safe_to_retry =
                 AttemptEntry::safe_to_retry(&current.value, current.digest, sequence);

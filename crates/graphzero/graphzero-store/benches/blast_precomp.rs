@@ -24,9 +24,8 @@ fn bench_blast_current(c: &mut Criterion) {
     group.finish();
 }
 
-/// Multi-size blast sweep: primary hot path across documented N set
-/// (`BENCH_FILE_SWEEP`) so skill scaling law is derivable from criterion
-/// alone (graphzero-ijf2c). Intent stays fixed; `BenchmarkId` is file count.
+/// Multi-size blast sweep: primary hot path across documented N set (`BENCH_FILE_SWEEP`) so skill
+/// scaling law is derivable from criterion alone. Intent stays fixed; `BenchmarkId` is file count.
 fn bench_blast_by_file_count(c: &mut Criterion) {
     let mut group = c.benchmark_group("blast_by_files");
     // Keep sample count modest: each N indexes a fresh synthetic repo once.

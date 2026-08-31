@@ -1,20 +1,22 @@
-//! Typed Effect IR v1 for model-selected, verifier-gated actions.
-//!
-//! An effect program describes an action. It never grants permission to execute
-//! it. Callers must still bind the program to the current state and capability
-//! generation, isolate effects, obtain verifier evidence, and pass policy gates.
-//! Raw fallback is a first-class operation and cannot be mixed with typed work.
-//!
-//! The production v1 identity uses canonical sorted-key JSON. The V2 prototype's
-//! proposed binary codec remains a separate future contract and is not implied by
-//! this module.
+//! Typed Effect IR for model-selected, verifier-gated actions. An effect program describes an
+//! action. It never grants permission to execute it.
 
 use std::{error::Error, fmt};
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-use crate::{ArtifactOwner, CwirVerifierClass, EffectClass, Sha256Digest, canonical_json, sha256};
+use crate::{ArtifactOwner, CwirVerifierClass, Sha256Digest, canonical_json, sha256};
+
+/// The strongest side effect an operation may perform.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EffectClass {
+    ReadOnly,
+    ReversibleMutation,
+    ApprovalRequiredMutation,
+    Irreversible,
+}
 
 pub const EFFECT_IR_CONTRACT_VERSION: u16 = 1;
 pub const EFFECT_IR_ACTION_DOMAIN: &[u8] = b"zerostack.effect_ir.action\0";

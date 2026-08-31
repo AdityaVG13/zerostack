@@ -1,4 +1,4 @@
-//! Compact outline skeleton string for budget-friendly agent orientation.
+//! Compact outline skeleton string for budget-friendly caller orientation.
 
 use super::types::OutlineItem;
 
@@ -50,11 +50,8 @@ fn names_collide_across_kinds(items: &[OutlineItem]) -> std::collections::HashSe
         .collect()
 }
 
-/// Format: `{path}: name start-end; … [gz://blob/<hash>]` with kind abbrev
-/// only when names collide across kinds. The trailing blob ref is the
-/// ref-first recovery anchor: budget=1 capsules must always carry a gz://
-/// evidence ref (release gate `assert_ref_first`), and every outline item of
-/// one file shares the same blob, so one bare ref anchors them all.
+/// Format: `{path}: name start-end; … [z://blob/<hash>]` with kind abbrev only when names collide
+/// across kinds.
 pub fn format_outline_skeleton(rel: &str, items: &[OutlineItem]) -> String {
     if items.is_empty() {
         return format!("{rel}:");
@@ -86,7 +83,14 @@ pub fn format_outline_skeleton(rel: &str, items: &[OutlineItem]) -> String {
     }
     if let Some(anchor) = items
         .iter()
-        .find(|it| it.evidence_ref.starts_with("gz://"))
+        .find(|it| {
+            let r = it.evidence_ref.as_str();
+            r.starts_with("z://blob/")
+                || r.starts_with("node/")
+                || r.starts_with("query/")
+                || r.starts_with("path/")
+                || r.starts_with("file/")
+        })
         .map(|it| {
             it.evidence_ref
                 .split('#')

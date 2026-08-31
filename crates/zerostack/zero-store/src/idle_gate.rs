@@ -1,32 +1,6 @@
-//! Idle-overhead release gate (ZS-OPS-006 / V6-R14).
-//!
-//! The daemonless law says the sidecar is invisible when idle: no background
-//! work, no spawn-per-call measurement, and a measured steady-state budget
-//! of <= 0.1% CPU and <= 500 MB resident memory. This module is the
-//! mechanism that makes that budget a *release gate*:
-//!
-//! - [`IdleWindowEvidence`] is the sealed evidence artifact: a window of
-//!   in-process samples (cumulative user/sys CPU nanoseconds and RSS bytes,
-//!   all host-clock readouts -- no child processes are spawned to measure)
-//!   plus a counter of background-activity events observed during the
-//!   window. Its `digest()` is content-derived over the canonical window
-//!   bytes, so evidence can be anchored externally.
-//! - [`evaluate_idle_release_gate`] refuses *without evidence*:
-//!   `None` evidence is a loud [`IdleGateError::RequiresEvidence`] -- the
-//!   gate never passes on prose. With evidence it compares the observed
-//!   window maximums against [`IdleBudgets`] (default 0.1% CPU fraction,
-//!   500 MB RSS) and returns a sealed [`IdleGateReceipt`]; budget
-//!   breaches are fail-loud refusals carried inside the receipt
-//!   ([`IdleGateRefusal`]), never silent truncation or clamping.
-//! - Background activity observed during the idle window refuses the gate
-//!   ([`IdleGateRefusalReason::BackgroundActivityDetected`]): the daemonless
-//!   law is enforced by evidence, not by promise.
-//! - [`IdleSampler`] is the in-process sampling seam; the host adapter for
-//!   the sidecar (zsx-node) is residual hub wiring -- the crate proves the
-//!   gate with a real `getrusage`-backed sampler in tests.
-//!
-//! The contract manifest [`idle_gate_contract`] freezes these semantics
-//! (budgets, no-evidence refusal, no background work, no spawn-per-call).
+//! Idle-overhead release gate. The daemonless law says the sidecar is
+//! invisible when idle: no background work, no spawn-per-call measurement, and a measured
+//! steady-state budget of <= 0.1% CPU and <= 500 MB resident memory.
 
 use serde::{Deserialize, Serialize};
 
@@ -41,12 +15,11 @@ pub const DEFAULT_IDLE_MAX_CPU_FRACTION_PPB: u64 = 1_000_000;
 /// Default idle RSS budget: 500 MB.
 pub const DEFAULT_IDLE_MAX_RSS_BYTES: u64 = 500 * 1024 * 1024;
 /// ABI tag carried by idle-gate artifacts.
-pub const IDLE_GATE_ABI_VERSION: &str = "v6-r14";
+pub const IDLE_GATE_ABI_VERSION: &str = "zerostack.idle-gate/1";
 
-/// One in-process measurement readout. CPU fields are cumulative since
-/// process start (getrusage semantics); the window fraction is derived from
-/// the delta between the first and last sample so a window can never see
-/// CPU time spent before the window.
+/// One in-process measurement readout. CPU fields are cumulative since process start
+/// (getrusage semantics); the window fraction is derived from the delta between the
+/// first and last sample so a window can never see CPU time spent before the window.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct IdleSample {
@@ -217,8 +190,7 @@ impl IdleWindowEvidence {
     }
 }
 
-/// The budgets the release gate enforces. Defaults are the V6 steady-state
-/// targets: <= 0.1% CPU and <= 500 MB RSS while idle.
+/// Idle release budgets. Defaults are at most 0.1% CPU and 500 MB RSS.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct IdleBudgets {
@@ -313,8 +285,7 @@ impl IdleGateReceipt {
 /// sealed refusals inside an [`IdleGateReceipt`].
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum IdleGateError {
-    /// The gate was evaluated without evidence. The release gate fails
-    /// without evidence -- always.
+    /// Release evaluation requires evidence.
     RequiresEvidence,
     /// The evidence window is structurally invalid.
     InvalidEvidence(String),
@@ -340,16 +311,9 @@ impl std::fmt::Display for IdleGateError {
 
 impl std::error::Error for IdleGateError {}
 
-/// Evaluate the idle release gate against sealed window evidence.
-///
-/// - `None` evidence is [`IdleGateError::RequiresEvidence`] -- the gate
-///   never passes on prose.
-/// - A nonzero background-activity count refuses
-///   ([`IdleGateRefusalReason::BackgroundActivityDetected`]).
-/// - Observed window maximums above the budgets refuse with the observed
-///   and budget values in the sealed receipt. Breaches are never clamped,
-///   truncated, or silently ignored.
-/// - Within budget the receipt admits with counts and the evidence digest.
+/// Evaluate the idle release gate against sealed window evidence. `None` evidence is
+/// [`IdleGateError::RequiresEvidence`] -- the gate never passes on prose. A nonzero
+/// background-activity count refuses ([`IdleGateRefusalReason::BackgroundActivityDetected`]).
 pub fn evaluate_idle_release_gate(
     evidence: Option<&IdleWindowEvidence>,
     budgets: IdleBudgets,
@@ -410,10 +374,8 @@ pub fn evaluate_idle_release_gate(
     Ok(receipt)
 }
 
-/// In-process sampling seam for idle windows. The sidecar host adapter
-/// (zsx-node) is residual hub wiring; the crate tests a real
-/// `getrusage`-backed sampler. Samplers must not spawn processes or start
-/// background work -- the measurement itself must be invisible.
+/// Samples idle windows without spawning processes or background work.
+/// Implementations must keep the measurement itself invisible.
 pub trait IdleSampler {
     fn sample(&mut self) -> Result<IdleSample, IdleGateError>;
 }
@@ -442,7 +404,7 @@ pub fn measure_idle_window<S: IdleSampler>(
     )
 }
 
-/// The frozen contract manifest for the idle release gate (ZS-OPS-006).
+/// The frozen contract manifest for the idle release gate.
 pub fn idle_gate_contract() -> serde_json::Value {
     serde_json::json!({
         "schema_version": IDLE_GATE_SCHEMA_VERSION,

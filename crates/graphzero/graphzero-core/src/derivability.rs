@@ -1,31 +1,5 @@
-//! Standalone derivability predicate (RACC row ZS-GRAPH-005).
-//!
-//! Answers "is artifact X derivable from the declared root inputs via the
-//! dependency graph's producer edges?" with an honest three-valued answer:
-//!
-//! - [`DerivabilityAnswer::Derivable`]: a declared root -> X path exists. The
-//!   answer carries the path as proof, the root it starts from, and the claim
-//!   grade of the *weakest* edge on the path. The claim is never ungraded:
-//!   a path through any `RuntimeObserved` edge (refinement-added) is graded
-//!   [`GradeName::ObservedOnly`] -- never a static grade
-//!   ([`GradeName::SoundOverapproximation`]); a path over declared edges only
-//!   is graded `SoundOverapproximation` (declared static edges are
-//!   over-approximations of true influence, per
-//!   [`EdgeProvenance::Declared`]).
-//! - [`DerivabilityAnswer::NotDerivable`]: no root -> X path exists in the
-//!   current graph. Honest labeling: `certified` is true only under declared
-//!   [`CoverageClass::Complete`] coverage of the edge set (absence may be
-//!   certified). Otherwise the answer is a current-graph statement ("no path
-//!   in the graph I was given"), never a claim about the true world.
-//! - [`DerivabilityAnswer::Unknown`]: the predicate cannot honestly answer
-//!   either way. Either X is unknown to the graph (not a node), or the graph
-//!   is known to be incomplete -- it contains refinement-added
-//!   `RuntimeObserved` edges, i.e. a region whose provenance is
-//!   runtime-observed only, so "no path" would be an ungrounded absence claim.
-//!
-//! The predicate never claims Derivable through an edge set known to be
-//! incomplete without labeling the claim's grade, and it never coerces
-//! absence out of a known-incomplete edge set.
+//! Derivability over declared roots and producer edges.
+//! Returns derivable, disproved under complete coverage, or unknown.
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
@@ -45,8 +19,7 @@ pub enum UnknownReason {
     ArtifactUnknown,
     /// No root -> X path exists, but the graph is known to be incomplete: it
     /// carries `runtime_observed_edges` refinement-added edges (runtime
-    /// provenance only), so absence cannot be asserted even as a current-graph
-    /// claim.
+    /// provenance only), so absence cannot be asserted even as a current-graph claim.
     RuntimeObservedRegion { runtime_observed_edges: usize },
 }
 
@@ -54,7 +27,7 @@ pub enum UnknownReason {
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "answer", rename_all = "snake_case")]
 pub enum DerivabilityAnswer {
-    /// A declared root reaches X. `path` is the proof (root -> ... -> X);
+    /// A declared root reaches X. `path` is the proof (root ->... -> X);
     /// `grade` labels the claim (weakest edge on the path); `truth` is the
     /// weakest edge truth class.
     Derivable {
@@ -92,11 +65,6 @@ impl DerivabilityAnswer {
 }
 
 /// Standalone derivability predicate over a dependency graph.
-///
-/// Owns a snapshot of the graph, the declared root inputs (derivation may
-/// start only from these), the set of edges known to be `RuntimeObserved`
-/// (refinement-added), and the declared coverage of the edge set (what "no
-/// path" may honestly mean).
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DerivabilityPredicate {
     pub graph: DependencyGraph,
@@ -110,10 +78,9 @@ pub struct DerivabilityPredicate {
 }
 
 impl DerivabilityPredicate {
-    /// Predicate over `graph` with declared root inputs and a declared
-    /// coverage of the edge set. No edges are initially known runtime-observed
-    /// -- use [`Self::mark_runtime_observed`] or
-    /// [`Self::from_refinement_loop`] to record refinement provenance.
+    /// Predicate over `graph` with declared root inputs and a declared coverage of the
+    /// edge set. No edges are initially known runtime-observed use
+    /// [`Self::mark_runtime_observed`] or [`Self::from_refinement_loop`] to record refinement provenance.
     #[must_use]
     pub fn new(
         graph: DependencyGraph,
@@ -137,8 +104,7 @@ impl DerivabilityPredicate {
 
     /// Predicate over a refined graph: snapshot of `loop_`'s graph plus every
     /// edge the loop labeled `RuntimeObserved`. The loop's public
-    /// `provenance_of` is the only access used -- the loop's internal label
-    /// map stays private.
+    /// `provenance_of` is the only access used -- the loop's internal label map stays private.
     #[must_use]
     pub fn from_refinement_loop(
         loop_: &RefinementLoop,
@@ -161,13 +127,8 @@ impl DerivabilityPredicate {
         }
     }
 
-    /// Ask: is `x` derivable from the declared roots?
-    ///
-    /// BFS from every declared root (deterministic order), capturing a parent
-    /// map so the answer carries a root -> X path as proof. Returns
-    /// [`DerivabilityAnswer::Unknown`] when X is not a node of the graph, or
-    /// when no path exists but the graph is known-incomplete (contains
-    /// runtime-observed edges).
+    /// Ask: is `x` derivable from the declared roots? BFS from every declared root (deterministic
+    /// order), capturing a parent map so the answer carries a root -> X path as proof.
     #[must_use]
     pub fn derivability(&self, x: ArtifactId) -> DerivabilityAnswer {
         if !self.graph.forward.contains_key(&x) {
@@ -227,8 +188,7 @@ impl DerivabilityPredicate {
         }
         // No path. Fail closed on known-incomplete edge sets: a
         // runtime-observed region means the declared edge set was once found
-        // incomplete, so "no path" cannot be asserted even as a current-graph
-        // absence claim.
+        // incomplete, so "no path" cannot be asserted even as a current-graph absence claim.
         if !self.runtime_edges.is_empty() {
             return DerivabilityAnswer::Unknown {
                 reason: UnknownReason::RuntimeObservedRegion {

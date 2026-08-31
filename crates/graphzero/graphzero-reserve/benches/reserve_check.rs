@@ -61,7 +61,7 @@ fn bench_check_conflict(c: &mut Criterion) {
         target_symbol: Some("func_50".into()),
         intent_text: None,
     }];
-    // Pre-acquire with different agent
+    // Pre-acquire with different caller
     let _ = svc.check_with_ttl("blocker_agent", &ops, true, None);
     c.bench_function("reserve_check_conflict", |b| {
         b.iter(|| black_box(svc.check("victim_agent", &ops, false).unwrap()))

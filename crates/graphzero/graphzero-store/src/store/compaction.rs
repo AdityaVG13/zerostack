@@ -1,6 +1,6 @@
-//! Tiered compaction (FR-014, FR-015): folds wal segments into a new
+//! Tiered compaction: folds wal segments into a new
 //! snapshot published via atomic rename. Triggers: segment count > 10 or
-//! dirty ratio > 0.3 (ADR-003).
+//! dirty ratio > 0.3.
 
 use std::fs;
 use std::io;
@@ -99,7 +99,7 @@ fn snapshot_blob_count(store_root: &Path, manifest: &Manifest) -> Result<usize> 
     Ok(view.coverage()?.blob_hashes.len())
 }
 
-/// True when either ADR-003 trigger fires.
+/// True when either trigger fires.
 pub fn should_compact(store_root: &Path) -> Result<bool> {
     let s = stats(store_root)?;
     Ok(s.segment_count > MAX_SEGMENTS || s.dirty_ratio > MAX_DIRTY_RATIO)
@@ -367,11 +367,9 @@ pub fn is_read_only_store_error(error: &Error) -> bool {
     })
 }
 
-/// Probe compaction work without taking the writer lock.
-///
-/// Returns `Ok(None)` when there is no unfolded WAL (nothing to compact). Used
-/// by `compact_on_open_if_needed` for the unlocked ADR-003 threshold check so
-/// under-threshold opens never flock on `.graphzero/lock`.
+/// Probe compaction work without taking the writer lock. Returns `Ok(None)` when there is
+/// no unfolded WAL (nothing to compact). Used by `compact_on_open_if_needed` for the
+/// unlocked threshold check so under-threshold opens never flock on `.graphzero/lock`.
 fn try_prepare_compaction_work(store_root: &Path) -> Result<Option<CompactionWork>> {
     let manifest = Manifest::load(store_root)?;
     let snapshot_id = manifest.latest().map_or(1, |s| s.snapshot_id + 1);
@@ -439,17 +437,12 @@ fn compact_locked(store_root: &Path) -> Result<u64> {
     compact_prepared(store_root, prepare_compaction_work(store_root)?)
 }
 
-/// Compact synchronously when an open observes either ADR-003 threshold.
-///
-/// Thresholds are probed **without** the exclusive writer lock so
-/// `open_cached` with under-threshold unfolded WAL does not flock-wait on
-/// index/publish. When work is required, the lock is taken and the threshold
-/// is re-checked so concurrent opens cannot double-compact the same segments.
-/// MAX_SEGMENTS is the maximum unfolded segment count an open may replay
-/// without compaction.
+/// Compact synchronously when an open observes either threshold. Thresholds are probed
+/// **without** the exclusive writer lock so `open_cached` with under-threshold unfolded WAL does
+/// not flock-wait on index/publish.
 pub fn compact_on_open_if_needed(store_root: &Path) -> Result<Option<u64>> {
-    // Unlocked ADR-003 probe: skip exclusive lock when WAL is empty or under
-    // both segment-count and dirty-ratio limits (graphzero-866dz).
+    // Unlocked probe: skip exclusive lock when WAL is
+    // empty or under both segment-count and dirty-ratio limits.
     let Some(probe) = try_prepare_compaction_work(store_root)? else {
         return Ok(None);
     };

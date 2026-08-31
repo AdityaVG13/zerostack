@@ -1,32 +1,5 @@
-//! V6-R13: executable theorem checkers (Draft 6, Thm 5.1 / 6.1 / 7.1 / 8.1).
-//!
-//! Each checker takes the theorem's premises as measured/typed inputs and
-//! verifies the claimed bound holds. All arithmetic is exact integer
-//! arithmetic (or exact rational arithmetic via [`crate::solver::Rational`]);
-//! no floats, no rounding, no extrapolation. An unmet premise is a typed
-//! refusal, never a weaker certificate.
-//!
-//! Theorem texts:
-//!
-//! * Thm 5.1 Explanation Evidence Preservation: if every factual claim in a
-//!   compact explanation is supported by an exact rooted source/runtime
-//!   artifact or explicitly labeled inference, and all omitted evidence
-//!   remains expandable before a protected factual decision, then the compact
-//!   interface does not reduce the baseline factual strategy set.
-//! * Thm 6.1 Decision-Delimited Refactor: if a refactor contains `d`
-//!   unresolved adaptive semantic decisions and all other operations are
-//!   privately composable and verifiable, then the prepared model-visible
-//!   interaction requires exactly `d + 1` Zero Execute calls.
-//! * Thm 7.1 Port Nonregression under Complete Observational Coverage: if
-//!   `V = B`, the verifier is sound, the target satisfies every obligation in
-//!   `V`, and the source baseline remains available for uncovered environment
-//!   cases, then the published target is protected-equivalent within the
-//!   declared observational contract.
-//! * Thm 8.1 Greenfield Strategy Preservation: if every suggestion,
-//!   capability, or plan is optional, exact project evidence remains
-//!   expandable, native tools remain available, and subjective decisions
-//!   remain with the model/user, then adding the backend cannot remove a
-//!   baseline construction strategy.
+//! Executable theorem-bound checkers. Each accepts measured, typed premises
+//! and verifies that the claimed bound holds.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
@@ -34,9 +7,7 @@ use std::fmt;
 
 use zero_abi::{CoverageGrade, ProtectedDimension, ProtectedScopeObligations};
 
-// ---------------------------------------------------------------------------
-// Thm 5.1 -- Explanation Evidence Preservation
-// ---------------------------------------------------------------------------
+// Explanation Evidence Preservation
 
 /// How one factual claim inside a compact explanation view is supported.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -72,7 +43,7 @@ pub struct CompactExplanationView {
     pub expansions: BTreeMap<String, String>,
 }
 
-/// Thm 5.1 certification: the compact view preserves the baseline factual
+/// Certifies that the compact view preserves the baseline factual
 /// strategy set.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct EvidencePreservationCertification {
@@ -83,12 +54,7 @@ pub struct EvidencePreservationCertification {
     pub expandable_omissions: usize,
 }
 
-/// Verifies Thm 5.1's premises over a compact explanation view.
-///
-/// Refuses (never certifies) when a factual claim is not supported by an
-/// exact rooted artifact present in the view or an explicit inference label,
-/// or when omitted evidence is not expandable to its bound artifact before a
-/// protected factual decision.
+/// Verifies explanation-evidence premises over a compact view.
 pub fn check_explanation_evidence_preservation(
     view: &CompactExplanationView,
 ) -> Result<EvidencePreservationCertification, TheoremViolation> {
@@ -137,11 +103,7 @@ pub fn check_explanation_evidence_preservation(
     })
 }
 
-/// Verifies that a claim's omitted evidence is expandable before a protected
-/// factual decision. For a rooted claim the expansion must resolve exactly to
-/// the claim's bound artifact (the theorem's falsifier); for a labeled
-/// inference the expansion must resolve to an exact rooted artifact present
-/// in the view.
+/// Verifies that a claim's omitted evidence is expandable before a protected factual decision.
 fn verify_expandable_omission(
     view: &CompactExplanationView,
     claim: &FactualClaim,
@@ -178,15 +140,11 @@ fn verify_expandable_omission(
     Ok(())
 }
 
-// ---------------------------------------------------------------------------
-// Thm 6.1 -- Decision-Delimited Refactor (d + 1 interaction call count)
-// ---------------------------------------------------------------------------
+// Decision-Delimited Refactor
 
-/// One continuation handle of a prepared model-visible interaction.
-///
-/// Runtime continuation handles carry no call count today, so both the
-/// declared unresolved decision count and the observed call count are
-/// measured/typed inputs to the checker.
+/// One continuation handle of a prepared model-visible interaction. Runtime
+/// continuation handles carry no call count today, so both the declared unresolved
+/// decision count and the observed call count are measured/typed inputs to the checker.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DecisionDelimitedHandle {
     /// Handle identifier.
@@ -194,11 +152,11 @@ pub struct DecisionDelimitedHandle {
     /// `d`: unresolved adaptive semantic decisions declared for the
     /// interaction.
     pub declared_unresolved_decisions: u64,
-    /// Observed Zero Execute calls in the prepared model-visible interaction.
-    pub observed_zero_execute_calls: u64,
+    /// Observed ZeroKernel calls in the prepared model-visible interaction.
+    pub observed_kernel_calls: u64,
 }
 
-/// Thm 6.1 checker input: the continuation handles plus the two premises on
+/// Decision-delimited refactor input: continuation handles and two premises on
 /// the remaining operations.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DecisionDelimitedRefactorInput {
@@ -210,7 +168,7 @@ pub struct DecisionDelimitedRefactorInput {
     pub other_operations_verifiable: bool,
 }
 
-/// Thm 6.1 certification: every interaction required exactly `d + 1` calls.
+/// Certifies that every interaction required exactly `d + 1` calls.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CallCountCertification {
     /// Number of certified continuation interactions.
@@ -219,11 +177,8 @@ pub struct CallCountCertification {
     pub expected_calls: Vec<(String, u64)>,
 }
 
-/// Verifies Thm 6.1: for every continuation handle, the observed Zero Execute
-/// call count must equal `declared_unresolved_decisions + 1` exactly.
-///
-/// Refuses when the private-composability or verifiability premise is unmet,
-/// when the interaction carries no handles, or when `d + 1` overflows.
+/// Verifies that each handle's call count equals `declared_unresolved_decisions + 1`.
+/// Refuses unmet premises, missing handles, empty identifiers, and count overflow.
 pub fn check_decision_delimited_refactor(
     input: &DecisionDelimitedRefactorInput,
 ) -> Result<CallCountCertification, TheoremViolation> {
@@ -247,11 +202,11 @@ pub fn check_decision_delimited_refactor(
             .ok_or_else(|| TheoremViolation::DecisionCountOverflow {
                 id: handle.id.clone(),
             })?;
-        if handle.observed_zero_execute_calls != expected {
+        if handle.observed_kernel_calls != expected {
             return Err(TheoremViolation::CallCountMismatch {
                 id: handle.id.clone(),
                 expected,
-                actual: handle.observed_zero_execute_calls,
+                actual: handle.observed_kernel_calls,
             });
         }
         expected_calls.push((handle.id.clone(), expected));
@@ -262,15 +217,11 @@ pub fn check_decision_delimited_refactor(
     })
 }
 
-// ---------------------------------------------------------------------------
-// Thm 7.1 -- Port Nonregression under Complete Observational Coverage
-// ---------------------------------------------------------------------------
+// Port Nonregression under Complete Observational Coverage
 
-/// Thm 7.1 checker input.
-///
-/// `B` is the declared source-behavior obligation set; the verified subset
-/// `V` is read from each obligation's coverage grade. The checker certifies
-/// protected equivalence only when `V == B` and every premise holds.
+/// Port-nonregression input. `B` is the declared source-behavior obligation set; the
+/// verified subset `V` is read from each obligation's coverage grade. The checker
+/// certifies protected equivalence only when `V == B` and every premise holds.
 pub struct PortNonregressionInput<'a> {
     /// The declared obligation set `B` with per-obligation coverage grades.
     pub obligations: &'a ProtectedScopeObligations,
@@ -281,7 +232,7 @@ pub struct PortNonregressionInput<'a> {
     pub source_baseline_available: bool,
 }
 
-/// Thm 7.1 certification: the target is protected-equivalent within the
+/// Certifies that the target is protected-equivalent within the
 /// declared observational contract.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ProtectedEquivalenceCertification {
@@ -293,14 +244,7 @@ pub struct ProtectedEquivalenceCertification {
     pub dimensions: Vec<ProtectedDimension>,
 }
 
-/// Verifies Thm 7.1's premises over a [`ProtectedScopeObligations`].
-///
-/// Refuses (obligations stay Unknown) when `V != B` -- any obligation with
-/// grade `Unknown` -- when a required obligation is only `Observed` (the
-/// CONTRACT-004 fail-closed rule, matching `zero_abi`'s
-/// `equivalent_claim_permitted`), or when the verifier-soundness or
-/// source-baseline premise is unmet. The checker never extrapolates beyond
-/// the declared observational contract.
+/// Verifies port-nonregression premises over `ProtectedScopeObligations`.
 pub fn check_port_nonregression_coverage(
     input: &PortNonregressionInput,
 ) -> Result<ProtectedEquivalenceCertification, TheoremViolation> {
@@ -342,9 +286,7 @@ pub fn check_port_nonregression_coverage(
     })
 }
 
-// ---------------------------------------------------------------------------
-// Thm 8.1 -- Greenfield Strategy Preservation (mandatory-gate audit)
-// ---------------------------------------------------------------------------
+// Greenfield Strategy Preservation
 
 /// What kind of backend surface is being audited.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -362,7 +304,7 @@ pub enum CapabilityKind {
 pub struct BackendCapability {
     /// Capability identifier.
     pub id: String,
-    /// Which kind of surface this is.
+    /// Capability kind.
     pub kind: CapabilityKind,
     /// Whether the surface is optional (no mandatory backend gate).
     pub optional: bool,
@@ -370,7 +312,7 @@ pub struct BackendCapability {
     pub requires_native_tool: Option<String>,
 }
 
-/// Thm 8.1 checker input: the optional capability set plus the three
+/// Greenfield-strategy input: the optional capability set and three
 /// remaining premises.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct GreenfieldStrategyInput {
@@ -384,7 +326,7 @@ pub struct GreenfieldStrategyInput {
     pub subjective_decisions_with_model_user: bool,
 }
 
-/// Thm 8.1 certification: no mandatory gate removes a baseline construction
+/// Certifies that no mandatory gate removes a baseline construction
 /// strategy.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct StrategyPreservationCertification {
@@ -392,12 +334,9 @@ pub struct StrategyPreservationCertification {
     pub audited_capabilities: usize,
 }
 
-/// Verifies Thm 8.1: every suggestion/capability/plan is optional, required
-/// native tools remain callable, exact project evidence remains expandable,
-/// and subjective decisions stay with the model/user.
-///
-/// A single mandatory gate is a loud refusal: the no-degradation envelope is
-/// lost and the claim must be removed, not weakened.
+/// Verifies that suggestions, capabilities, and plans remain optional while native tools remain
+/// callable, exact project evidence remains expandable, and subjective decisions stay with the
+/// model/user.
 pub fn check_greenfield_strategy_preservation(
     input: &GreenfieldStrategyInput,
 ) -> Result<StrategyPreservationCertification, TheoremViolation> {
@@ -430,16 +369,14 @@ pub fn check_greenfield_strategy_preservation(
     })
 }
 
-// ---------------------------------------------------------------------------
 // Shared typed violation
-// ---------------------------------------------------------------------------
 
 /// A theorem premise that did not hold, or a claimed bound that was violated.
 /// Every variant is a refusal: the checker never returns a weaker
 /// certificate.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum TheoremViolation {
-    // Thm 5.1.
+    // Explanation evidence preservation.
     /// A claim carried no identifier.
     EmptyClaimId,
     /// A rooted claim carried an empty artifact root.
@@ -461,7 +398,7 @@ pub enum TheoremViolation {
     },
     /// An expansion resolves to an artifact absent from the view.
     UnrootedExpansion { id: String, artifact_root: String },
-    // Thm 6.1.
+    // Decision-delimited refactor.
     /// The interaction carried no continuation handles.
     NoContinuationHandles,
     /// A handle carried no identifier.
@@ -478,7 +415,7 @@ pub enum TheoremViolation {
         expected: u64,
         actual: u64,
     },
-    // Thm 7.1.
+    // Port nonregression.
     /// No obligations were declared, so nothing can be certified.
     NoDeclaredObligations,
     /// `V != B`: obligations with grade `Unknown` stay Unknown.
@@ -489,7 +426,7 @@ pub enum TheoremViolation {
     UnsoundVerifier,
     /// The source-baseline premise is unmet.
     BaselineUnavailable,
-    // Thm 8.1.
+    // Greenfield strategy preservation.
     /// A suggestion/capability/plan carried no identifier.
     EmptyCapabilityId,
     /// Exact project evidence is not expandable.

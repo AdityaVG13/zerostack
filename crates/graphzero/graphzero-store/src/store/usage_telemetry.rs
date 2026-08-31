@@ -1,42 +1,21 @@
-//! Opt-in usage telemetry: token-accounting only.
-//!
-//! Disabled by default. When explicitly enabled, GraphZero may persist only
-//! closed `{execution_path, raw_tokens, spent_tokens}` records. This path never
-//! stores prompts, responses, commands, paths, refs, tool names, errors,
-//! durations, timestamps, or identifiers.
-//!
-//! In-session CodeMode protocol fields (`telemetry` / `telemetry_ref` with
-//! logical_ops / physical_ops) remain a separate local protocol surface and are
-//! not written here.
-//!
-//! ## Counter semantics
-//!
-//! - `raw_tokens`: uncompressed source token mass from the authoritative
-//!   accounting path (MCP full result mass; CodeMode full contract mass).
-//! - `spent_tokens`: tokens actually presented to the caller (MCP visible text;
-//!   CodeMode compact / visible ack line).
-//!
-//! The contract requires `spent_tokens <= raw_tokens`. Records that violate it
-//! are rejected and not persisted.
+//! Opt-in usage telemetry: token-accounting only. Disabled by default. When explicitly enabled,
+//! GraphZero may persist only closed `{execution_path, raw_tokens, spent_tokens}` records.
 
 use serde::{Deserialize, Serialize};
 use std::fs::{self, OpenOptions};
 use std::io::{self, BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 
-#[cfg(test)]
-use super::telemetry::telemetry_env_enabled;
 use super::telemetry::{TELEMETRY_ENV, resolve_telemetry};
 
 /// Relative path under a GraphZero store root for opt-in usage JSONL.
 pub const USAGE_TELEMETRY_REL: &str = "telemetry/usage-telemetry.jsonl";
 
-/// Execution surface that produced the token-accounting sample.
+/// In-process execution path that produced the token-accounting sample.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ExecutionPath {
-    Mcp,
-    Codemode,
+    Domain,
 }
 
 /// Complete allowlisted usage-telemetry record. Closed schema — unknown fields
@@ -124,48 +103,6 @@ pub fn record_usage(
         });
     }
     append_record(path, record).map_err(|err| UsageTelemetryError::Io(err.to_string()))
-}
-
-/// Record MCP accounting when opted in. Fail-open on I/O; reject bad contracts.
-pub fn record_mcp_accounting(
-    store_root: &Path,
-    enabled: bool,
-    raw_tokens: usize,
-    spent_tokens: usize,
-) {
-    if !enabled {
-        return;
-    }
-    let Ok(record) = UsageRecord::try_new(
-        ExecutionPath::Mcp,
-        u64::try_from(raw_tokens).unwrap_or(u64::MAX),
-        u64::try_from(spent_tokens).unwrap_or(u64::MAX),
-    ) else {
-        return;
-    };
-    let path = usage_telemetry_path_for_store(store_root);
-    let _ = record_usage(&path, true, &record);
-}
-
-/// Record CodeMode accounting when opted in. Fail-open on I/O; reject bad contracts.
-pub fn record_codemode_accounting(
-    store_root: &Path,
-    enabled: bool,
-    raw_tokens: usize,
-    spent_tokens: usize,
-) {
-    if !enabled {
-        return;
-    }
-    let Ok(record) = UsageRecord::try_new(
-        ExecutionPath::Codemode,
-        u64::try_from(raw_tokens).unwrap_or(u64::MAX),
-        u64::try_from(spent_tokens).unwrap_or(u64::MAX),
-    ) else {
-        return;
-    };
-    let path = usage_telemetry_path_for_store(store_root);
-    let _ = record_usage(&path, true, &record);
 }
 
 /// Inspect opt-in usage telemetry. Never uploads; `exporter` is always `none`.

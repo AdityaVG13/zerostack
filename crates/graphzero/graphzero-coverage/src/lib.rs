@@ -1,7 +1,5 @@
-//! GraphZero P0.3 Coverage Machinery.
-//!
-//! Per-blob per-tier bitmaps, lazy freshness verification, and three-answer
-//! query results (PRESENT / ABSENT / UNKNOWN) with `CoverageCertificate`.
+//! Per-blob coverage bitmaps, lazy freshness checks, and three-state query results.
+//! `CoverageCertificate` distinguishes present, absent, and unknown answers.
 
 pub mod bitmap;
 pub mod certificate;

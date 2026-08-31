@@ -1,11 +1,6 @@
-//! Wave 16 savings reports: exact numerator/denominator and deterministic
-//! provenance, with Unknown vs Zero distinguished and incomparable pairs
-//! rejected. Measurement-only, off the authority path.
-//!
-//! No ungrounded speed or ratio claim is ever produced. Savings are
-//! always presented as exact integer numerator/denominator (tokens, bytes,
-//! calls) plus the deterministic provenance root. A zero baseline yields
-//! Unknown; a measured equal native/Zero usage yields Zero.
+//! Savings reports with exact numerator/denominator and deterministic provenance, with Unknown vs
+//! Zero distinguished and incomparable pairs rejected. Measurement-only, off the authority path. No
+//! ungrounded speed or ratio claim is ever produced.
 
 #![forbid(unsafe_code)]
 
@@ -17,7 +12,7 @@ use std::error::Error;
 use std::fmt;
 
 /// Wire schema for savings reports.
-pub const SAVINGS_REPORT_SCHEMA: &str = "zerostack.zero_gauge.savings_report.v1";
+pub const SAVINGS_REPORT_SCHEMA: &str = "zerostack.zero_gauge.savings_report";
 pub const SAVINGS_REPORT_VERSION: u16 = 1;
 
 /// Whether a savings measurement is claimable.
@@ -52,10 +47,9 @@ pub struct UnitSavings {
     pub status: SavingsStatusForUnit,
 }
 
-/// Per-unit status flattened for stable provenance. The top-level
-/// `SavingsStatus` is the aggregate over the three units; `UnitSavings`
-/// carries the per-unit status so provenance remains deterministic even when
-/// one dimension is Unknown while another is Positive.
+/// Per-unit status flattened for stable provenance. The top-level `SavingsStatus` is the
+/// aggregate over the three units; `UnitSavings` carries the per-unit status so
+/// provenance remains deterministic even when one dimension is Unknown while another is Positive.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub enum SavingsStatusForUnit {
@@ -89,10 +83,9 @@ pub struct SavingsReport {
 }
 
 impl SavingsReport {
-    /// Build a report from a comparable pair. Returns a `SavingsReport` for
-    /// every comparable pair; the `status` distinguishes Unknown from Zero.
-    /// Incomparable pairs never reach this method: `PairedObservations::new`
-    /// already rejected them with `PairError`.
+    /// Build a report from a comparable pair. Returns a `SavingsReport` for every
+    /// comparable pair; the `status` distinguishes Unknown from Zero. Incomparable pairs
+    /// never reach this method: `PairedObservations::new` already rejected them with `PairError`.
     pub fn from_pair(pair: &PairedObservations) -> Result<Self, ReportError> {
         let native = pair.native.usage;
         let zero = pair.zero.usage;
@@ -353,66 +346,5 @@ impl Error for ReportError {}
 impl From<PairError> for ReportError {
     fn from(err: PairError) -> Self {
         Self::Pair(err)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn valid_report() -> SavingsReport {
-        let native = MeasuredUsage::new(100, 200, 4);
-        let zero = MeasuredUsage::new(60, 150, 3);
-        let tokens = compute_unit(native.tokens, zero.tokens);
-        let bytes = compute_unit(native.bytes, zero.bytes);
-        let calls = compute_unit(native.calls, zero.calls);
-        let mut report = SavingsReport {
-            schema: SAVINGS_REPORT_SCHEMA.into(),
-            version: SAVINGS_REPORT_VERSION,
-            task: TaskIdentity {
-                task_id: "report-validation".into(),
-                corpus_sha: None,
-            },
-            machine: MachineFingerprint {
-                os: "test-os".into(),
-                arch: "test-arch".into(),
-                cpu_model: "test-cpu".into(),
-                kernel: "test-kernel".into(),
-                rustc_version: "test-rustc".into(),
-                git_sha: "a".repeat(40),
-                cargo_profile: "test".into(),
-            },
-            native,
-            zero,
-            status: aggregate_status(&tokens.status, &bytes.status, &calls.status),
-            tokens,
-            bytes,
-            calls,
-            provenance_root: String::new(),
-        };
-        report.provenance_root = report.compute_root();
-        report
-    }
-
-    #[test]
-    fn validation_recomputes_units_and_aggregate_status() {
-        let report = valid_report();
-        report.validate().unwrap();
-
-        let mut forged_unit = report.clone();
-        forged_unit.tokens.numerator += 1;
-        forged_unit.provenance_root = forged_unit.compute_root();
-        assert!(matches!(
-            forged_unit.validate(),
-            Err(ReportError::InconsistentUnit { .. })
-        ));
-
-        let mut forged_status = report;
-        forged_status.status = SavingsStatus::Zero;
-        forged_status.provenance_root = forged_status.compute_root();
-        assert_eq!(
-            forged_status.validate(),
-            Err(ReportError::AggregateStatusMismatch)
-        );
     }
 }

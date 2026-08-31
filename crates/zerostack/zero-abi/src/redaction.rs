@@ -1,17 +1,6 @@
-//! Secret redaction and undeclared-effect tracing (ZS-SEC-004, ZS-STORE-004).
-//!
-//! [`Redactor`] is the only sanctioned path for secrets crossing authority
-//! boundaries: provider prompts, UI exports, benchmark traces, and error
-//! strings. It fails closed -- every occurrence of every configured secret is
-//! replaced by the redaction token, in keys, string fields, array elements,
-//! and nested objects; a redaction is only complete when the output contains
-//! no configured secret substring.
-//!
-//! [`EffectTrace`] compares the effects a candidate DECLARED against the
-//! effects OBSERVED during execution. Any undeclared effect (network,
-//! process, environment, or unlisted mutation) yields
-//! [`crate::SafetyVerdict::Unknown`] -- execution is blocked or Unsafe,
-//! never silently admitted.
+//! Secret redaction and undeclared-effect tracing. [`Redactor`] is the
+//! only sanctioned path for secrets crossing authority boundaries: provider prompts, UI exports,
+//! benchmark traces, and error strings.
 
 use std::{error::Error, fmt};
 
@@ -155,7 +144,7 @@ impl Redactor {
 
     /// Redact one plain string (error messages, single-line emissions) and
     /// fail closed: if any configured secret survives, the caller gets
-    /// `RedactionLeak` and MUST NOT emit the output (ZS-SEC-004).
+    /// `RedactionLeak` and MUST NOT emit the output.
     pub fn redact_text_checked(&self, text: &str) -> Result<String, SecretsError> {
         let redacted = self.redact_text(text);
         for secret in &self.policy.secrets {
@@ -185,10 +174,9 @@ impl Redactor {
     }
 }
 
-/// A declared-vs-observed effect trace. `declared` is what the candidate
-/// promised; `observed` is what execution actually performed. An undeclared
-/// observed effect is a sandbox violation: blocked or Unsafe, never silently
-/// admitted (ZS-STORE-004).
+/// A declared-vs-observed effect trace. `declared` is what the candidate promised;
+/// `observed` is what execution actually performed. An undeclared observed effect is
+/// a sandbox violation: blocked or Unsafe, never silently admitted.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct EffectTrace {

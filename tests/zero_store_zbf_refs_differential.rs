@@ -1,6 +1,5 @@
-//! Differential harness: `ZbfObject::from_bytes` vs `refs_from_verified_bytes`.
-//! Bounded garbage campaign; refs walker must never panic.
-//! Bead: zerostack-zbf-from-bytes-ci-harness-8ok8 (differential half)
+//! Differentially checks `ZbfObject::from_bytes` against `refs_from_verified_bytes`.
+//! The bounded garbage campaign requires the refs walker to avoid panics.
 
 use proptest::prelude::*;
 use proptest::test_runner::{Config, FileFailurePersistence};

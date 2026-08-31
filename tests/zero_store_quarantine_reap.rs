@@ -1,4 +1,4 @@
-//! SURF-0013: put reaps stale tmp files and quarantine preserves digest-mismatched bodies.
+//! Put reaps stale temporary files; quarantine preserves digest-mismatched bodies.
 
 use std::fs;
 use std::path::PathBuf;

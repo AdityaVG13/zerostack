@@ -1,5 +1,5 @@
 //! Global symbol table: name-sorted dense u32 IDs, CHD perfect-hash lookup
-//! (FR-004), and ordered prefix search (FR-005).
+//! and ordered prefix search.
 
 use std::collections::BTreeMap;
 
@@ -112,10 +112,9 @@ impl<'a> SymbolTable<'a> {
         self.symbols.entries.get(id as usize)
     }
 
-    /// True when symbol IDs are dense `0..n` and names are strictly ascending
-    /// — the invariant behind rank arithmetic in the locate fast path
-    /// (`graphzero` locate shell minting). Single allocation-free scan;
-    /// callers should cache the verdict per snapshot.
+    /// True when symbol IDs are dense `0..n` and names are strictly ascending the
+    /// invariant behind rank arithmetic in the locate fast path (`graphzero` locate
+    /// shell minting). Single allocation-free scan; callers should cache the verdict per snapshot.
     pub fn entries_dense_and_sorted(&self) -> bool {
         let mut prev: Option<&str> = None;
         for (index, entry) in self.symbols.entries.iter().enumerate() {
@@ -137,7 +136,7 @@ impl<'a> SymbolTable<'a> {
     }
 
     /// O(1) exact lookup via CHD perfect hash, verified against the stored
-    /// name so unknown keys return `None` (FR-004).
+    /// name so unknown keys return `None`.
     pub fn get(&self, symbol: &str) -> Option<u32> {
         let id = lookup(self.mph.seeds, self.mph.values, symbol.as_bytes())?;
         if self.name(id)? == symbol {
@@ -147,7 +146,7 @@ impl<'a> SymbolTable<'a> {
         }
     }
 
-    /// Ordered prefix search over name-sorted IDs (FR-005). Returns the dense
+    /// Ordered prefix search over name-sorted IDs. Returns the dense
     /// ID range whose names start with `prefix`, in lexicographic order.
     pub fn prefix_search(&self, prefix: &str) -> impl Iterator<Item = u32> + '_ {
         let n = self.symbols.entries.len();

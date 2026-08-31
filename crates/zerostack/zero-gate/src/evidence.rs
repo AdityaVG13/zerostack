@@ -1,31 +1,4 @@
 //! Production Program evidence assembly for FSZero, GraphZero, and TokenZero.
-//!
-//! A Program-level aggregate may be sealed only from *real, collected*
-//! evidence: for every required engine (FSZero, GraphZero, TokenZero) this
-//! assembler reads five distinct evidence artifacts — planner, codemode
-//! raw-worker, MCP, lifecycle, and applied-GC — and validates each one against
-//! its contract, its digest, and its provenance before it is allowed to
-//! contribute:
-//!
-//! - the artifact's digest must bind its exact bytes: `artifact_sha256` is the
-//!   SHA-256 over the canonical JSON of the artifact with its own
-//!   `artifact_sha256` field zeroed (the codebase's self-digest convention,
-//!   like `receipt_head`), and `artifact_bytes` must equal the file's exact
-//!   byte length — so a tampered file can never count;
-//! - the declared `contract` must be the exact contract of its evidence class;
-//! - `source_head` and `hub_head` must equal the manifest's explicit source
-//!   head and current hub head (stale or foreign evidence fails closed);
-//! - the report inside must parse as the class's report shape and its
-//!   self-binding digest must recompute from its fields;
-//! - all five classes must be present, with one program identity, committed
-//!   closure, matched step counts, lifecycle closure, and applied GC.
-//!
-//! Only then is the per-engine [`ProgramProof`] constructed, and only then is
-//! the [`AggregateProgramReceipt`] built and verified. The aggregate
-//! `program_digest` is *derived* from the three real engine proof digests —
-//! this module never synthesizes a fixed success digest, and there is no
-//! fixture fallback: if any engine or class is missing, partial, stale, or
-//! digest-mismatched, assembly fails closed with a typed error.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -166,7 +139,7 @@ pub struct EngineEvidenceSource {
 #[serde(deny_unknown_fields)]
 pub struct ProgramEvidenceManifest {
     pub version: u16,
-    /// Exact explicit source repository head the harness was checked out at.
+    /// Exact source repository head bound by this manifest.
     pub source_head: String,
     /// Current hub repository head at collection time.
     pub hub_head: String,
@@ -296,10 +269,7 @@ impl fmt::Display for ProgramEvidenceError {
 }
 impl std::error::Error for ProgramEvidenceError {}
 
-fn evidence_error(
-    code: ProgramEvidenceFailure,
-    detail: impl Into<String>,
-) -> ProgramEvidenceError {
+fn evidence_error(code: ProgramEvidenceFailure, detail: impl Into<String>) -> ProgramEvidenceError {
     ProgramEvidenceError {
         code,
         detail: detail.into(),
@@ -350,8 +320,8 @@ pub fn assemble_program_evidence(
             "manifest hub_head is not 40..=64 lowercase hex",
         ));
     }
-    let assembly_manifest_digest =
-        Sha256Digest::from_hex(&manifest.assembly_manifest_digest).map_err(|_| {
+    let assembly_manifest_digest = Sha256Digest::from_hex(&manifest.assembly_manifest_digest)
+        .map_err(|_| {
             evidence_error(
                 ProgramEvidenceFailure::InvalidAssemblyManifestDigest,
                 "manifest assembly_manifest_digest is not 64 lowercase hex",
@@ -644,4 +614,3 @@ fn derive_aggregate_program_digest(proofs: &[ProgramProof]) -> Sha256Digest {
     }
     Sha256Digest::from_bytes(sha256(&bytes))
 }
-

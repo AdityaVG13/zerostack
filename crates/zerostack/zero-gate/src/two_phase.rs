@@ -1,39 +1,34 @@
-//! Assembly-bound two-phase execution kernel.
-//!
-//! `ExecutionPermit`, `BrokeredExecution`, `ReadyToFinalize`, and the final
-//! receipts are linear capabilities. Their fields are private, they are not
-//! cloneable, and only the preceding phase can construct the next phase.
+//! Assembly-bound two-phase execution kernel. `ExecutionPermit`, `BrokeredExecution`,
+//! `ReadyToFinalize`, and the final receipts are linear capabilities. Their fields are
+//! private, they are not cloneable, and only the preceding phase can construct the next phase.
 
-use crate::deoptimization::{deoptimization_contract_digest, BaselineExecutionReceipt};
+use crate::deoptimization::{BaselineExecutionReceipt, deoptimization_contract_digest};
 use crate::quality::{
-    quality_envelope_contract_digest, QualityAdmissionRecord, QualityAdmission,
-    QualityEvidenceClass, QualityGuarantee, QualitySelection,
+    QualityAdmission, QualityAdmissionRecord, QualityEvidenceClass, QualityGuarantee,
+    QualitySelection, quality_envelope_contract_digest,
 };
 use crate::semantic_cut::{
-    semantic_cut_contract_digest, SemanticCutCertificateRecord, SemanticCutEvidence,
+    SemanticCutCertificateRecord, SemanticCutEvidence, semantic_cut_contract_digest,
 };
 use crate::transaction::{
-    transaction_contract_digest, RestorationScope, TransactionDisposition,
-    TransactionReceipt,
+    RestorationScope, TransactionDisposition, TransactionReceipt, transaction_contract_digest,
 };
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use sha2::{Digest as _, Sha256};
 use std::collections::BTreeSet;
 use std::fmt;
 use std::time::{SystemTime, UNIX_EPOCH};
 use zero_abi::{
-    canonical_json, raw_worker::EffectClass, reasoning_contract_digest,
-    verify_strict_no_downshift, zbf_contract_digest, ArtifactOwner,
-    Sha256Digest as AbiDigest, DurableProfile, ReasoningContract, RobustSnapCertificate,
-    SnapLevel, StrictReasoningAdmissionRecord, StrictReasoningAdmission, ZbfArtifactKind,
-    ZbfObject,
+    ArtifactOwner, DurableProfile, EffectClass, ReasoningContract, RobustSnapCertificate,
+    Sha256Digest as AbiDigest, SnapLevel, StrictReasoningAdmission, StrictReasoningAdmissionRecord,
+    ZbfArtifactKind, ZbfObject, canonical_json, reasoning_contract_digest,
+    verify_strict_no_downshift, zbf_contract_digest,
 };
-use zero_cert::{effect_witness_contract_digest, EffectAccepted, VerifiedEvidence};
+use zero_cert::{EffectAccepted, VerifiedEvidence, effect_witness_contract_digest};
 
 /// Schema version. Bumped to 6 when the permit lease binding (expiry
 /// deadline, epoch, caller session id) entered the admission/permit digests
-/// (ZS-VERIFY-005).
 pub const TWO_PHASE_SCHEMA_VERSION: u16 = 6;
 pub const GUARD_COUNT: usize = 10;
 pub const MAX_SOURCE_REPOSITORIES: usize = 64;
@@ -854,7 +849,7 @@ pub fn candidate_protocol_identity(binding: &ExecutionBinding) -> Sha256Digest {
     bytes.extend_from_slice(&binding.fixed_model_digest);
     bytes.extend_from_slice(&binding.reasoning_contract_digest);
     bytes.extend_from_slice(&two_phase_contract_digest());
-    let mut framed = b"ZERO.TWO_PHASE.CANDIDATE_PROTOCOL.V1\0".to_vec();
+    let mut framed = b"ZERO.TWO_PHASE.CANDIDATE_PROTOCOL\0".to_vec();
     framed.extend_from_slice(&bytes);
     hash_bytes(&framed)
 }
@@ -884,8 +879,6 @@ pub enum PeerOwner {
 pub enum ExecutionSurface {
     Mcp,
     Cli,
-    ClaudeCode,
-    Pi,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -1114,9 +1107,6 @@ fn safety_shield_digest(
     hash_bytes(&bytes)
 }
 
-/// Backward-compatible kernel name for the proof-carrying quality decision.
-pub type PerformanceAdmission = QualityAdmission;
-
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct GuardEvidence {
@@ -1127,7 +1117,7 @@ pub struct GuardEvidence {
     pub safety_shield: SafetyShieldEvidence,
     pub approval_grant_digest: Option<Sha256Digest>,
     pub irreversible_pre_action_evidence_digest: Option<Sha256Digest>,
-    pub performance: PerformanceAdmission,
+    pub performance: QualityAdmission,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -1140,7 +1130,7 @@ pub struct PrepareRequest {
     pub envelope: WorkerEnvelope,
     pub evidence: GuardEvidence,
     /// Permit lease: the absolute wall-clock deadline (ms since epoch) after
-    /// which the permit MUST NOT start (ZS-VERIFY-005).
+    /// which the permit MUST NOT start.
     pub expiry_deadline_ms: u64,
     /// Permit lease: the epoch the permit is bound to. Zero is refused.
     pub epoch: u64,
@@ -1276,7 +1266,7 @@ impl ExecutionPermit {
         &self.caller_session_id
     }
     /// Start the brokered execution now. An expired permit is refused
-    /// fail-loud with `ExpiredPermit` and returns no execution (ZS-VERIFY-005).
+    /// fail-loud with `ExpiredPermit` and returns no execution.
     pub fn start(self) -> Result<BrokeredExecution, KernelError> {
         let now_ms = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -1316,7 +1306,7 @@ impl ExecutionPermit {
 
 pub fn prepare(request: PrepareRequest) -> Result<ExecutionPermit, PrepareFailure> {
     // Permit lease is mandatory and fail-closed: a permit without a caller
-    // session or epoch is not a permit (ZS-VERIFY-005).
+    // session or epoch is not a permit.
     if request.caller_session_id.is_empty() {
         return Err(PrepareFailure {
             error: KernelError::at(
@@ -1716,7 +1706,7 @@ fn validate_g6(request: &PrepareRequest) -> Result<(), KernelError> {
         return Err(KernelError::at(
             FailureCode::MissingSafetyShield,
             Guard::G6SafetyShield,
-            "V2 shield identity or state binding is invalid",
+            "shield identity or state binding is invalid",
         ));
     }
     match (request.effect_class, shield.kind) {
@@ -1960,7 +1950,10 @@ impl BrokeredExecution {
         Ok(())
     }
 
-    pub fn record_verification(&mut self, evidence_digest: Sha256Digest) -> Result<(), KernelError> {
+    pub fn record_verification(
+        &mut self,
+        evidence_digest: Sha256Digest,
+    ) -> Result<(), KernelError> {
         self.expect(ControllerInstruction::Verify)?; // ubs:ignore — BrokeredExecution::expect instruction matcher, not Result::expect
         if is_zero(&evidence_digest) {
             return Err(KernelError::execution(
@@ -2319,8 +2312,7 @@ fn validate_closure(
                     != execution.request.evidence.safety_shield.acceptance_digest
                 || execution.request.evidence.safety_shield.action_digest
                     != Some(closure.action_digest)
-                || execution.request.evidence.performance.selection()
-                    != QualitySelection::Candidate
+                || execution.request.evidence.performance.selection() != QualitySelection::Candidate
             {
                 return Err(KernelError::at(
                     FailureCode::IncompleteTransactionClosure,
@@ -3044,4 +3036,3 @@ fn hash_bytes(bytes: &[u8]) -> Sha256Digest {
 fn is_zero(digest: &Sha256Digest) -> bool {
     digest.iter().all(|byte| *byte == 0)
 }
-

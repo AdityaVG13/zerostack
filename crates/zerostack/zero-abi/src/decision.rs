@@ -1,13 +1,5 @@
-//! Typed contingent policy over observation classes (ZS-EXEC-004).
-//!
-//! A plan reaching a semantic decision point calls the decision surface with
-//! the point and the observed value. If the supplied contingent policy has a
-//! covering rule, the selected alternative is returned and execution stays
-//! within one call. Otherwise the resolver returns an `Uncovered`
-//! `DecisionRequired` payload -- the interpreter must NOT privately choose a
-//! branch (V6-C03/H03). A rule that selects an alternative the decision point
-//! does not offer is a policy error and fails closed ([`DecisionError::AlternativeNotOffered`]),
-//! never a silent selection.
+//! Typed contingent policy over observation classes. A plan reaching a semantic
+//! decision point calls the decision surface with the point and the observed value.
 
 use std::{error::Error, fmt};
 
@@ -269,17 +261,9 @@ impl ContingentPolicy {
         Ok(())
     }
 
-    /// Resolve one semantic decision point against this policy.
-    ///
-    /// Laws:
-    /// 1. The first rule whose observation class matches the point AND whose
-    ///    observed match accepts the observed value selects its alternative
-    ///    -- but ONLY if that alternative is offered by the point.
-    /// 2. A matching rule whose alternative is not offered by the point is a
-    ///    policy error ([`DecisionError::AlternativeNotOffered`]) and fails
-    ///    closed; it is never a silent selection.
-    /// 3. No matching rule resolves to `Uncovered` with the full
-    ///    `DecisionRequired` payload.
+    /// Resolve one semantic decision point against this policy. Laws 1. The first rule whose
+    /// observation class matches the point AND whose observed match accepts the observed value selects
+    /// its alternative but ONLY if that alternative is offered by the point. 2.
     pub fn resolve(&self, point: &SemanticDecisionPoint, observed_value: &str) -> PolicyResolution {
         for (rule_index, rule) in self.rules.iter().enumerate() {
             if rule.observation_class != point.observation_class {
@@ -328,10 +312,9 @@ impl ContingentPolicy {
 /// Result of resolving a decision point against a contingent policy.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum PolicyResolution {
-    /// A covering rule selected an offered alternative, carrying the index
-    /// of the matching rule (policy order) so callers can report usage
-    /// honestly. This is the ONLY resolution that lets execution continue
-    /// within one call.
+    /// A covering rule selected an offered alternative, carrying the index of
+    /// the matching rule (policy order) so callers can report usage honestly.
+    /// This is the ONLY resolution that lets execution continue within one call.
     Selected {
         alternative: String,
         rule_index: usize,

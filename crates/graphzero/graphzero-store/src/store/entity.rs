@@ -1,28 +1,6 @@
-//! Entity-addressed knowledge: dedup facts, not bytes.
-//!
-//! Content hashing dedups identical bytes. Agents meet the same knowledge as a
-//! read capsule, grep hit, diff hunk, stack frame, or blast node -- five
-//! costumes, one fact. This module is the GraphZero-owned entity layer over the
-//! CAS: refs address facts (`gz://entity/<64-hex>`), byte-level views link to
-//! their entity, and novelty upgrades from "seen these bytes?" to "know this
-//! fact?".
-//!
-//! Mars target (spec §5): second and later encounters of a known entity through
-//! ANY view cost at most 10% of the first encounter.
-//!
-//! Foundation: identity, view linking, novelty billing.
-//! Index-time minting (`graphzero-entity-refs-lfoo.1`): symbol spans mint
-//! `EntityKey`/`EntityId` at publish and persist a sidecar so `gz://node` and
-//! blob span evidence link to `gz://entity/<id>`.
-//! View emission (`graphzero-entity-refs-lfoo.2`): read/grep/diff/trace/blast
-//! costumes call [`link_emitted_view`] so each points at the same entity.
-//! SeenProvider (`.3`): [`crate::EntityAwareSeenProvider`] composes
-//! [`EntityNovelty`] with local/TokenZero byte seen-sets.
-//! Dedup ledger (`.4`): [`EntityDedupLedger`] surfaces cross-view entity dedup
-//! rate next to byte dedup; [`REPEAT_ENCOUNTER_PCT`] gates repeat billing.
-//! TokenZero fusion (`.5`): [`super::entity_novelty_fusion`] persists known
-//! [`EntityId`]s as `zerostack.entity-novelty` under the shared store and
-//! publishes a SharedCas snapshot — no second entity namespace.
+//! Entity-addressed knowledge: dedup facts, not bytes. Content hashing dedups identical bytes.
+//! callers meet the same knowledge as a read capsule, grep hit, diff hunk, stack frame, or blast
+//! node -- five costumes, one fact.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
@@ -44,7 +22,7 @@ pub const ENTITY_KEY_VERSION: u8 = 1;
 pub const REPEAT_ENCOUNTER_PCT: u32 = 10;
 
 /// Local operational dedup ledger schema (never shareable telemetry).
-pub const DEDUP_LEDGER_SCHEMA: &str = "graphzero.dedup_ledger.v1";
+pub const DEDUP_LEDGER_SCHEMA: &str = "graphzero.dedup_ledger";
 
 /// Relative path under a GraphZero store root for the dedup ledger.
 pub const DEDUP_LEDGER_REL: &str = "telemetry/dedup_ledger.json";
@@ -64,9 +42,9 @@ impl EntityId {
         &self.0
     }
 
-    /// Canonical engine-owned ref: `gz://entity/<64-hex>`.
+    /// Canonical bare ref: `entity/<64-hex>`.
     pub fn to_ref(&self) -> String {
-        format!("gz://entity/{}", self.0)
+        format!("entity/{}", self.0)
     }
 }
 
@@ -76,7 +54,7 @@ impl fmt::Display for EntityId {
     }
 }
 
-/// Kind of knowledge fact (v1: symbol definitions only).
+/// Kind of knowledge fact.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum EntityKind {
@@ -98,11 +76,9 @@ impl EntityKind {
     }
 }
 
-/// Canonical key material that hashes to an [`EntityId`].
-///
-/// Identity is knowledge, not presentation: the same symbol + defining content
-/// digest yields the same entity whether the agent met it via read, grep, diff,
-/// or trace.
+/// Canonical key material that hashes to an [`EntityId`]. Identity is
+/// knowledge, not presentation: the same symbol + defining content digest
+/// yields the same entity whether the caller met it via read, grep, diff, or trace.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct EntityKey {
     pub kind: EntityKind,
@@ -126,7 +102,7 @@ impl EntityKey {
         })
     }
 
-    /// Deterministic preimage: `v1\0{kind}\0{symbol}\0{content_digest}`.
+    /// Deterministic preimage: `graphzero.entity\0{kind}\0{symbol}\0{content_digest}`.
     pub fn preimage(&self) -> Vec<u8> {
         let mut out = Vec::with_capacity(
             16 + self.kind.as_str().len() + self.symbol.len() + self.content_digest.len(),
@@ -147,7 +123,7 @@ impl EntityKey {
     }
 }
 
-/// How the agent encountered the fact (presentation costume).
+/// How the caller encountered the fact (presentation costume).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum EntityViewKind {
@@ -176,7 +152,7 @@ impl EntityViewKind {
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct EntityView {
     pub kind: EntityViewKind,
-    /// Engine-owned or ZeroRef view address (`gz://blob/…`, `gz://node/…`, …).
+    /// Canonical view address, such as `z://blob/...` or `node/...`.
     pub view_ref: String,
 }
 
@@ -208,11 +184,8 @@ impl EntityRecord {
     }
 }
 
-/// Default max entities retained in the process-local [`DEFAULT_ENTITY_REGISTRY`].
-///
-/// Override at runtime with `GRAPHZERO_ENTITY_REGISTRY_MAX` (positive usize).
-/// When over the cap, lowest entity-id keys are evicted so RSS stays bounded in
-/// long-lived MCP/daemon processes that open multiple repos.
+/// Default max entities retained in the process-local [`DEFAULT_ENTITY_REGISTRY`]. Override at
+/// runtime with `GRAPHZERO_ENTITY_REGISTRY_MAX` (positive usize).
 pub const DEFAULT_ENTITY_REGISTRY_MAX: usize = 100_000;
 
 /// Env var for process entity-registry soft cap (positive usize).
@@ -302,9 +275,8 @@ impl EntityRegistry {
         }
     }
 
-    /// Drop lowest entity-id entries until `by_id.len() <= max_entities`.
-    ///
-    /// Soft cap: preferred over fail-loud so multi-repo hydrate cannot abort
+    /// Drop lowest entity-id entries until `by_id.len <= max_entities`. Soft
+    /// cap: preferred over fail-loud so multi-repo hydrate cannot abort
     /// queries; callers that need fail-loud can check [`Self::len`] after merge.
     pub fn enforce_cap(&mut self, max_entities: usize) {
         if max_entities == 0 || self.by_id.len() <= max_entities {
@@ -349,23 +321,14 @@ fn enforce_process_entity_cap(g: &mut RegistryInner) -> bool {
     evicted
 }
 
-/// Clears the process-local entity registry.
-///
-/// Production-safe reset for MCP/daemon handoff between repos (also used by tests).
+/// Clear the process-local entity registry and hydration markers.
 pub fn clear_entity_registry() {
     let mut g = DEFAULT_ENTITY_REGISTRY.lock();
     g.registry = EntityRegistry::new();
     g.hydrated_sidecars.clear();
 }
 
-/// Hydrate the process registry from the latest published sidecar on first
-/// registry use (graphzero perf). Snapshot::open no longer hydrates eagerly;
-/// every consumer of the registry calls this once, which restores the exact
-/// pre-deferral semantics at first touch while one-shot CLI query processes
-/// that never read entity views skip the ~2ms sidecar parse entirely.
-///
-/// `store_root` locates the manifest/shards; hydration is a no-op when the
-/// sidecar is missing or already merged.
+/// Hydrate the process registry from the latest published sidecar on first use.
 pub fn entity_registry_hydrate(store_root: &Path) {
     {
         let g = DEFAULT_ENTITY_REGISTRY.lock();
@@ -382,12 +345,6 @@ pub fn entity_registry_hydrate(store_root: &Path) {
     let _ = hydrate_published_entities(&store_root.join("shards"), latest.snapshot_id);
 }
 
-/// Alias of [`clear_entity_registry`] for operator-facing docs.
-#[inline]
-pub fn reset_entity_registry() {
-    clear_entity_registry();
-}
-
 /// Current process registry entity count (after caps).
 pub fn entity_registry_len() -> usize {
     DEFAULT_ENTITY_REGISTRY.lock().registry.len()
@@ -402,7 +359,6 @@ pub fn link_view(key: EntityKey, kind: EntityViewKind, view_ref: impl Into<Strin
 }
 
 /// Link `view_ref` as `kind` onto the entity already known via `anchor_ref`.
-///
 /// Returns `None` when the anchor is not registered (no mint / no hydrate yet).
 pub fn link_view_from_anchor(
     anchor_ref: &str,
@@ -433,10 +389,9 @@ pub fn link_view_from_anchor_with_root(
     Some(link_view(record.key, kind, view_ref))
 }
 
-/// Link an emitted costume to a known entity via any of `anchors` (node, evidence, …).
-///
-/// Tries each non-empty anchor, then `view_ref` itself. Used by read/grep/diff/trace/blast
-/// emission so every costume points at the same [`EntityId`].
+/// Link an emitted costume to a known entity via any of `anchors` (node,
+/// evidence, …). Tries each non-empty anchor, then `view_ref` itself. Used by
+/// read/grep/diff/trace/blast emission so every costume points at the same [`EntityId`].
 pub fn link_emitted_view(
     kind: EntityViewKind,
     view_ref: &str,
@@ -453,7 +408,7 @@ pub fn link_emitted_view(
     link_view_from_anchor(view_ref, kind, view_ref)
 }
 
-/// Convenience: link via `gz://node/<symbol>` and optional evidence ref.
+/// Link a symbol view through its canonical `node/<symbol>` ref.
 pub fn link_emitted_symbol_view(
     kind: EntityViewKind,
     symbol: &str,
@@ -462,7 +417,7 @@ pub fn link_emitted_symbol_view(
     if symbol.is_empty() {
         return link_emitted_view(kind, view_ref, &[]);
     }
-    let node = format!("gz://node/{symbol}");
+    let node = format!("node/{symbol}");
     link_emitted_view(kind, view_ref, &[node.as_str(), view_ref])
 }
 
@@ -489,7 +444,7 @@ pub fn entity_for_view_with_store(store_root: &Path, view_ref: &str) -> Option<E
 }
 
 /// Schema id for publish-time entity sidecars.
-pub const ENTITY_SIDECAR_SCHEMA: &str = "graphzero.entities.v1";
+pub const ENTITY_SIDECAR_SCHEMA: &str = "graphzero.entities";
 
 /// One symbol span ready for index-time entity minting.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -497,9 +452,9 @@ pub struct SymbolSpanMint {
     pub symbol: String,
     /// Full lowercase 64-hex digest of defining content bytes.
     pub content_digest: String,
-    /// `gz://node/<symbol>` (or qualified spelling).
+    /// Canonical `node/<symbol>` address.
     pub node_ref: String,
-    /// `gz://blob/<hash>#B<start>-<end>` name/evidence span.
+    /// `z://blob/<hash>#B<start>-<end>` name/evidence span.
     pub blob_span_ref: String,
 }
 
@@ -522,7 +477,6 @@ pub fn slice_defining_bytes(content: &[u8], start: u32, end: u32) -> Option<&[u8
 }
 
 /// Mint a symbol entity and link node + blob-span evidence views.
-///
 /// Same symbol + defining digest ⇒ same [`EntityId`] across encounters.
 pub fn mint_symbol_span_entity(span: &SymbolSpanMint) -> Result<EntityId> {
     let key = EntityKey::new(
@@ -557,10 +511,8 @@ pub fn mint_symbol_spans(spans: &[SymbolSpanMint]) -> Result<(EntityRegistry, Ve
     Ok((registry, ids))
 }
 
-/// Merge records into the process-local registry (idempotent view union).
-///
-/// After merge, enforces [`entity_registry_max`] so multi-repo hydrate cannot
-/// grow process RSS without bound.
+/// Merge records into the process-local registry (idempotent view union). After merge,
+/// enforces [`entity_registry_max`] so multi-repo hydrate cannot grow process RSS without bound.
 pub fn register_entity_records(records: &[EntityRecord]) {
     let mut g = DEFAULT_ENTITY_REGISTRY.lock();
     for record in records {
@@ -683,7 +635,7 @@ pub fn lookup_entity_with_store(store_root: &Path, id: &EntityId) -> Result<Opti
     Ok(lookup_entity(id))
 }
 
-/// Novelty over facts (not bytes): have we already paid for this entity?
+/// Novelty records whether this entity's facts have already been charged.
 #[derive(Clone, Debug, Default)]
 pub struct EntityNovelty {
     /// entity id hex → first-encounter view kind (None when marked without a view).
@@ -801,9 +753,8 @@ pub fn repeat_bill(first_tokens: u32) -> u32 {
     billed.min(first_tokens)
 }
 
-/// Cross-view entity dedup ledger, surfaced next to byte dedup.
-///
-/// Tracks naive token mass, mass after identical-byte dedup, and mass after
+/// Cross-view entity dedup ledger, surfaced next to byte dedup. Tracks
+/// naive token mass, mass after identical-byte dedup, and mass after
 /// entity novelty (`REPEAT_ENCOUNTER_PCT`). Rates are integer percents.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EntityDedupLedger {
@@ -876,11 +827,9 @@ impl EntityDedupLedger {
         }
     }
 
-    /// Record a destination-level hit without a full novelty bill (session apply).
-    ///
-    /// `byte_repeat`: identical destination already seen.
-    /// `entity_cross_view`: different costume, same fact already known.
-    /// `first`: newly served destination (counts toward naive + after_byte + after_entity).
+    /// Record a destination-level hit without a full novelty bill (session apply). `byte_repeat`:
+    /// identical destination already seen. `entity_cross_view`: different costume, same fact
+    /// already known. `first`: newly served destination (counts toward naive + after_byte + after_entity).
     pub fn record_destination_hit(
         &mut self,
         tokens: u32,
@@ -1104,16 +1053,11 @@ fn validate_entity_id_hex(hex: &str) -> Result<()> {
     if !hex.bytes().all(|b| b.is_ascii_hexdigit()) {
         bail!("entity id must be hexadecimal");
     }
-    // Reject uppercase at the identity boundary so emission stays lowercase.
-    if hex.bytes().any(|b| b.is_ascii_uppercase()) {
-        // Accept on input by normalizing callers; validation for parse paths
-        // that want strict lowercase can check separately. Content digests and
-        // EntityId::parse normalize via to_ascii_lowercase.
-    }
+    // EntityId::parse normalizes valid hexadecimal input to lowercase.
     Ok(())
 }
 
-/// Strict lowercase check used by `gz://entity/` parse.
+/// Validate a canonical lowercase entity id.
 pub fn validate_entity_ref_id(hex: &str) -> Result<()> {
     if hex.len() != 64 {
         bail!("entity id must be full 64-hex SHA-256");

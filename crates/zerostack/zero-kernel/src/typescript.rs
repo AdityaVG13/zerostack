@@ -1,8 +1,5 @@
-//! Bounded TypeScript syntax erasure for ZeroKernel cells.
-//!
-//! The evaluator executes JavaScript semantics. Type-only syntax is replaced
-//! with spaces while preserving newlines and byte offsets. Runtime TypeScript
-//! constructs such as enums and namespaces fail typed instead of being guessed.
+//! Bounded TypeScript syntax erasure for ZeroKernel cells. The evaluator executes JavaScript
+//! semantics. Type-only syntax is replaced with spaces while preserving newlines and byte offsets.
 
 use tree_sitter::{Node, Parser};
 use tree_sitter_typescript::LANGUAGE_TYPESCRIPT;

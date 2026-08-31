@@ -1,47 +1,4 @@
-//! ZS-METRIC-004: exact multi-resource feasible hit-rate intersection solver.
-//!
-//! Cost model (documented). For one resource coordinate the expected cost of
-//! an operation served at hit rate `h` is
-//!
-//! ```text
-//!   cost(h) = preparation + h * hit + (1 - h) * fallback
-//! ```
-//!
-//! where `preparation`, `hit` and `fallback` are measured intervals. A cache
-//! hit costs `hit` with probability `h`; a miss is served by the degraded
-//! fallback path with probability `1 - h`; `preparation` is the fixed
-//! per-operation overhead. The baseline interval is the status-quo no-reuse
-//! cost and anchors the ordering invariants: the whole fallback interval must
-//! sit at or below the whole baseline interval, and the whole hit interval at
-//! or below the whole fallback interval. Baseline itself is not part of the
-//! blended-cost inequality: a miss is served by the fallback path, not by a
-//! full recompute.
-//!
-//! Certified (sufficient) condition. A hit rate `h` is certified for a
-//! coordinate only if the worst case inside the uncertainty box still meets
-//! the target:
-//!
-//! ```text
-//!   preparation.hi + h * hit.hi + (1 - h) * fallback.hi <= target.lo
-//! ```
-//!
-//! Because the coefficients `1`, `h` and `1 - h` are nonnegative on `[0, 1]`,
-//! the worst case is the corner `(preparation.hi, hit.hi, fallback.hi)`. The
-//! exists (necessary) condition uses the best-case corner
-//! `(preparation.lo, hit.lo, fallback.lo)` against `target.hi`; it is
-//! reported for diagnosis only and never certifies.
-//!
-//! Exactness and refusal. All arithmetic is exact rational arithmetic over
-//! i128/u128 with u256 widening for comparisons: no floats, no rounding, and
-//! no guessed splits. The same input always yields the same intervals. When
-//! the certified intersection over every coordinate is empty, the solver
-//! returns a typed blocker naming the first coordinate (in input order) whose
-//! feasible interval disjoints the running intersection; it never returns a
-//! compromise hit rate. Inverted intervals, coordinate values that contradict
-//! the path ordering, and empty coordinate sets are loud refusals.
-//!
-//! The caller builds [`ResourceCoordinate`] from measured resource receipts;
-//! this module is pure interval math and performs no I/O.
+//! Exact multi-resource feasible hit-rate intersection solver.
 
 use std::cmp::Ordering;
 use std::error::Error;
@@ -50,11 +7,9 @@ use std::fmt;
 use serde::de::{self, Deserializer};
 use serde::{Deserialize, Serialize};
 
-/// A closed measured interval `[lo, hi]` of one resource quantity.
-///
-/// `lo > hi` is a typed refusal: an inverted interval is ambiguous data, never
-/// silently swapped. Values are u64; the solver widens to i128/u256 for exact
-/// comparisons.
+/// A closed measured interval `[lo, hi]` of one resource quantity. `lo > hi` is
+/// a typed refusal: an inverted interval is ambiguous data, never silently
+/// swapped. Values are u64; the solver widens to i128/u256 for exact comparisons.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 pub struct Interval {
     /// Lower endpoint of the measured interval.
@@ -174,10 +129,8 @@ impl<'de> Deserialize<'de> for ResourceCoordinate {
     }
 }
 
-/// An exact reduced rational `num / den` with `den > 0`.
-///
-/// Values are reduced at construction, so equality is structural. Comparisons
-/// widen to u256 via schoolbook multiplication: nothing is rounded.
+/// An exact reduced rational `num / den` with `den > 0`. Values are reduced at construction, so
+/// equality is structural. Comparisons widen to u256 via schoolbook multiplication: nothing is rounded.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize)]
 pub struct Rational {
     num: i128,
@@ -295,7 +248,6 @@ fn gcd(a: u128, b: u128) -> u128 {
 }
 
 /// The feasible hit-rate interval of one coordinate, endpoints inclusive.
-///
 /// Both endpoints lie inside `[0, 1]` and `min <= max` by construction.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct FeasibleInterval {
@@ -423,11 +375,9 @@ impl fmt::Display for SolverError {
 
 impl Error for SolverError {}
 
-/// Computes the certified (worst-case) feasible interval for one corner box.
-///
-/// Solves `p + h * hit + (1 - h) * fallback <= t` for `h in [0, 1]` with exact
-/// rational bounds. `None` means the interval is empty: even the best hit rate
-/// cannot meet the target inside this box.
+/// Computes the certified (worst-case) feasible interval for one corner box. Solves `p + h *
+/// hit + (1 - h) * fallback <= t` for `h in [0, 1]` with exact rational bounds. `None` means
+/// the interval is empty: even the best hit rate cannot meet the target inside this box.
 fn corner_interval(p: u64, hit: u64, fallback: u64, target: u64) -> Option<FeasibleInterval> {
     // k = target - p - fallback; slope = hit - fallback. Both fit i128.
     let k = i128::from(target) - i128::from(p) - i128::from(fallback);
@@ -488,10 +438,8 @@ pub fn certified_feasible_interval(coordinate: &ResourceCoordinate) -> Option<Fe
     )
 }
 
-/// The exists (best-case) feasible hit-rate interval of one coordinate.
-///
-/// Diagnostic only: an exists interval never certifies feasibility, because
-/// the true instantiation inside the box is unknown.
+/// The exists (best-case) feasible hit-rate interval of one coordinate. Diagnostic only: an exists
+/// interval never certifies feasibility, because the true instantiation inside the box is unknown.
 pub fn exists_feasible_interval(coordinate: &ResourceCoordinate) -> Option<FeasibleInterval> {
     corner_interval(
         coordinate.preparation.lo,
@@ -501,12 +449,9 @@ pub fn exists_feasible_interval(coordinate: &ResourceCoordinate) -> Option<Feasi
     )
 }
 
-/// Exact direct evaluation of the certified condition at `h`:
-/// `preparation.hi + h * hit.hi + (1 - h) * fallback.hi <= target.lo`.
-///
-/// This is the independent box check used to validate the analytic interval:
-/// for any hit rate, the direct evaluation and the analytic interval must
-/// agree exactly.
+/// Exact direct evaluation of the certified condition at `h` `preparation.hi + h * hit.hi + (1 -
+/// h) * fallback.hi <= target.lo`. This is the independent box check used to validate the analytic
+/// interval for any hit rate, the direct evaluation and the analytic interval must agree exactly.
 pub fn certified_holds(coordinate: &ResourceCoordinate, h: Rational) -> bool {
     let p = i128::from(coordinate.preparation.hi);
     let hit = i128::from(coordinate.hit.hi);
@@ -537,13 +482,8 @@ pub fn exists_holds(coordinate: &ResourceCoordinate, h: Rational) -> bool {
     u256_cmp(lhs, rhs) != Ordering::Greater
 }
 
-/// Computes the certified feasible hit-rate intersection over every
-/// coordinate, or reports the coordinate that makes it empty.
-///
-/// Deterministic: the same coordinates in the same order always yield the
-/// same intersection, and the blocker is always the first coordinate whose
-/// interval disjoints the running intersection. Infeasibility is a typed
-/// error, never a compromise hit rate.
+/// Computes the certified feasible hit-rate intersection over every coordinate, or reports the
+/// coordinate that makes it empty.
 pub fn feasible_intersection(
     coordinates: &[ResourceCoordinate],
 ) -> Result<FeasibleIntersection, SolverError> {
@@ -594,7 +534,7 @@ pub fn feasible_intersection(
     })
 }
 
-// --- Exact u256 arithmetic (schoolbook), used only for comparisons. ---
+// Exact u256 arithmetic (schoolbook), used only for comparisons.
 
 /// A signed 256-bit value in two's complement, `hi * 2^128 + lo` with signed
 /// `hi`. Every intermediate magnitude here is below `2^132`, so `hi` never
@@ -644,12 +584,9 @@ fn u256_unsigned_mul(a: u128, b: u128) -> U256 {
     }
 }
 
-/// Schoolbook u128 x u128 -> u256 multiplication, `(hi, lo)`.
-///
-/// No widening primitive is assumed on the toolchain; this is exact and
-/// carries correctly at every boundary. `pub(crate)` so the theorem-checker
-/// and statistical-bound modules reuse the same widening instead of
-/// reimplementing it.
+/// Schoolbook u128 x u128 -> u256 multiplication, `(hi, lo)`. No widening primitive is assumed on
+/// the toolchain; this is exact and carries correctly at every boundary. `pub(crate)` so the
+/// theorem-checker and statistical-bound modules reuse the same widening instead of reimplementing it.
 pub(crate) fn widen_mul(a: u128, b: u128) -> (u128, u128) {
     const MASK: u128 = u128::MAX >> 64;
     let a_lo = a & MASK;

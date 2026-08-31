@@ -1,18 +1,4 @@
-//! Canonical ZeroStack store-root resolution and on-disk layout.
-//!
-//! One algorithm, three engines. Each engine contributes only its own
-//! directory names and its own opt-in alias environment variables;
-//! precedence, project namespacing, and path shapes are owned here, so two
-//! engines can never disagree about where a logical object lives.
-//!
-//! Before this module existed, TokenZero, FSZero, and GraphZero each carried
-//! their own resolver and had already drifted in ways that split a single
-//! logical store: FSZero honored the environment pin ahead of a project-local
-//! store and without any opt-in gate, TokenZero applied no project
-//! namespacing at all (so unrelated projects sharing one pin collided on one
-//! path), and the three disagreed on the project-key shape. The canonical
-//! rules below are the reconciliation, with the majority behavior winning
-//! except where only one engine was correct.
+//! Canonical ZeroStack store-root resolution and on-disk layout. One algorithm, three engines.
 
 use std::ffi::{OsStr, OsString};
 use std::path::{Component, Path, PathBuf};
@@ -198,17 +184,8 @@ pub struct ResolvedStore {
 }
 
 impl ResolvedStore {
-    /// The single resolution entry point.
-    ///
-    /// Order:
-    /// 1. An existing real `<repo_root>/.zerostack` wins unconditionally.
-    /// 2. Otherwise, an explicitly opted-in non-empty pin is selected.
-    /// 3. Otherwise, an existing engine legacy directory remains selected so
-    ///    authoritative data is never stranded or overwritten.
-    /// 4. Otherwise, `<repo_root>/.zerostack` is the default for a new store.
-    ///
-    /// `repo_root` is normalized, so equivalent path spellings resolve
-    /// identically and containment checks cannot be defeated by spelling.
+    /// The single resolution entry point. Order 1. An existing real `<repo_root>/.zerostack` wins
+    /// unconditionally. 2. Otherwise, an explicitly opted-in non-empty pin is selected. 3.
     pub fn resolve(repo_root: &Path, engine: Engine, env: &StoreEnv) -> Self {
         let repo_root = absolutize(repo_root);
         let pin_value = env
@@ -323,13 +300,8 @@ impl ResolvedStore {
         self.project_key.as_deref()
     }
 
-    /// The directory to hand to a CAS handle: the parent of `blobs/` and of
-    /// `gc/`, which is also the scope of the store coordination lock.
-    ///
-    /// Digest-addressed objects are immutable and self-verifying, so they are
-    /// shared per store root and deliberately not project-namespaced; only
-    /// mutable engine state needs a project key. In legacy mode there is no
-    /// shared root, so the engine's own directory hosts them.
+    /// The directory to hand to a CAS handle: the parent of `blobs/` and of `gc/`, which is also the
+    /// scope of the store coordination lock.
     pub fn cas_host(&self) -> &Path {
         match &self.unified_root {
             Some(root) => root,
@@ -429,7 +401,7 @@ pub struct StoreResolutionReport {
     pub warnings: Vec<String>,
 }
 
-/// Create the directories implied by a resolved store. Separate from
+/// Create the directories implied by an already resolved store.
 pub fn ensure_layout(resolved: &ResolvedStore) -> std::io::Result<()> {
     if resolved.pin_value().is_some_and(literal_tilde_root) {
         return Err(std::io::Error::new(
@@ -470,12 +442,8 @@ fn local_marker_is_symlink(repo_root: &Path) -> bool {
         .unwrap_or(false)
 }
 
-/// Stable project key: sha256 over the absolutized root path string, first
-/// [PROJECT_KEY_HEX_LEN] lowercase hex characters, no prefix.
-///
-/// The key carries no prefix because the namespace already lives in the
-/// [PROJECTS_DIR] path component; a prefix would only make one engine's shard
-/// directory unpredictable from another engine.
+/// Stable project key: sha256 over the absolutized root path string, first [PROJECT_KEY_HEX_LEN]
+/// lowercase hex characters, no prefix.
 pub fn project_key(repo_root: &Path) -> String {
     let abs = absolutize(repo_root);
     let mut h = Sha256::new();
@@ -489,14 +457,8 @@ pub fn project_key(repo_root: &Path) -> String {
     full[..PROJECT_KEY_HEX_LEN].to_string()
 }
 
-/// Absolutize a path for identity purposes: canonicalize when it exists,
-/// otherwise make it absolute against the current directory and remove `.`
-/// and `..` textually.
-///
-/// The textual fallback is what makes the key stable for a root that does not
-/// exist yet: `./repo` and `<cwd>/repo` must hash identically, or two engines
-/// disagree about a project's shard the moment one of them runs before the
-/// directory is created.
+/// Absolutize a path for identity purposes: canonicalize when it exists, otherwise make it absolute
+/// against the current directory and remove `.` and `..` textually.
 pub fn absolutize(path: &Path) -> PathBuf {
     if let Ok(canonical) = path.canonicalize() {
         return canonical;

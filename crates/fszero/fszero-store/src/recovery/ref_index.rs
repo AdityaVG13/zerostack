@@ -19,14 +19,9 @@ pub(super) fn ref_index_enabled() -> bool {
     std::env::var("FSZERO_REF_INDEX").ok().as_deref() != Some("0")
 }
 
-/// Keys that carry a durable identity worth cross-root recovery.
-/// Blob content refs + CodeMode execution artifacts (post-edit readback).
-/// Transient `fz://seq/` and bare named keys (`read`, `search`) stay local.
+/// Return true for canonical durable identities that support cross-root recovery.
 pub(super) fn ref_indexable(key: &str) -> bool {
-    if key.starts_with("fz://seq/") {
-        return false;
-    }
-    key.starts_with("fz://blob/") || key.starts_with("fz://codemode/")
+    key.starts_with("z://blob/")
 }
 
 pub(super) fn ref_index_root() -> Option<PathBuf> {
@@ -42,10 +37,7 @@ pub(super) fn ref_index_root() -> Option<PathBuf> {
 
 pub(super) fn ref_index_shard_path(ref_id: &str) -> Option<PathBuf> {
     let root = ref_index_root()?;
-    let id = ref_id
-        .strip_prefix("fz://blob/")
-        .or_else(|| ref_id.strip_prefix("tz://blob/"))
-        .or_else(|| ref_id.strip_prefix("gz://blob/"));
+    let id = ref_id.strip_prefix("z://blob/");
     let shard = if let Some(hash) = id {
         let mut s = hash
             .chars()
@@ -63,18 +55,6 @@ pub(super) fn ref_index_shard_path(ref_id: &str) -> Option<PathBuf> {
         fszero_core::hexutil::sha256_hex_of(h.finalize().into())[..2].to_string()
     };
     Some(root.join(format!("{shard}.ndjson")))
-}
-
-/// One locator covers every immutable artifact below an execution base. The
-/// exact payload key still selects and verifies bytes in the located store.
-pub(super) fn codemode_execution_base_ref(ref_id: &str) -> Option<String> {
-    const PREFIX: &str = "fz://codemode/execution/";
-    let rest = ref_id.strip_prefix(PREFIX)?;
-    let (execution_id, _) = rest.split_once('/')?;
-    if execution_id.is_empty() {
-        return None;
-    }
-    Some(format!("{PREFIX}{execution_id}"))
 }
 
 pub(super) fn ensure_ref_index_dir(dir: &Path) -> std::io::Result<()> {
@@ -104,9 +84,8 @@ pub(super) fn parse_ref_index_line(line: &str, order: u64) -> Option<RefIndexEnt
     })
 }
 
-/// Returns parsed entries plus the count of damaged (unparseable) lines —
-/// a torn shard tail parses up to the tear; the damage count is reported by
-/// callers, never silently absorbed (fszero-ku8).
+/// Returns parsed entries plus the count of damaged (unparseable) lines a torn shard tail
+/// parses up to the tear; the damage count is reported by callers, never silently absorbed.
 pub(super) fn read_ref_index_entries_reporting(shard: &Path) -> (Vec<RefIndexEntry>, usize) {
     let Ok(text) = std::fs::read_to_string(shard) else {
         return (Vec::new(), 0);
@@ -130,7 +109,7 @@ pub(super) fn read_ref_index_entries(shard: &Path) -> Vec<RefIndexEntry> {
     read_ref_index_entries_reporting(shard).0
 }
 
-/// Process-global in-memory map of ref-index shards (fszero-lim).
+/// Process-global in-memory map of ref-index shards.
 /// Keyed by shard path; invalidated on append/compact when mtime/len changes.
 pub(super) struct RefIndexShardCache {
     mtime: Option<SystemTime>,
@@ -206,9 +185,8 @@ fn lookup_ref_index_entry_exact(ref_id: &str) -> Option<RefIndexEntry> {
             }
         }
     }
-    // Miss/stale: load shard map **outside** the mutex so concurrent expand of
-    // other shards (or the same shard) is not serialized on disk read/parse
-    // (fszero-ref-index-cache-mutex-io-1qgf). Double-check before insert.
+    // Miss/stale: load shard map **outside** the mutex so concurrent expand of other shards
+    // (or the same shard) is not serialized on disk read/parse. Double-check before insert.
     let by_ref = load_ref_index_shard_map(&shard);
     let result = by_ref.get(ref_id).cloned();
     if let Ok(mut cache) = REF_INDEX_SHARD_CACHE.lock() {
@@ -220,26 +198,16 @@ fn lookup_ref_index_entry_exact(ref_id: &str) -> Option<RefIndexEntry> {
         cache.insert(shard, RefIndexShardCache { mtime, len, by_ref });
         return result;
     }
-    // Lock poisoned: return the map we already loaded uncached.
+    // A poisoned lock returns the already-loaded map without caching it.
     result
 }
 
 pub(super) fn lookup_ref_index_entry(ref_id: &str) -> Option<RefIndexEntry> {
-    lookup_ref_index_entry_exact(ref_id).or_else(|| {
-        codemode_execution_base_ref(ref_id)
-            .as_deref()
-            .and_then(lookup_ref_index_entry_exact)
-    })
+    lookup_ref_index_entry_exact(ref_id)
 }
 
 pub(super) fn prune_missing_ref_index_entries_for(ref_id: &str) {
-    let mut refs = vec![ref_id.to_string()];
-    if let Some(base) = codemode_execution_base_ref(ref_id) {
-        refs.push(base);
-    }
-    for reference in refs {
-        if let Some(shard) = ref_index_shard_path(&reference) {
-            let _ = write_compacted_ref_index_shard(&shard, true);
-        }
+    if let Some(shard) = ref_index_shard_path(ref_id) {
+        let _ = write_compacted_ref_index_shard(&shard, true);
     }
 }

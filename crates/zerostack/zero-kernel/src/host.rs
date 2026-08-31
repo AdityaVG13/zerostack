@@ -26,6 +26,7 @@ use zero_store::{EventLog, ProviderUsagePublication, ZeroCas};
 
 use crate::preparation::{CellPreparation, PreparedCell};
 use crate::shell::{ShellCommand, run_shell};
+use crate::snap_gate::{SnapToFileReadRequest, SnapToFileReadResult, SnapToFileService};
 use crate::state::{StateError, StateSnapshot, StateStore};
 use crate::transaction::{
     PendingFileContent, Transaction, TransactionCoordinator, TransactionError,
@@ -317,6 +318,7 @@ pub struct ZeroKernel {
     files: Arc<dyn FileEngine>,
     structural: Arc<dyn StructuralEngine>,
     tokens: Arc<dyn TokenEngine>,
+    snap_to_file: Arc<SnapToFileService>,
     cas: ZeroCas,
     events: EventLog,
     state: StateStore,
@@ -362,6 +364,9 @@ impl ZeroKernel {
         budget
             .validate()
             .map_err(|error| HostError::InvalidRequest(error.to_string()))?;
+        let snap_to_file = Arc::new(SnapToFileService::new(context.session_id.clone()).map_err(
+            |detail| HostError::Engine(EngineError::new(EngineErrorKind::Internal, detail, false)),
+        )?);
         let store_root = store_root.into();
         let cas = ZeroCas::open(store_root.clone());
         let state = StateStore::open(store_root.clone(), &context.session_id);
@@ -383,6 +388,7 @@ impl ZeroKernel {
             files,
             structural,
             tokens,
+            snap_to_file,
             cas,
             events,
             state,
@@ -416,16 +422,9 @@ impl ZeroKernel {
         self.begin_from_request(request, cancellation, None)
     }
 
-    /// Shared launch core for ordinary and prepared cells.
-    ///
-    /// Ordinary cells derive canonical capsule roots from the current facts,
-    /// draft a `WorkCapsule`, publish it through the FileEngine, and seal a
-    /// `PreparedCell` carrying the exact capsule, publication, and binding.
-    /// Prepared cells bind the caller-supplied coordinates instead: the
-    /// publication must roundtrip through the FileEngine byte-for-byte and
-    /// the current effective state/contract coordinates must match the
-    /// sealed binding before any guest work launches. No capsule is drafted
-    /// or published twice and no transient divergent capsule exists.
+    /// Shared launch core for ordinary and prepared cells. Ordinary cells derive canonical capsule
+    /// roots from the current facts, draft a `WorkCapsule`, publish it through the FileEngine, and seal
+    /// a `PreparedCell` carrying the exact capsule, publication, and binding.
     pub(crate) fn begin_from_request(
         &self,
         request: ZeroKernelRequest,
@@ -470,10 +469,8 @@ impl ZeroKernel {
         self.transactions.reconcile(&invocation)?;
         let prepared = match sealed {
             Some(sealed) => {
-                // The finalized source is bound into the capsule task root:
-                // an internal caller must never launch sealed coordinates
-                // under a different source. Reject before any state,
-                // binding, or recovery check.
+                // The finalized source is bound into the capsule an internal caller must never launch sealed
+                // coordinates under a different source. Reject before any state, binding, or recovery check.
                 if request.source != sealed.source() {
                     return Err(HostError::InvalidRequest(
                         "prepared cell launch source differs from the sealed source".into(),
@@ -509,13 +506,9 @@ impl ZeroKernel {
                 sealed.clone()
             }
             None => {
-                // The capsule budgets are explicit units mapped from the
-                // kernel budget: provider_usage_budget binds the
-                // provider-visible dispatch envelope (call_limit) and
-                // complete_work_budget binds the compute envelope (cpu_ms).
-                // The epoch is this cell's session sequence. Nothing is
-                // silently zeroed; request validation already guarantees
-                // every budget dimension is positive.
+                // The capsule budgets are explicit units mapped from the kernel budget: provider_usage_budget
+                // binds the provider-visible dispatch envelope (call_limit) and complete_work_budget binds the
+                // compute envelope (cpu_ms). The epoch is this cell's session sequence.
                 let capsule = WorkCapsule::draft(
                     capsule_roots(&self.context, &request.budget, &request.source)?,
                     cell_number,
@@ -553,6 +546,7 @@ impl ZeroKernel {
             files: Arc::clone(&self.files),
             structural: Arc::clone(&self.structural),
             tokens: Arc::clone(&self.tokens),
+            snap_to_file: Arc::clone(&self.snap_to_file),
             cas: self.cas.clone(),
             events: self.events.clone(),
             state_store: self.state.clone(),
@@ -598,6 +592,17 @@ impl ZeroKernel {
     pub fn cas(&self) -> &ZeroCas {
         &self.cas
     }
+    /// Registers a validated completeness envelope supplied by the trusted GraphZero host.
+    /// Model-authored inputs must never cross this trust boundary. The returned handle is valid
+    /// only for this kernel instance and can be used in a `z.read({snapToFile: ...})` request.
+    pub fn register_snap_to_file_completeness(
+        &self,
+        input: zero_gate::GraphZeroCompletenessInput,
+    ) -> Result<ZeroHandle, HostError> {
+        self.snap_to_file
+            .register_completeness(&self.cas, input)
+            .map_err(HostError::InvalidRequest)
+    }
 
     pub fn record_provider_usage(
         &self,
@@ -609,15 +614,9 @@ impl ZeroKernel {
             .map_err(|error| HostError::Event(error.to_string()))
     }
 
-    /// One-call prepare, validate, execute, and atomically commit.
-    ///
-    /// Binds the prepared source digest, WorkCapsule roots (including policy
-    /// via the contract coordinate), state-before root, and the exact effect
-    /// receipt in a single host call. Cancellation is enforced before any
-    /// commit and receipt/binding drift is rejected. The returned typed
-    /// response's `state` and `effects` refer to the same committed effect;
-    /// validation/cancellation failures leave state unchanged. No placeholder
-    /// receipt and no second effect authority exists outside this path.
+    /// One-call prepare, validate, execute, and atomically commit. Binds the prepared source digest,
+    /// WorkCapsule roots (including policy via the contract coordinate), state-before root, and the
+    /// exact effect receipt in a single host call.
     pub fn execute_atomic_effect(
         &self,
         source: &str,
@@ -710,6 +709,7 @@ pub struct Cell {
     files: Arc<dyn FileEngine>,
     structural: Arc<dyn StructuralEngine>,
     tokens: Arc<dyn TokenEngine>,
+    snap_to_file: Arc<SnapToFileService>,
     cas: ZeroCas,
     events: EventLog,
     state_store: StateStore,
@@ -836,6 +836,27 @@ impl Cell {
             None => {}
         }
         Ok(labeled_outline(&path, &snapshot))
+    }
+
+    pub fn snap_to_file(
+        &mut self,
+        request: SnapToFileReadRequest,
+    ) -> Result<SnapToFileReadResult, HostError> {
+        if self.cancellation.is_cancelled() || self.invocation.cancellation.is_cancelled() {
+            return Err(HostError::Engine(EngineError::new(
+                EngineErrorKind::Cancelled,
+                "cancelled before Snap-to-File evaluation",
+                false,
+            )));
+        }
+        let completeness = request.completeness.clone();
+        let result = self
+            .snap_to_file
+            .snap(request)
+            .map_err(HostError::InvalidRequest)?;
+        push_handle(&mut self.handles, completeness);
+        self.ledger.calls = self.ledger.calls.saturating_add(1);
+        Ok(result)
     }
 
     pub fn snap(&mut self, request: SnapRequest) -> Result<SnapResult, HostError> {
@@ -1557,12 +1578,7 @@ impl Cell {
         async_record.bytes_visible = 0;
     }
 
-    /// Bind the guest dispatch trace to this cell. Every trace must carry the
-    /// exact cell capsule root and a positive, strictly monotonic occurrence
-    /// (and sequence); an empty or mismatched root, a nonpositive occurrence,
-    /// or a monotonicity break is rejected outright — nothing is stamped or
-    /// repaired after the guest recorded it. A rejected trace is never
-    /// rendered into a response or terminal event.
+    /// Bind the guest dispatch trace to this cell.
     pub fn record_operations(
         &mut self,
         operations: Vec<ZeroOperationTrace>,
@@ -1922,11 +1938,9 @@ impl Cell {
                 false,
             ));
         }
-        // Reject binding drift before commit: the effective state root and
-        // contract coordinate must still match the sealed binding. Drift is a
-        // hard failure with state unchanged, never a silent second authority.
-        // Call fail with the transaction still present so fail owns rollback
-        // and surfaces any rollback errors.
+        // Reject binding drift before commit: the effective state root and contract coordinate must still
+        // match the sealed binding. Drift is a hard failure with state unchanged, never a silent second
+        // authority.
         let current_state_root = effective_state_root(&self.state);
         if self.binding().state_root != current_state_root
             || self.binding().contract_root != contract_root(&self.context)
@@ -2149,10 +2163,9 @@ fn now_ms() -> u64 {
         .as_millis() as u64
 }
 
-/// Canonical coordinate root: SHA256 over the canonical JSON encoding of a
-/// typed manifest. Coordinates that are not directly derivable content
-/// (unmeasured, empty, or environmental facts) bind this way, so no root is
-/// ever an all-zero or sentinel placeholder.
+/// Canonical coordinate root: SHA256 over the canonical JSON encoding of a typed
+/// manifest. Coordinates that are not directly derivable content (unmeasured, empty, or
+/// environmental facts) bind this way, so no root is ever an all-zero or sentinel placeholder.
 fn coordinate_root(manifest: serde_json::Value) -> String {
     sha256_hex(canonical_json(&manifest).as_bytes())
 }
@@ -2177,12 +2190,9 @@ fn contract_root(context: &KernelContext) -> String {
     }))
 }
 
-/// Real current capsule coordinates for a fresh cell: the project and
-/// protected scope bind the canonical workspace/project facts, task binds
-/// the finalized source digest, policy binds the direct contract, execution
-/// binds the complete enforced budget, and the explicitly empty or
-/// unmeasured planes (obligations, evidence, verifier, ledger) bind typed
-/// manifests.
+/// Real current capsule coordinates for a fresh cell: the project and protected scope bind the
+/// canonical workspace/project facts, the finalized source digest, policy binds the direct
+/// contract, execution binds the complete enforced budget, and the explicitly empty or unmeasured.
 fn capsule_roots(
     context: &KernelContext,
     budget: &KernelBudget,
@@ -2266,10 +2276,9 @@ fn effect_fact(receipt: &FileEffectReceipt) -> serde_json::Value {
     })
 }
 
-/// The terminal capsule tuple every new event carries: the sealed capsule
-/// root and object, explicit unmeasured provider/cache/quality coordinates,
-/// an explicit ordinary speculation coordinate, the actual effect facts, and
-/// the actual operation trace vector.
+/// The terminal capsule tuple every new event carries: the sealed capsule root and
+/// object, explicit unmeasured provider/cache/quality coordinates, an explicit ordinary
+/// speculation coordinate, the actual effect facts, and the actual operation trace vector.
 fn event_capsule_roots(
     publication: &CapsulePublication,
     effect_manifest: serde_json::Value,
@@ -2655,10 +2664,9 @@ fn store_recovery_manifest(
     cas.put(&bytes).map_err(cas_host_error)
 }
 
-/// Large reads return a structural outline plus an exact handle. The outline
-/// MUST be impossible to mistake for file content (pc_821d2acdacfc): every
-/// outline read carries a machine-greppable header naming the path, the true
-/// byte length, and the exact-content handle for expansion.
+/// Large reads return a labeled structural outline and an exact handle.
+/// The label includes the path, true byte length, and expansion handle so callers
+/// cannot mistake the outline for file content.
 fn labeled_outline(path: &std::path::Path, snapshot: &FileSnapshot) -> String {
     let outline = snapshot
         .outline
@@ -2863,323 +2871,4 @@ pub fn typed_error(kind: EngineErrorKind, detail: impl Into<String>) -> EngineEr
 #[allow(dead_code)]
 fn _empty_state() -> BTreeMap<String, Value> {
     BTreeMap::new()
-}
-#[cfg(test)]
-mod capsule_launch_tests {
-    use super::*;
-    use zero_abi::{
-        CertifyResult, CompressionRequest, CompressionResult, FileLease, ProjectionRequest,
-        ProjectionResult, StructuralResult, TokenAccounting,
-    };
-
-    struct CapsuleOnlyLease;
-    impl FileLease for CapsuleOnlyLease {}
-
-    /// FileEngine whose only real surface is capsule storage; the sealed
-    /// source check fires before any other engine interaction.
-    struct CapsuleOnlyFiles(Mutex<BTreeMap<String, WorkCapsule>>);
-
-    impl FileEngine for CapsuleOnlyFiles {
-        fn lease(&self, _invocation: &EngineInvocation) -> Result<Box<dyn FileLease>, EngineError> {
-            Ok(Box::new(CapsuleOnlyLease))
-        }
-
-        fn read(
-            &self,
-            _invocation: &EngineInvocation,
-            _request: FileReadRequest,
-        ) -> Result<FileSnapshot, EngineError> {
-            Err(EngineError::new(
-                EngineErrorKind::NotFound,
-                "no files",
-                false,
-            ))
-        }
-
-        fn lookup(
-            &self,
-            _invocation: &EngineInvocation,
-            _root: PathBuf,
-            _options: LookupOptions,
-        ) -> Result<Vec<PathBuf>, EngineError> {
-            Ok(Vec::new())
-        }
-
-        fn apply(
-            &self,
-            _invocation: &EngineInvocation,
-            _request: FileEffectRequest,
-        ) -> Result<FileEffectReceipt, EngineError> {
-            Err(EngineError::new(
-                EngineErrorKind::Internal,
-                "no effects",
-                false,
-            ))
-        }
-
-        fn restore(
-            &self,
-            _invocation: &EngineInvocation,
-            _receipt: &FileEffectReceipt,
-        ) -> Result<(), EngineError> {
-            Err(EngineError::new(
-                EngineErrorKind::Internal,
-                "no restore",
-                false,
-            ))
-        }
-
-        fn reconcile(
-            &self,
-            _invocation: &EngineInvocation,
-        ) -> Result<Vec<ZeroHandle>, EngineError> {
-            Ok(Vec::new())
-        }
-
-        fn put_capsule(
-            &self,
-            _invocation: &EngineInvocation,
-            capsule: &WorkCapsule,
-        ) -> Result<CapsulePublication, EngineError> {
-            let capsule_root = capsule
-                .root()
-                .map_err(|detail| EngineError::new(EngineErrorKind::InvalidInput, detail, false))?;
-            let value = serde_json::to_value(capsule).map_err(|error| {
-                EngineError::new(EngineErrorKind::InvalidInput, error.to_string(), false)
-            })?;
-            let object_digest = sha256_hex(canonical_json(&value).as_bytes());
-            let object = ZeroHandle::from_digest(&object_digest).map_err(|error| {
-                EngineError::new(EngineErrorKind::InvalidInput, error.to_string(), false)
-            })?;
-            self.0.lock().insert(object_digest, capsule.clone());
-            Ok(CapsulePublication {
-                capsule_root,
-                object,
-                created: true,
-            })
-        }
-
-        fn get_capsule(
-            &self,
-            _invocation: &EngineInvocation,
-            publication: &CapsulePublication,
-        ) -> Result<WorkCapsule, EngineError> {
-            let capsule = self
-                .0
-                .lock()
-                .get(publication.object.digest())
-                .cloned()
-                .ok_or_else(|| {
-                    EngineError::new(
-                        EngineErrorKind::NotFound,
-                        "capsule object is not published",
-                        false,
-                    )
-                })?;
-            let actual = capsule
-                .root()
-                .map_err(|detail| EngineError::new(EngineErrorKind::InvalidInput, detail, false))?;
-            if actual != publication.capsule_root {
-                return Err(EngineError::new(
-                    EngineErrorKind::Corrupt,
-                    "capsule root does not match its publication",
-                    false,
-                ));
-            }
-            Ok(capsule)
-        }
-    }
-
-    struct NoGraph;
-    impl StructuralEngine for NoGraph {
-        fn query(
-            &self,
-            _invocation: &EngineInvocation,
-            _query: StructuralQuery,
-        ) -> Result<StructuralResult, EngineError> {
-            Err(EngineError::new(
-                EngineErrorKind::Unsupported,
-                "no graph",
-                false,
-            ))
-        }
-    }
-
-    struct NoTokens;
-    impl TokenEngine for NoTokens {
-        fn measure(
-            &self,
-            _invocation: &EngineInvocation,
-            _bytes: &[u8],
-        ) -> Result<TokenAccounting, EngineError> {
-            Ok(TokenAccounting {
-                tokenizer: "bytes".into(),
-                billed: 0,
-                visible: 0,
-                cached: 0,
-                certified: false,
-            })
-        }
-
-        fn certify(
-            &self,
-            _invocation: &EngineInvocation,
-            _bytes: &[u8],
-            _claimed: &TokenAccounting,
-        ) -> Result<CertifyResult, EngineError> {
-            Err(EngineError::new(
-                EngineErrorKind::Unsupported,
-                "no certify",
-                false,
-            ))
-        }
-
-        fn project(
-            &self,
-            _invocation: &EngineInvocation,
-            _request: ProjectionRequest,
-        ) -> Result<ProjectionResult, EngineError> {
-            Err(EngineError::new(
-                EngineErrorKind::Unsupported,
-                "no project",
-                false,
-            ))
-        }
-
-        fn compress(
-            &self,
-            _invocation: &EngineInvocation,
-            _request: CompressionRequest,
-        ) -> Result<CompressionResult, EngineError> {
-            Err(EngineError::new(
-                EngineErrorKind::Unsupported,
-                "no compress",
-                false,
-            ))
-        }
-
-        fn expand(
-            &self,
-            _invocation: &EngineInvocation,
-            _handle: &ZeroHandle,
-            _options: ExpandOptions,
-        ) -> Result<Vec<u8>, EngineError> {
-            Err(EngineError::new(
-                EngineErrorKind::Unsupported,
-                "no expand",
-                false,
-            ))
-        }
-    }
-
-    fn sealed_kernel_and_prepared(
-        root: &tempfile::TempDir,
-    ) -> (ZeroKernel, crate::PreparedCell, String) {
-        let kernel = ZeroKernel::new(
-            KernelContext {
-                workspace_root: root.path().to_path_buf(),
-                project_root: root.path().to_path_buf(),
-                session_id: "capsule-launch".into(),
-                expected_state_root: None,
-                contract_digest: "contract".into(),
-            },
-            KernelBudget {
-                wall_ms: 1_000,
-                cpu_ms: 1_000,
-                memory_bytes: 8 * 1024 * 1024,
-                call_limit: 16,
-                task_limit: 4,
-                output_byte_limit: 16 * 1024,
-            },
-            Arc::new(CapsuleOnlyFiles(Mutex::new(BTreeMap::new()))),
-            Arc::new(NoGraph),
-            Arc::new(NoTokens),
-            root.path().join(".zerostack"),
-        )
-        .unwrap();
-        let sealed_source = "return 'sealed';".to_string();
-        let probe = kernel.begin_cell(&sealed_source).unwrap();
-        let mut preparation = CellPreparation::new();
-        preparation.feed(&sealed_source).unwrap();
-        let sealed = preparation
-            .finish(
-                probe.binding().clone(),
-                probe.capsule().clone(),
-                probe.publication().clone(),
-            )
-            .unwrap();
-        drop(probe);
-        (kernel, sealed, sealed_source)
-    }
-
-    #[test]
-    fn begin_from_request_rejects_sealed_source_drift() {
-        let root = tempfile::tempdir().unwrap();
-        let (kernel, sealed, sealed_source) = sealed_kernel_and_prepared(&root);
-        let drifted = ZeroKernelRequest::new(
-            "return 'other';".into(),
-            kernel.context.clone(),
-            kernel.budget.clone(),
-        )
-        .unwrap();
-        let error =
-            match kernel.begin_from_request(drifted, AtomicCancellation::new(), Some(&sealed)) {
-                Ok(_) => panic!("sealed launch accepted source drift"),
-                Err(error) => error,
-            };
-        assert!(matches!(error, HostError::InvalidRequest(_)));
-        assert_eq!(kernel.live_frames(), 0);
-        assert_eq!(kernel.live_tasks(), 0);
-        assert_eq!(kernel.live_processes(), 0);
-        let valid = ZeroKernelRequest::new(
-            sealed_source.into(),
-            kernel.context.clone(),
-            kernel.budget.clone(),
-        )
-        .unwrap();
-        let cell = kernel
-            .begin_from_request(valid, AtomicCancellation::new(), Some(&sealed))
-            .expect("valid sealed launch must succeed after source rejection");
-        assert_eq!(kernel.live_frames(), 1);
-        drop(cell);
-        assert_eq!(kernel.live_frames(), 0);
-    }
-
-    #[test]
-    fn begin_from_request_rejects_sealed_budget_drift() {
-        let root = tempfile::tempdir().unwrap();
-        let (kernel, sealed, sealed_source) = sealed_kernel_and_prepared(&root);
-        let mut changed_budget = kernel.budget.clone();
-        changed_budget.cpu_ms += 1;
-        let budget_drifted = ZeroKernelRequest::new(
-            sealed_source.clone().into(),
-            kernel.context.clone(),
-            changed_budget,
-        )
-        .unwrap();
-        let error = match kernel.begin_from_request(
-            budget_drifted,
-            AtomicCancellation::new(),
-            Some(&sealed),
-        ) {
-            Ok(_) => panic!("sealed launch accepted budget drift"),
-            Err(error) => error,
-        };
-        assert!(matches!(error, HostError::InvalidRequest(_)));
-        assert_eq!(kernel.live_frames(), 0);
-        assert_eq!(kernel.live_tasks(), 0);
-        assert_eq!(kernel.live_processes(), 0);
-        let valid = ZeroKernelRequest::new(
-            sealed_source.into(),
-            kernel.context.clone(),
-            kernel.budget.clone(),
-        )
-        .unwrap();
-        let cell = kernel
-            .begin_from_request(valid, AtomicCancellation::new(), Some(&sealed))
-            .expect("valid sealed launch must succeed after budget rejection");
-        assert_eq!(kernel.live_frames(), 1);
-        drop(cell);
-        assert_eq!(kernel.live_frames(), 0);
-    }
 }

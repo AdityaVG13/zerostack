@@ -1,23 +1,18 @@
-//! Strict validation of the FSZero world-ref v1 enumeration envelope.
-//!
-//! Contract source: FSZero `docs/design/world-ref.md` (fszero-cbt, world-ref
-//! v1). GraphZero owns strict schema validation only; FSZero owns payload
-//! resolution and byte authority. Unknown fields are additive and ignored;
-//! unknown major versions, missing/malformed contract fields, and
-//! mismatched world refs fail loudly before any graph work is attempted.
+//! Validates FSZero world-ref enumeration envelopes.
+//! GraphZero validates schema; FSZero owns payload resolution and bytes.
 
 use serde_json::{Map, Value};
 
-/// Supported world-envelope major version (FSZero world-ref v1).
+/// Supported world-envelope major version (FSZero world-ref).
 pub const WORLD_ENVELOPE_VERSION: u64 = 1;
 
-/// Canonical world ref scheme prefix (`fz://world/<wid>`, `<wid>` = `W[0-9]+`).
-pub const WORLD_REF_PREFIX: &str = "fz://world/";
+/// Canonical world ref prefix (`world/<wid>`, `<wid>` = `W[0-9]+`).
+pub const WORLD_REF_PREFIX: &str = "world/";
 
-/// Parsed and validated FSZero world-ref v1 enumeration envelope.
+/// Parsed and validated FSZero world-ref enumeration envelope.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WorldEnvelope {
-    /// Canonical ref, e.g. `fz://world/W3`.
+    /// Canonical ref, e.g. `world/W3`.
     pub world_ref: String,
     /// World id, e.g. `W3`.
     pub world: String,
@@ -39,7 +34,7 @@ pub enum WorldEnvelopeError {
     Malformed(String),
     /// Version field is an integer but not the supported major.
     UnsupportedMajor { found: u64 },
-    /// `world_ref` does not match the canonical `fz://world/W<digits>` shape.
+    /// `world_ref` does not match the canonical `world/W<digits>` shape.
     InvalidWorldRef(String),
     /// Envelope `world_ref` disagrees with the caller's request `world_ref`.
     MismatchedWorldRef { envelope: String, requested: String },
@@ -70,11 +65,9 @@ impl std::fmt::Display for WorldEnvelopeError {
 
 impl std::error::Error for WorldEnvelopeError {}
 
-/// Parse and strictly validate an FSZero world-ref v1 enumeration envelope.
-///
-/// Accepts additive unknown fields; rejects unknown major versions, missing or
-/// malformed contract fields, and non-canonical world refs before any graph
-/// work is attempted.
+/// Parse and strictly validate an FSZero world-ref enumeration envelope. Accepts
+/// additive unknown fields; rejects unknown major versions, missing or malformed
+/// contract fields, and non-canonical world refs before any graph work is attempted.
 pub fn parse_world_envelope(input: &str) -> Result<WorldEnvelope, WorldEnvelopeError> {
     let value: Value = serde_json::from_str(input)
         .map_err(|e| WorldEnvelopeError::Malformed(format!("invalid JSON: {e}")))?;
@@ -84,7 +77,7 @@ pub fn parse_world_envelope(input: &str) -> Result<WorldEnvelope, WorldEnvelopeE
     parse_world_envelope_value(obj)
 }
 
-/// Validate an already-decoded JSON object as a world-ref v1 envelope.
+/// Validate an already-decoded JSON object as a world-ref envelope.
 pub fn parse_world_envelope_value(
     obj: &Map<String, Value>,
 ) -> Result<WorldEnvelope, WorldEnvelopeError> {
@@ -103,13 +96,12 @@ pub fn parse_world_envelope_value(
         .and_then(Value::as_str)
         .ok_or_else(|| WorldEnvelopeError::Malformed("missing string world_ref field".into()))?
         .to_string();
-    validate_world_ref(&world_ref)?;
-
     let world = obj
         .get("world")
         .and_then(Value::as_str)
         .ok_or_else(|| WorldEnvelopeError::Malformed("missing string world field".into()))?
         .to_string();
+    let world_ref = canonicalize_world_ref(&world_ref)?;
     let expected_world = world_ref
         .strip_prefix(WORLD_REF_PREFIX)
         .expect("world_ref prefix validated above");
@@ -151,24 +143,26 @@ pub fn parse_world_envelope_value(
     })
 }
 
-/// Validate the canonical `fz://world/W<digits>` world ref shape (at least
-/// one digit required).
-pub fn validate_world_ref(world_ref: &str) -> Result<(), WorldEnvelopeError> {
-    let Some(wid) = world_ref.strip_prefix(WORLD_REF_PREFIX) else {
-        return Err(WorldEnvelopeError::InvalidWorldRef(world_ref.into()));
-    };
+/// Canonicalize `world/W<digits>`.
+pub fn canonicalize_world_ref(world_ref: &str) -> Result<String, WorldEnvelopeError> {
+    let wid = world_ref
+        .strip_prefix(WORLD_REF_PREFIX)
+        .ok_or_else(|| WorldEnvelopeError::InvalidWorldRef(world_ref.into()))?;
     let tail = wid.strip_prefix('W').unwrap_or("");
     if tail.is_empty() || !tail.bytes().all(|b| b.is_ascii_digit()) {
         return Err(WorldEnvelopeError::InvalidWorldRef(world_ref.into()));
     }
-    Ok(())
+    Ok(format!("{WORLD_REF_PREFIX}{wid}"))
 }
 
-/// Bind an optional FSZero world envelope to a speculative blast request.
-///
-/// Returns the effective world ref: the envelope's `world_ref` when the
-/// request ref is empty, otherwise the request ref (which must equal the
-/// envelope's). A missing envelope leaves the request ref unchanged.
+/// Validate canonical `world/W<digits>` with at least one decimal digit.
+pub fn validate_world_ref(world_ref: &str) -> Result<(), WorldEnvelopeError> {
+    canonicalize_world_ref(world_ref).map(|_| ())
+}
+
+/// Bind an optional FSZero world envelope to a speculative blast request. Returns the effective
+/// world ref: the envelope's `world_ref` when the request ref is empty, otherwise the request
+/// ref (which must equal the envelope's). A missing envelope leaves the request ref unchanged.
 pub fn bind_world_envelope(
     requested: &str,
     envelope_text: Option<&str>,
@@ -177,15 +171,15 @@ pub fn bind_world_envelope(
         return Ok(requested.to_string());
     };
     let envelope = parse_world_envelope(text)?;
-    if !requested.is_empty() && requested != envelope.world_ref {
+    if requested.is_empty() {
+        return Ok(envelope.world_ref);
+    }
+    let requested = canonicalize_world_ref(requested)?;
+    if requested != envelope.world_ref {
         return Err(WorldEnvelopeError::MismatchedWorldRef {
             envelope: envelope.world_ref,
-            requested: requested.to_string(),
+            requested,
         });
     }
-    Ok(if requested.is_empty() {
-        envelope.world_ref
-    } else {
-        requested.to_string()
-    })
+    Ok(requested)
 }

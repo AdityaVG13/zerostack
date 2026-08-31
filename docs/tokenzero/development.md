@@ -10,49 +10,39 @@ TokenZero requires Rust 1.98 nightly or newer. `rust-toolchain.toml` pins
 ```bash
 git clone https://github.com/AdityaVG13/zerostack
 cd zerostack
-cargo build --release -p tokenzero-cli --bin tokenzero
+cargo build --release -p zero-kernel
 
-./target/release/tokenzero doctor --json
-./target/release/tokenzero read README.md --json
-./target/release/tokenzero find "TokenZero" docs --json
-./target/release/tokenzero tree . --depth 2 --json
-./target/release/tokenzero run -- cargo test -p tokenzero-kernel --lib
-./target/release/tokenzero expand tz://blob/<id> --selector raw
+./target/release/zero-kernel doctor
+./target/release/zero-kernel exec
 ```
+
+TokenZero is domain logic plus the ZeroKernel adapter. There is no `tokenzero` product CLI.
 
 ## Verify
 
 Use a named package and exact `--lib`, `--bin`, or `--test` target. Do not treat `cargo test --workspace` as the project gate.
 
 ```bash
-cargo test -p tokenzero-kernel --lib
+cargo test -p zero-token --lib
 cargo fmt --all -- --check
 ```
 
-Format changed Rust files with `rustfmt --edition 2024 -- <file.rs>`. There is no `scripts/rustfmt_targeted.sh` helper in this repository.
+Format changed Rust files with `rustfmt --edition 2024 -- <file.rs>`.
 
 ## Workspace
 
-Ten Cargo packages under `crates/tokenzero/`:
+The internal domain library lives under `crates/tokenzero/`; its ZeroKernel adapter lives under `crates/zerostack/`.
 
 | Crate | Responsibility |
 | --- | --- |
-| `tokenzero-core` | Compression model and content-addressed exact-recovery refs |
-| `tokenzero-recovery` | Bounded recovery cache with exact byte-recovery for refs |
-| `tokenzero-runtime` | Runtime and session orchestration for the context layer |
-| `tokenzero-filters` | Content filters and selectors for compression |
-| `tokenzero-cli` | Standalone CLI and classic MCP compatibility entrypoint |
-| `tokenzero-engine` | Typed TokenEngine adapter consumed by ZeroKernel |
-| `tokenzero-kernel` | Kernel-facing measurement and projection |
-| `tokenzero-install` | Installer and agent-wiring |
-| `tokenzero-pulse` | Pulse telemetry |
-| `tokenzero-test-support` | Shared test helpers |
+| `tokenzero-core` | Tokenizer identity, compression, model artifacts, and exact-recovery decisions |
+| `zero-token` | Typed `TokenEngine` implementation consumed by ZeroKernel |
 
-The `tokenzero` CLI binary is produced by `tokenzero-cli`.
+Hub Pulse telemetry lives in `crates/zerostack/zero-pulse`. There is no `tokenzero pulse` command.
 
 ## Verification artifacts
 
-Local TokenZero proof artifacts are not a ZeroStack release channel. Do not treat `results/current/` listings, MCP smoke JSON, or platform uploads as a tagged release, Homebrew bottle, or npm publication.
+Local TokenZero proof artifacts are not ZeroStack release channels.
 
 ## Release boundaries
 

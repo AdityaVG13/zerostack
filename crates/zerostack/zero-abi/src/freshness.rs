@@ -1,9 +1,6 @@
-//! Engine-neutral certified invalidation and freshness contract.
-//!
-//! Engines own dependency discovery. This module freezes only shared identities,
-//! canonical digests, closure comparison, and fail-closed outcomes. Wall clock is
-//! deliberately absent: repository, assembly, index, and closure identities are
-//! the only freshness authority.
+//! Engine-neutral certified invalidation and freshness contract. Engines own dependency discovery.
+//! This module freezes only shared identities, canonical digests, closure comparison, and
+//! fail-closed outcomes.
 
 use crate::{Sha256Digest, canonical_json, sha256};
 use serde::{Deserialize, Serialize};

@@ -26,12 +26,19 @@ function summarize(samples) {
   };
 }
 
+function assertCompleted(response) {
+  if (response?.outcome !== 'Completed') {
+    throw new Error(`benchmark cell returned ${response?.outcome ?? 'no outcome'}: ${JSON.stringify(response?.error ?? null)}`);
+  }
+  return response;
+}
+
 async function measure(kernel, source) {
   const samples = [];
   for (let i = 0; i < RUNS; i += 1) {
     const started = performance.now();
     try {
-      await kernel.executeCell(source);
+      assertCompleted(await kernel.executeCell(source));
     } catch (error) {
       throw new Error(`benchmark cell failed at sample ${i + 1}`, { cause: error });
     }
@@ -48,13 +55,13 @@ async function main() {
     await kernel.initialize();
     const initializationMs = performance.now() - initializedAt;
 
-    await kernel.executeCell('return 1');
+    assertCompleted(await kernel.executeCell('return 1'));
     const noopFrame = await measure(kernel, 'return 1');
     const readFile = await measure(kernel, "return await z.read('Cargo.toml')");
     const fixture = await fs.stat(path.join(ROOT, 'Cargo.toml'));
 
     report = {
-      schema: 'zerokernel.reference-benchmark.v1',
+      schema: 'zerokernel.reference-benchmark',
       measured_at: new Date().toISOString(),
       environment: {
         platform: os.platform(),
@@ -62,7 +69,9 @@ async function main() {
         cpu: os.cpus()[0]?.model ?? 'unknown',
         memory_bytes: os.totalmem(),
         node: process.version,
-        binding: 'packaged platform prebuild',
+        binding: process.env.ZERO_KERNEL_NATIVE_ADDON
+          ? 'explicit development override'
+          : 'packaged platform prebuild',
       },
       method: {
         runs_per_operation: RUNS,

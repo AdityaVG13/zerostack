@@ -1,22 +1,4 @@
-//! Per-derived-row provenance (`zerostack.derivation-provenance`).
-//!
-//! Bead: `graphzero-iubq` (migrate after TokenZero freeze `04b9db5`).
-//! Prior attach work: `graphzero-3wbh` / `.1` / `.2` / `.3`.
-//!
-//! Freeze owner: TokenZero `schemas/derivation-provenance/v1/`.
-//! Orthogonal to frozen `zerostack.cas-gc.legacy` (untouched). This module emits
-//! the shared contract behind `GRAPHZERO_PROVENANCE` / `ZEROSTACK_PROVENANCE`
-//! opt-in:
-//!
-//! - durable `ProvenanceRecord` explaining WHY a derived row exists
-//! - attach on the worktree-overlay edge derivation path
-//! - attach on the full-index shard/global CSR edge path
-//! - attach on outline/semantic/capsule derivation transforms
-//! - query + doctor orphan surface (source blob missing from CAS)
-//!
-//! Records live under engine-private
-//! `<store-root>/graphzero/provenance/<row_id>.json` so v1 GC collectors that
-//! only discover `gc/roots|pins|leases` are unaffected.
+//! Persists provenance for each derived row under the shared derivation schema.
 
 use std::fs::{self, OpenOptions};
 use std::io::Write;
@@ -32,8 +14,7 @@ use crate::fast_hex;
 use super::path_safety::file_name_to_str;
 use super::refs::blob_span_ref;
 
-/// Frozen schema id (`zerostack.derivation-provenance`, TokenZero SHA `04b9db5`).
-/// Replaces retired proposal tag `zerostack.cas-gc.vnext-provenance`.
+/// Canonical derivation-provenance schema id.
 pub const PROVENANCE_SCHEMA_VERSION: &str = "zerostack.derivation-provenance";
 
 /// Record type for one derived-row provenance entry.
@@ -43,19 +24,19 @@ pub const RECORD_TYPE_DERIVATION: &str = "derivation-provenance";
 pub const PRODUCING_ENGINE: &str = "graphzero";
 
 /// Transform id for worktree-overlay scan edges (first attach path).
-pub const TRANSFORM_OVERLAY_EXTRACT_EDGES: &str = "graphzero.overlay.extract_edges.v1";
+pub const TRANSFORM_OVERLAY_EXTRACT_EDGES: &str = "graphzero.overlay.extract_edges";
 
 /// Transform id for full-index edges folded into the snapshot graph (global CSR).
-pub const TRANSFORM_INDEXER_SHARD_EDGES: &str = "graphzero.indexer.shard_edges.v1";
+pub const TRANSFORM_INDEXER_SHARD_EDGES: &str = "graphzero.indexer.shard_edges";
 
 /// Transform id for outline/skeleton name spans derived from defs.
-pub const TRANSFORM_OUTLINE_EXTRACT_SPANS: &str = "graphzero.outline.extract_spans.v1";
+pub const TRANSFORM_OUTLINE_EXTRACT_SPANS: &str = "graphzero.outline.extract_spans";
 
 /// Transform id for semantic definition chunks (full block body).
-pub const TRANSFORM_SEMANTIC_EXTRACT_CHUNKS: &str = "graphzero.semantic.extract_chunks.v1";
+pub const TRANSFORM_SEMANTIC_EXTRACT_CHUNKS: &str = "graphzero.semantic.extract_chunks";
 
-/// Transform id for durable query-capsule spills (`gz://query/<id>`).
-pub const TRANSFORM_CAPSULE_BUILD: &str = "graphzero.capsule.build.v1";
+/// Transform id for durable `query/<id>` capsule spills.
+pub const TRANSFORM_CAPSULE_BUILD: &str = "graphzero.capsule.build";
 
 /// Derived artifact kinds (beyond `graph_edge`).
 pub const DERIVED_KIND_OUTLINE_SPAN: &str = "outline_span";
@@ -91,7 +72,7 @@ pub struct ProvenanceRecord {
     pub row_id: String,
     /// Kind of derived artifact (`graph_edge`, …).
     pub derived_kind: String,
-    /// Expandable evidence ref for the derived span (`gz://blob/<hash>#B…`).
+    /// Expandable evidence ref for the derived span (`z://blob/<hash>#B…`).
     pub derived_ref: String,
     /// Source blob digest (lowercase 64-hex SHA-256).
     pub source_blob_digest: String,
@@ -277,7 +258,7 @@ impl ProvenanceRecord {
         )
     }
 
-    /// Durable query-capsule spill derivation (`gz://query/<id>`).
+    /// Durable `query/<id>` capsule-spill derivation.
     pub fn for_query_capsule(
         source_blob_digest: &str,
         capsule_id: &str,
@@ -299,7 +280,7 @@ impl ProvenanceRecord {
             record_type: RECORD_TYPE_DERIVATION.to_string(),
             row_id,
             derived_kind: DERIVED_KIND_QUERY_CAPSULE.to_string(),
-            derived_ref: format!("gz://query/{capsule_id}"),
+            derived_ref: format!("query/{capsule_id}"),
             source_blob_digest: digest,
             byte_span: ByteSpan { start, end },
             line_span: content.and_then(|c| line_span_for_bytes(c, start, end)),
@@ -347,7 +328,7 @@ pub fn row_id_for_edge(
     kind: u8,
 ) -> String {
     let mut hasher = Sha256::new();
-    hasher.update(b"graphzero.provenance.edge.v1\0");
+    hasher.update(b"graphzero.provenance.edge\0");
     hasher.update(transform_id.as_bytes());
     hasher.update(b"\0");
     hasher.update(source_blob.as_bytes());
@@ -372,7 +353,7 @@ pub fn row_id_for_span(
     symbol: Option<&str>,
 ) -> String {
     let mut hasher = Sha256::new();
-    hasher.update(b"graphzero.provenance.span.v1\0");
+    hasher.update(b"graphzero.provenance.span\0");
     hasher.update(transform_id.as_bytes());
     hasher.update(b"\0");
     hasher.update(source_blob.as_bytes());
@@ -409,7 +390,6 @@ pub fn write_provenance_record(store_root: &Path, record: &ProvenanceRecord) -> 
 }
 
 /// Attach provenance for one overlay edge when opt-in is enabled.
-///
 /// No-op (returns `Ok(None)`) when provenance is disabled.
 pub fn attach_overlay_edge_provenance(
     store_root: &Path,
@@ -435,7 +415,6 @@ pub fn attach_overlay_edge_provenance(
 }
 
 /// Attach provenance for one full-index shard/global CSR edge when opt-in is enabled.
-///
 /// No-op (returns `Ok(None)`) when provenance is disabled.
 pub fn attach_indexer_shard_edge_provenance(
     store_root: &Path,
@@ -460,10 +439,9 @@ pub fn attach_indexer_shard_edge_provenance(
     )
 }
 
-/// Attach outline + semantic provenance for one def/span when opt-in is enabled.
-///
-/// Outline uses the identifier/name span; semantic uses the full definition block
-/// (falls back to the name span when block bounds are absent).
+/// Attach outline + semantic provenance for one def/span when opt-in is
+/// enabled. Outline uses the identifier/name span; semantic uses the full
+/// definition block (falls back to the name span when block bounds are absent).
 pub fn attach_def_span_provenance(
     store_root: &Path,
     source_blob_digest: &str,
@@ -595,7 +573,7 @@ pub fn read_provenance_record(store_root: &Path, row_id: &str) -> Result<Option<
     Ok(Some(record))
 }
 
-/// Look up provenance by derived evidence ref (`gz://blob/…#B…`).
+/// Look up provenance by derived evidence ref (`z://blob/…#B…`).
 pub fn lookup_by_derived_ref(
     store_root: &Path,
     derived_ref: &str,

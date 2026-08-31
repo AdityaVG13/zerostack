@@ -1,19 +1,5 @@
-//! RACC deterministic-facts-only contract guard.
-//!
-//! GraphZero results must be cacheable, which requires every emitted fact to be
-//! a deterministic function of (snapshot, operator, args). This module is the
-//! enforced contract: it canonicalizes a fact payload for byte-identity
-//! comparison across runs, and audits payloads for the two failure classes that
-//! break caching or model-independence:
-//!
-//! 1. nondeterminism leaking into facts (wall-clock timestamps, absolute temp
-//!    paths, random ids, pid/host identity);
-//! 2. speculative semantic claims (`this probably does auth`, `should be
-//!    refactored`) instead of parser/index-derived structure.
-//!
-//! [`debug_assert_deterministic_facts`] is called from the query surface router
-//! and from blast serialization, so debug and test builds fail loudly when a
-//! change introduces either class.
+//! RACC deterministic-facts-only contract guard. GraphZero results must be cacheable, which
+//! requires every emitted fact to be a deterministic function of (snapshot, operator, args).
 
 use serde::Serialize;
 use serde_json::{Map, Value};

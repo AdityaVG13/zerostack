@@ -1,0 +1,29 @@
+[package]
+name = "zero-token"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Typed TokenZero TokenEngine implementation for ZeroKernel"
+autotests = false
+publish = false
+
+[dependencies]
+tiktoken-rs.workspace = true
+tokenzero-core = { workspace = true }
+zero-abi.workspace = true
+zero-store.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+sha2.workspace = true
+tempfile.workspace = true
+zerostack-conformance.workspace = true
+zerostack-test-support = { workspace = true, features = ["kernel"] }
+
+[[test]]
+name = "token_certify"
+path = "../../../tests/tokenzero/adapter_certify.rs"
+
+[[test]]
+name = "token_output_contract"
+path = "../../../tests/tokenzero/adapter_output_contract_goldens.rs"

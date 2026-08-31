@@ -1,7 +1,6 @@
-//! Provider-neutral Work Capsule, turn, interrupt, governor, and promotion contracts.
-//!
-//! Every transition and promotion decision fails closed. Roots bind semantics;
-//! FSZero remains the byte-storage authority and no contract selects a model.
+//! Provider-neutral Work Capsule, turn, interrupt, governor, and promotion
+//! contracts. Every transition and promotion decision fails closed. Roots bind
+//! semantics; FSZero remains the byte-storage authority and no contract selects a model.
 
 use std::collections::BTreeMap;
 
@@ -113,11 +112,8 @@ impl WorkCapsule {
         self.roots.validate()
     }
 
-    /// Deterministic Draft genesis. Identical full inputs (roots, epoch, and
-    /// both budgets) always produce the same capsule and the same capsule
-    /// root. The epoch must be positive; budgets are caller-provided and
-    /// retained exactly, so zero is representable only when explicitly
-    /// supplied — never silently manufactured.
+    /// Deterministic Draft genesis. Identical full inputs (roots, epoch, and both budgets) always
+    /// produce the same capsule and the same capsule root.
     pub fn draft(
         roots: CapsuleRoots,
         epoch: u64,
@@ -142,11 +138,9 @@ impl WorkCapsule {
         Ok(sha256_hex(canonical_json(&value).as_bytes()))
     }
 
-    /// Successor law. `next` is a legal successor of `self` only when both
-    /// capsules validate (version nonzero, epoch positive), the epoch is
-    /// nondecreasing, the state edge is a legal [`CapsuleState`] edge, and
-    /// the immutable roots (project, task, protected_scope, fallback) are
-    /// unchanged. All other roots may evolve.
+    /// Successor law. `next` is a legal successor of `self` only when both capsules validate (version
+    /// nonzero, epoch positive), the epoch is nondecreasing, the state edge is a legal [`CapsuleState`]
+    /// edge, and the immutable roots (project,, protected_scope, fallback) are unchanged.
     pub fn validate_successor(&self, next: &Self) -> Result<(), String> {
         self.validate()?;
         next.validate()?;

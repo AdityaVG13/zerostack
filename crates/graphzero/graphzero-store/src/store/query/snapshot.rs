@@ -4,7 +4,6 @@ use std::cell::RefCell;
 use std::collections::{BTreeSet, HashMap};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
@@ -37,10 +36,7 @@ use crate::store::csr::edge_kind;
 use crate::store::symbol_table::SymbolTable;
 use crate::{CsrAdjacency, ReverseIndex};
 
-/// Process-wide warm snapshot cache (MCP / multi-call CodeMode).
-///
-/// Without this, every MCP tool call cold-opens + fully replays WAL — the
-/// GraphZero twin of TokenZero's per-has_ref journal reload storm.
+/// Process-wide warm snapshot cache that avoids reopening shards and replaying the WAL on each call.
 const SNAPSHOT_CACHE_CAP: usize = 4;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -61,10 +57,9 @@ fn snapshot_cache() -> &'static Mutex<Vec<SnapCacheEntry>> {
     CACHE.get_or_init(|| Mutex::new(Vec::with_capacity(SNAPSHOT_CACHE_CAP)))
 }
 
-/// In-flight cold opens for `open_cached` misses (single-flight coalescing).
-///
-/// Concurrent openers for the same `(store_root, tip key)` wait on one `Snapshot::open`
-/// instead of stampeding mmap/WAL/hydrate work (graphzero-0td2d).
+/// In-flight cold opens for `open_cached` misses (single-flight
+/// coalescing). Concurrent openers for the same `(store_root, tip key)`
+/// wait on one `Snapshot::open` instead of stampeding mmap/WAL/hydrate work.
 struct OpenFlight {
     /// `None` while the leader is opening; `Some` when finished (Ok or shared error text).
     state: Mutex<Option<std::result::Result<Arc<Snapshot>, String>>>,
@@ -75,14 +70,6 @@ fn open_flights() -> &'static Mutex<HashMap<(PathBuf, SnapCacheKey), Arc<OpenFli
     static FLIGHTS: OnceLock<Mutex<HashMap<(PathBuf, SnapCacheKey), Arc<OpenFlight>>>> =
         OnceLock::new();
     FLIGHTS.get_or_init(|| Mutex::new(HashMap::new()))
-}
-
-/// How many cold `open_with_timing` calls `open_cached` led (tests / single-flight proof).
-static OPEN_CACHED_COLD_OPENS: AtomicUsize = AtomicUsize::new(0);
-
-#[cfg(test)]
-fn take_open_cached_cold_opens() -> usize {
-    OPEN_CACHED_COLD_OPENS.swap(0, Ordering::SeqCst)
 }
 
 fn wal_fingerprint(wal_dir: &Path) -> u64 {
@@ -98,7 +85,7 @@ fn wal_fingerprint(wal_dir: &Path) -> u64 {
             .modified()
             .ok()
             .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-            .map(|d| d.as_nanos() as u64)
+            .map(|duration| u64::try_from(duration.as_nanos()).unwrap_or(u64::MAX))
             .unwrap_or(0);
         acc = acc
             .wrapping_mul(1315423911)
@@ -124,17 +111,11 @@ pub struct Snapshot {
     global: ShardReader,
     paths: HashMap<ContentHash, PathRecord>,
     locate_index: OnceLock<Result<LocateIndex, String>>,
-    /// One-shot verdict that the published symbol table is dense and
-    /// name-sorted (the locate fast-path invariant). Cached so long-lived
-    /// MCP/CodeMode servers verify once per snapshot, not per query.
+    /// Cached verdict for the dense, name-sorted symbol-table invariant.
     locate_fast_path: OnceLock<bool>,
-    /// Snapshot-scoped verified-blob cache (graphzero blob-read hot path).
-    /// `read_blob_at_path` re-reads AND re-hashes the object on every
-    /// `get_hex`; blast's file-target pass reads one blob per break site, so
-    /// a single op paid N full SHA-256 verifications of the same small set of
-    /// files. Content is immutable under its digest and the store root is
-    /// bound to this open snapshot, so a per-snapshot memo preserves the
-    /// integrity invariant (each distinct path is still read+verified once).
+    /// Snapshot-scoped verified-blob cache (graphzero blob-read hot path). `read_blob_at_path` re-reads
+    /// AND re-hashes the object on every `get_hex`; blast's file-target pass reads one blob per break
+    /// site, so a single op paid N full SHA-256 verifications of the same small set of files.
     blob_cache: std::sync::OnceLock<std::sync::Mutex<HashMap<String, std::sync::Arc<Vec<u8>>>>>,
     snap_edit_index: OnceLock<Result<SnapEditIndex, String>>,
     snapshot_cov_counts: OnceLock<Result<[usize; 3], String>>,
@@ -151,11 +132,9 @@ pub struct Snapshot {
     pub(crate) pending: PendingFacts,
 }
 
-/// Host-timed Snapshot::open / open_cached stage breakdown
-/// (env `GRAPHZERO_OPEN_PHASE_TIMING=1`).
-///
-/// When the env is set, each open records wall-ms per stage and callers may
-/// drain via [`take_open_phase_timings`]. When off: no Instant clocks.
+/// Host-timed Snapshot::open / open_cached stage breakdown (env `GRAPHZERO_OPEN_PHASE_TIMING=1`).
+/// When the env is set, each open records wall-ms per stage and callers may drain via
+/// [`take_open_phase_timings`]. When off: no Instant clocks.
 #[derive(Clone, Debug, Default, Serialize)]
 pub struct OpenPhaseTimings {
     pub compact_ms: f64,
@@ -274,7 +253,9 @@ impl Snapshot {
                     open_phase_add(|t| t.manifest_ms += open_phase_ms(start.elapsed()));
                 }
                 let Some(entry) = manifest.latest().cloned() else {
-                    bail!("no snapshot published; run `graphzero index` first");
+                    bail!(
+                        "no snapshot published; index the workspace through ZeroKernel before querying"
+                    );
                 };
                 let global_path = shards_dir.join(global_file_name(entry.snapshot_id));
                 let shard_start = time_phases.then(Instant::now);
@@ -312,11 +293,8 @@ impl Snapshot {
                 open_phase_add(|t| t.paths_ms += open_phase_ms(start.elapsed()));
             }
 
-            // Entity hydration is deferred to first registry use (graphzero
-            // perf): the sidecar parse cost (~2ms) no longer lands on every
-            // open. Registry consumers go through `entity_registry_hydrate`
-            // which hydrates once on demand; CLI query processes that never
-            // touch entity views skip it entirely.
+            // Defer entity hydration until first registry use. Query paths that never
+            // touch entity views skip the sidecar parse cost.
 
             if matches!(timing_mode, OpenTimingMode::Standalone) {
                 if let Some(start) = total_start {
@@ -352,9 +330,7 @@ impl Snapshot {
         }
     }
 
-    /// Warm open: compact an oversized WAL, then reuse a process-cached snapshot
-    /// when tip identity is unchanged. Compaction is synchronous so the first
-    /// CodeMode plan never pays an unbounded WAL replay.
+    /// Compact an oversized WAL, then reuse a process-cached snapshot when tip identity is unchanged.
     #[tracing::instrument(skip_all, fields(store_root = %store_root.display(), has_repo = repo_root.is_some()))]
     pub fn open_cached(store_root: &Path, repo_root: Option<&Path>) -> Result<Arc<Self>> {
         Self::open_cached_with_compactor(store_root, repo_root, || {
@@ -387,7 +363,7 @@ impl Snapshot {
             open_phase_add(|t| t.manifest_ms += open_phase_ms(start.elapsed()));
         }
         let Some(entry) = manifest.latest().cloned() else {
-            bail!("no snapshot published; run `graphzero index` first");
+            bail!("no snapshot published; index the workspace through ZeroKernel before querying");
         };
         let key = cache_key_for(store_root, &entry);
         if let Ok(guard) = snapshot_cache().lock() {
@@ -430,7 +406,6 @@ impl Snapshot {
                     repo_root,
                     OpenTimingMode::Continue,
                 )?);
-                OPEN_CACHED_COLD_OPENS.fetch_add(1, Ordering::SeqCst);
                 if let Some(start) = total_start {
                     open_phase_add(|t| t.total_ms = open_phase_ms(start.elapsed()));
                 }
@@ -462,7 +437,7 @@ impl Snapshot {
             }
         }
 
-        // Leader may race a completed open that filled the cache after our miss check.
+        // Another completed open may fill the cache after the leader's miss check.
         if let Ok(guard) = snapshot_cache().lock() {
             if let Some(hit) = guard
                 .iter()
@@ -484,7 +459,6 @@ impl Snapshot {
             }
         }
 
-        OPEN_CACHED_COLD_OPENS.fetch_add(1, Ordering::SeqCst);
         let open_result =
             Self::open_with_timing(store_root, repo_root, OpenTimingMode::Continue).map(Arc::new);
         match open_result {
@@ -541,8 +515,6 @@ impl Snapshot {
     }
 
     /// Drop only the cached entry for `store_root`, leaving other stores warm.
-    /// Used after watch reindex / notify so multi-repo MCP/CodeMode caches are
-    /// not process-wide nuked (graphzero-n4xyy).
     pub fn invalidate_open_cache_for(store_root: &Path) {
         if let Ok(mut guard) = snapshot_cache().lock() {
             guard.retain(|e| e.store_root != store_root);
@@ -555,15 +527,6 @@ impl Snapshot {
 
     pub fn symbol_count(&self) -> Result<usize> {
         Ok(super::super::symbol_table::SymbolTable::from_view(&self.global.view()?)?.len())
-    }
-
-    /// Strict ordinal substrate bound to this opened snapshot's global shard.
-    pub fn ordinal_sidecar(&self) -> Result<super::super::ordinals::OrdinalSidecar> {
-        super::super::ordinals::load_published_for_global(
-            &self.store_root.join("shards"),
-            self.entry.snapshot_id,
-            Some(&self.global.view()?),
-        )
     }
 
     pub fn global_view(&self) -> Result<super::super::hot_path::ShardView<'_>> {
@@ -612,7 +575,7 @@ impl Snapshot {
         }
     }
 
-    /// Tier-C `hot` / `changes` snap hooks (P3.2 FR-013).
+    /// Tier-C snapshot hooks for `hot` and `changes`.
     pub fn git_empirical_capsule(
         &self,
         query: &str,
@@ -643,12 +606,12 @@ impl Snapshot {
                 break;
             }
             let evidence = if hp.content_sha256.is_empty() {
-                format!("gz://path/{}", hp.path)
+                format!("path/{}", hp.path)
             } else {
-                format!("gz://blob/{}", hp.content_sha256)
+                format!("z://blob/{}", hp.content_sha256)
             };
             destinations.push(DestinationRef {
-                destination_ref: format!("gz://path/{}", hp.path),
+                destination_ref: format!("path/{}", hp.path),
                 evidence_ref: evidence,
                 label: format!("{}:{:.1}", hp.path, hp.churn_score),
                 path: Some(hp.path.clone()),
@@ -759,10 +722,9 @@ impl Snapshot {
     }
 
     pub fn blob_bytes(&self, hash_hex: &str) -> Option<Vec<u8>> {
-        // Snapshot-scoped memo: verified-once per (store, hash) per process.
-        // Integrity is preserved — the first read still goes through
-        // `BlobStore::get_hex`, which rejects digest mismatches; later reads
-        // of the same immutable object reuse those verified bytes.
+        // Snapshot-scoped memo: verified-once per (store, hash) per process. Integrity is
+        // preserved — the first read still goes through `BlobStore::get_hex`, which rejects
+        // digest mismatches; later reads of the same immutable object reuse those verified bytes.
         if let Some(cache) = self.blob_cache.get()
             && let Ok(guard) = cache.lock()
             && let Some(bytes) = guard.get(hash_hex)
@@ -801,14 +763,8 @@ impl Snapshot {
         }
     }
 
-    /// Warm edit-anchor index. The first call builds from snapshot data (parallel);
-    /// resolves are I/O-free afterwards.
-    ///
-    /// Sidecar persistence was tried and REVERTED (graphzero perf ledger): a
-    /// JSON-framed sidecar measured 124ms warm load vs 67ms parallel rebuild —
-    /// deserializing ~50k entries with token sets and trigram arrays costs more
-    /// than rebuilding from the mmap'd shards. Retry only with a compact binary
-    /// encoding (packed trigrams, joined tokens) if snap gets hotter.
+    /// Warm edit-anchor index. The first call builds from snapshot data (parallel); resolves are
+    /// I/O-free afterwards.
     pub fn snap_edit_index(&self) -> Result<&SnapEditIndex> {
         match self
             .snap_edit_index
@@ -1122,7 +1078,7 @@ impl Capsule {
 }
 
 fn silent_risk_blob_ref(hash_hex: &str) -> String {
-    format!("gz://blob/{hash_hex}#B0-0")
+    format!("z://blob/{hash_hex}#B0-0")
 }
 
 fn cmp_silent_risk(
@@ -1194,7 +1150,7 @@ fn scan_path_silent_risks(
 }
 
 const SILENT_RISK_CACHE_SCHEMA: u32 = 1;
-const SILENT_RISK_ALGORITHM: &str = "silent-risk-v1";
+const SILENT_RISK_ALGORITHM: &str = "silent-risk";
 
 #[derive(Debug, Deserialize, Serialize)]
 struct SilentRiskCache {
@@ -1247,7 +1203,7 @@ fn silent_risk_cache_path(snapshot: &Snapshot) -> PathBuf {
     snapshot
         .store_root
         .join("query-cache")
-        .join("silent-risks-v1.json")
+        .join("silent-risks.json")
 }
 
 fn load_silent_risk_cache(

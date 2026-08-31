@@ -137,8 +137,8 @@ impl From<io::Error> for OwnerWatchError {
     }
 }
 pub struct OwnerWatcher {
-    /// Retained on Unix (wait re-checks it); on Windows the handle is the
-    /// exactness proof, so the identity field is kept for parity only.
+    /// Retained on Unix for wait rechecks. On Windows, the process handle proves
+    /// identity, and this field preserves the cross-platform layout.
     #[cfg_attr(windows, allow(dead_code))]
     identity: ProcessIdentity,
     /// Retained exact process handle (Windows): the handle pins the captured
@@ -174,10 +174,9 @@ impl OwnerWatcher {
     pub fn wait(self) -> Result<(), OwnerWatchError> {
         #[cfg(windows)]
         {
-            // Blocking wait on the retained handle: no polling, and the
-            // handle closes exactly once when `self` drops after this call.
-            // SAFETY: `self.handle` is the unique RAII process handle captured
-            // at watch creation; INFINITE waits until that incarnation exits.
+            // Blocking wait on the retained handle: no polling, and the handle closes exactly
+            // once when `self` drops after this call. SAFETY: `self.handle` is the unique RAII
+            // process handle captured at watch creation; INFINITE waits until that incarnation exits.
             let rc = unsafe { WaitForSingleObject(self.handle.raw(), INFINITE) };
             if rc == WAIT_OBJECT_0 {
                 Ok(())
@@ -309,8 +308,7 @@ fn capture(_: u32) -> io::Result<Option<ProcessIdentity>> {
         "session owner identity unsupported",
     ))
 }
-/// Adopt a uniquely owned Unix fd. `OwnedFd` closes it on every return path,
-/// including `is_live()?` I/O errors that used to skip the manual `close`.
+/// Adopt a uniquely owned Unix descriptor that closes on every return path.
 #[cfg(any(target_os = "linux", target_os = "android", target_os = "macos"))]
 fn adopt_owned_fd(raw: libc::c_int) -> io::Result<std::os::fd::OwnedFd> {
     use std::os::fd::{FromRawFd, OwnedFd};
@@ -337,7 +335,7 @@ fn wait_for_exit(id: &ProcessIdentity) -> Result<(), OwnerWatchError> {
         events: libc::POLLIN,
         revents: 0,
     };
-    // SAFETY: `p` is one initialized pollfd naming our owned pidfd.
+    // SAFETY: `p` is an initialized pollfd naming the owned pidfd.
     let rc = unsafe { libc::poll(&mut p, 1, -1) };
     if rc < 0 {
         Err(io::Error::last_os_error().into())
@@ -434,14 +432,11 @@ fn wait_for_exit(_: &ProcessIdentity) -> Result<(), OwnerWatchError> {
     .into())
 }
 
-// ---------------------------------------------------------------------------
 // Windows handle ownership
-// ---------------------------------------------------------------------------
 
-/// RAII-owned Windows kernel handle. The handle closes exactly once when the
-/// owner drops. Windows kernel object handles permit concurrent operations;
-/// higher-level pipe code serializes operations that share an OVERLAPPED
-/// event, while process/event calls are independent.
+/// RAII-owned Windows kernel handle. The handle closes exactly once when the owner drops.
+/// Windows kernel object handles permit concurrent operations; higher-level pipe code
+/// serializes operations that share an OVERLAPPED event, while process/event calls are independent.
 #[cfg(windows)]
 pub(crate) struct Handle(HANDLE);
 
@@ -486,7 +481,7 @@ impl Handle {
     /// Create an event object (RAII); `manual_reset` matches
     /// `bManualReset` in CreateEventW.
     pub(crate) fn create_event(manual_reset: bool) -> io::Result<Self> {
-        // SAFETY: null attributes/name create an unnamed event owned by us.
+        // SAFETY: Null attributes and name create an unnamed event owned by this process.
         let raw =
             unsafe { CreateEventW(std::ptr::null(), manual_reset as i32, 0, std::ptr::null()) };
         Self::new(raw)

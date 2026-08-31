@@ -1,16 +1,5 @@
-//! GZSH binary format: fixed-offset header and `repr(C)` section entry
-//! types. See `docs/contracts/format_change_checklist.md` for version bumps.
-//!
-//! Layout (all little-endian):
-//! ```text
-//! 0x00  magic           [u8; 4]  = "GZSH"
-//! 0x04  version         u8       = FORMAT_VERSION (0x02 current; 0x01 legacy)
-//! 0x05  reserved        [u8; 24] = 0x00..
-//! 0x1D  section_count   u8       = 6
-//! 0x1E  section_offsets [u64; 6] (absolute file offsets)
-//! 0x4E  header_crc      u32      (CRC32c over bytes 0x00..0x4E)
-//! 0x52  sections...
-//! ```
+//! GZSH binary format with a fixed little-endian header and `repr(C)` sections.
+//! The header stores a four-byte magic, one version byte, 24 reserved bytes, and offsets.
 
 use anyhow::{Result, bail};
 use bytemuck::{Pod, Zeroable};
@@ -18,7 +7,6 @@ use bytemuck::{Pod, Zeroable};
 pub const SHARD_MAGIC: [u8; 4] = *b"GZSH";
 pub const DELTA_MAGIC: [u8; 4] = *b"GZDL";
 pub const MANIFEST_MAGIC: [u8; 4] = *b"GZMF";
-pub const FORMAT_VERSION_LEGACY: u8 = 0x01;
 pub const FORMAT_VERSION: u8 = 0x02;
 pub const SECTION_COUNT: usize = 6;
 pub const HEADER_LEN: usize = 0x52;
@@ -72,12 +60,11 @@ impl ShardHeader {
         if header.magic != SHARD_MAGIC {
             bail!("bad magic: expected GZSH, found {:02x?}", header.magic);
         }
-        if header.version != FORMAT_VERSION && header.version != FORMAT_VERSION_LEGACY {
+        if header.version != FORMAT_VERSION {
             bail!(
-                "unsupported format version {}, expected {} or {}",
+                "unsupported format version {}, expected {}",
                 header.version,
-                FORMAT_VERSION,
-                FORMAT_VERSION_LEGACY
+                FORMAT_VERSION
             );
         }
         if header.section_count != SECTION_COUNT as u8 {
@@ -119,22 +106,9 @@ pub struct SymbolEntry {
 
 const _: () = assert!(std::mem::size_of::<SymbolEntry>() == 14);
 
-/// On-disk identifier-only span. Kept for reading legacy shards.
-#[derive(Clone, Copy, Debug, Pod, Zeroable, PartialEq, Eq)]
-#[repr(C, packed)]
-pub struct IdentifierSpanEntry {
-    pub blob_idx: u32,
-    pub start: u32,
-    pub end: u32,
-    pub symbol_id: u32,
-}
-
-const _: () = assert!(std::mem::size_of::<IdentifierSpanEntry>() == 16);
-
-/// Byte span of a symbol occurrence inside a content-addressed blob.
-/// `start`/`end` are the identifier/name extent; `block_start`/`block_end`
-/// are the full definition node when tier-A extraction provides them (v2).
-/// `blob_idx` references the blob hash table in the coverage section.
+/// Byte span of a symbol occurrence inside a content-addressed blob. `start`/`end` are the
+/// identifier/name extent; `block_start`/`block_end` are the full definition node when tier-A
+/// extraction provides them. `blob_idx` references the blob hash table in the coverage section.
 #[derive(Clone, Copy, Debug, Pod, Zeroable, PartialEq, Eq)]
 #[repr(C, packed)]
 pub struct SpanEntry {
@@ -155,18 +129,6 @@ impl Default for SpanEntry {
 }
 
 impl SpanEntry {
-    /// Upgrade an identifier-only on-disk row.
-    pub fn from_identifier_span(entry: IdentifierSpanEntry) -> Self {
-        Self {
-            blob_idx: entry.blob_idx,
-            start: entry.start,
-            end: entry.end,
-            symbol_id: entry.symbol_id,
-            block_start: 0,
-            block_end: 0,
-        }
-    }
-
     /// Byte range for outline/skeleton line mapping: full block when present.
     pub fn outline_byte_range(&self) -> (u32, u32) {
         if self.block_end > self.block_start {

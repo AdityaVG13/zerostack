@@ -1,10 +1,8 @@
 //! Cryptographically random bytes for session capabilities and generations.
 use std::io;
 
-/// Fill `buffer` with bytes from the operating system CSPRNG.
-///
-/// Unix reads `/dev/urandom`; Windows calls `BCryptGenRandom` with the
-/// system-preferred RNG (never the ambient `rand` seed).
+/// Fill `buffer` with bytes from the operating system CSPRNG. Unix reads `/dev/urandom`;
+/// Windows calls `BCryptGenRandom` with the system-preferred RNG (never the ambient `rand` seed).
 pub fn fill_random(buffer: &mut [u8]) -> io::Result<()> {
     if buffer.len() > u32::MAX as usize {
         return Err(io::Error::new(

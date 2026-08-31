@@ -3,16 +3,25 @@ name = "fszero-core"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "FSZero domain types: operation ABI, filesystem contract, ZeroRef helpers."
+description = "FSZero filesystem types, edit specifications, and ZeroRef helpers."
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
 autotests = false
 publish = false
 
 [dependencies]
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-sha2 = "0.11.0"
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
 zero-abi.workspace = true
 zero-ref.workspace = true
 
-[dev-dependencies]
-fszero-test-support = { path = "../fszero-test-support" }
+
+[[test]]
+name = "capability"
+path = "../../../tests/fszero/core_capability.rs"
+
+[[test]]
+name = "edit_spec"
+path = "../../../tests/fszero/core_edit_spec.rs"

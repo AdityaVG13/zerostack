@@ -1,19 +1,18 @@
 # GraphZero architecture
 
-GraphZero owns repository structure, relationship evidence, index freshness, coverage, and blast radius. It supplies a typed engine adapter to ZeroKernel and a standalone CLI for graph diagnostics and maintenance.
+GraphZero owns repository structure, relationship evidence, index freshness, coverage, and blast radius. It supplies a typed engine adapter to ZeroKernel. It is not an installable product and has no product CLI. Indexing happens inside `z.find` through the structural engine.
 
 ## Crate layers
 
 ```text
-graphzero-cli        standalone operator commands
-graphzero-kernel     typed adapter consumed by ZeroKernel
-graphzero-engine     request routing and domain execution
+zero-graph          typed structural-engine facade consumed by ZeroKernel
+graphzero-engine     internal query, impact, and evidence library
 graphzero-store      snapshots, indexes, refs, and durable graph data
 graphzero-extract    language extraction and syntax evidence
 graphzero-types      public domain types and stable errors
 ```
 
-Specialized crates add semantic retrieval, SCIP ingestion, reservations, coverage, packaging, and explanation. There is no engine-local JavaScript planner. ZeroStack owns cell evaluation and orchestration.
+`graphzero-reserve` adds intent coordination and `graphzero-coverage` certifies freshness and absence claims. There is no engine-local JavaScript planner. ZeroStack owns cell evaluation and orchestration.
 
 ## Query routing
 
@@ -47,8 +46,8 @@ Callers answer one relationship. Blast radius starts from edit intent and combin
 
 ## Exact evidence
 
-Large result sets may stay behind `gz://` refs. A ref identifies evidence but does not make source bytes authoritative. FSZero owns exact file content and snapshots. TokenZero controls model-visible projection and recovery-aware accounting.
+Large result sets may stay behind `z://blob/` refs. A ref identifies evidence but does not make source bytes authoritative. FSZero owns exact file content and snapshots. TokenZero controls model-visible projection and recovery-aware accounting.
 
 ## Release model
 
-FSZero, GraphZero, and TokenZero are the released products. Once coordinated releases begin, all three engines will publish the same version to signal compatible contract parity. ZeroStack remains source-only.
+FSZero, GraphZero, and TokenZero are domain libraries in the ZeroStack workspace, not separately released products. ZeroStack currently ships from source only.

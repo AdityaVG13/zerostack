@@ -1,10 +1,6 @@
-//! SPEC-HUB-005 -- ABI digest bumps on Wire/version pins (C-23/24/26).
-//!
-//! Mutation test: changing a C-23/24/26 pin constant inside the test
-//! must change `assembly_abi_contract_digest()`. Fails if the digest is
-//! unchanged. C-25 semantic-mutation (ProtocolLimits defaults etc.) is
-//! deliberately not asserted here; see `crates/zero-abi/src/digest.rs` and
-//! `docs/spec/SPEC-TAGS.md` Notes -- C-25 stays Ambiguous.
+//! ABI digest bumps on Wire/version pins. Mutation test: changing a
+//! pin constant inside the test must change `assembly_abi_contract_digest`. Fails if the
+//! digest is unchanged.
 
 use serde_json::Value;
 use zero_abi::{
@@ -19,8 +15,7 @@ fn digest_of(manifest: &Value) -> Sha256Digest {
 
 #[test]
 fn unmutated_manifest_digest_equals_published() {
-    // Pinned baseline: production manifest hash must equal independent sha256(canonical_json(manifest)).
-    // The fixture is not a call to assembly_abi_contract_digest alone; we compute independently and also pin the published value indirectly via stability test below.
+    // Compute SHA-256 over the canonical manifest independently of the published digest.
     let manifest = assembly_abi_contract_manifest();
     let expected = assembly_abi_contract_digest();
     let computed = digest_of(&manifest);
@@ -28,8 +23,9 @@ fn unmutated_manifest_digest_equals_published() {
         computed, expected,
         "canonical manifest digest must equal published assembly_abi_contract_digest"
     );
-    // Independent cross-check: re-derive via canonical_json+sha256 without calling digest helper again on a fresh manifest literal
-    // ensures manifest construction and digest publication share the same canonical bytes.
+    // Independent cross-check: re-derive via canonical_json+sha256 without calling digest helper again
+    // on a fresh manifest literal ensures manifest construction and digest publication share the same
+    // canonical bytes.
     let canonical = canonical_json(&manifest);
     let independent = Sha256Digest::from_bytes(sha256(canonical.as_bytes()));
     assert_eq!(independent, expected);
@@ -61,7 +57,7 @@ fn hashed_manifest_binds_c23_c24_c26_pin_constants() {
 fn contract_version_pin_mutation_bumps_digest() {
     let mut manifest = assembly_abi_contract_manifest();
     let baseline = digest_of(&manifest);
-    // Independent fixture: change only C-23 pin via JSON mutation must change digest.
+    // Independent fixture: change only pin via JSON mutation must change digest.
     manifest["contract_version"] = Value::from(999_u64);
     let mutated = digest_of(&manifest);
     assert_ne!(

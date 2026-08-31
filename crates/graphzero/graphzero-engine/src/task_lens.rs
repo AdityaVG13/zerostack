@@ -1,25 +1,5 @@
-//! Composed task-lens entry point (RACC row ZS-GRAPH-004).
-//!
-//! One entry taking `(task contract, candidate plan)` and returning `(demanded
-//! evidence closure, write closure, assurance grade, source roots, tests,
-//! interfaces, unresolved ambiguities)`.
-//!
-//! The entry is a *composition of lens stages* over one candidate scope:
-//!
-//! - Composition is explicit and ordered: stages apply left to right, and every
-//!   stage attributes its contribution (`before -> after`, removed symbols,
-//!   note) in the result receipt.
-//! - Every stage reuses an existing GraphZero primitive: the address atlas
-//!   (`AddressAtlas::resolve`), the reverse-graph write closure
-//!   (`rewrite_closure`), the truth-grade vocabulary (`TruthClass`, read-only),
-//!   and the blast impact query (`impact_before_edit`). No lens logic is
-//!   duplicated; the only additive pieces are the composition frame itself
-//!   (receipt, identity, intersect filter).
-//! - The identity lens is a lawful unit: composing it changes nothing.
-//! - Incoherent compositions fail loud: a stage that can prove the scope is
-//!   empty records an honest `provably_empty` reason (with the disjoint sets)
-//!   instead of silently returning an empty result, and the evidence closure
-//!   is graded `Incomplete` (never falsely `Exact`).
+//! Computes evidence and write closures for a candidate plan.
+//! Returns assurance, source roots, tests, interfaces, and unresolved ambiguities.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
@@ -242,9 +222,7 @@ fn node_id_for(symbol: &str) -> NodeId {
     NodeId(ContentHash::of(symbol.as_bytes()))
 }
 
-// ---------------------------------------------------------------------------
 // Stages
-// ---------------------------------------------------------------------------
 
 /// Source stage: resolve the task fingerprint through the address atlas into
 /// the initial candidate scope. Must be the first stage (fail loud otherwise).
@@ -418,10 +396,8 @@ impl TaskLens for ScopeFilterLens {
     }
 }
 
-/// Expansion stage: dependency closure of the scope over the indexed reverse
-/// graph, reusing `rewrite_closure` (same relation walk, same HIT grammar).
-/// Nodes introduced by the closure carry the atlas-known truth when available,
-/// otherwise `TruthClass::Unknown` -- grade attribution is never invented.
+/// Expansion stage: dependency closure of the scope over the indexed reverse graph, reusing
+/// `rewrite_closure` (same relation walk, same HIT grammar).
 pub struct DependencyClosureLens {
     pub max_depth: u32,
     /// symbol -> truth for symbols the address atlas knows (grade attribution).
@@ -580,9 +556,7 @@ impl TaskLens for GradeFilterLens {
     }
 }
 
-// ---------------------------------------------------------------------------
 // Composed entry point
-// ---------------------------------------------------------------------------
 
 /// Explicit, ordered lens composition. Stages apply left to right; each
 /// contribution lands in the receipt.
@@ -608,7 +582,7 @@ impl ComposedTaskLens {
     }
 }
 
-/// The composed entry point's full answer, one tuple per RACC ZS-GRAPH-004:
+/// The composed entry point's full answer, one tuple per RACC:
 /// demanded evidence closure, write closure, assurance grade, source roots,
 /// tests, interfaces, unresolved ambiguities -- plus the lens receipt.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

@@ -1,8 +1,6 @@
-//! Cognitive-work graph contracts over GraphZero's existing truth lattice.
-//!
-//! Compiler-resolved edges carry toolchain provenance. Reverse impact,
-//! temporal overlays, proof support, and mechanical classification preserve
-//! incomplete and unknown states instead of upgrading them.
+//! Cognitive-work graph contracts over GraphZero's existing truth lattice. Compiler-resolved
+//! edges carry toolchain provenance. Reverse impact, temporal overlays, proof support, and
+//! mechanical classification preserve incomplete and unknown states instead of upgrading them.
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
@@ -349,17 +347,9 @@ pub struct MechanicalRegionInput {
     pub epoch: u64,
 }
 
-/// Pure trivalent classifier, fail-closed:
-///
-/// - `Unsafe` only for explicit semantic choice/conflict: unresolved decision
-///   gaps.
-/// - `Safe` only for exactly one rooted exact locus (with evidence premises),
-///   exact/complete reverse impact, complete coverage and freshness, and
-///   every valid obligation discharged by a fresh proof support bound to the
-///   requested snapshot and the obligation's protected scope root.
-/// - `Unknown` for everything missing, stale, incomplete, or ambiguous --
-///   underapproximated fibers and multiple candidate loci never upgrade to
-///   `Unsafe`.
+/// Pure trivalent classifier, fail-closed `Unsafe` only for explicit semantic choice/conflict:
+/// unresolved decision gaps. `Safe` only for exactly one rooted exact locus (with evidence
+/// premises), exact/complete reverse impact, complete coverage and freshness, and every valid.
 pub fn classify_mechanical_region(input: &MechanicalRegionInput) -> MechanicalGraphVerdict {
     if !input.gaps.is_empty() {
         return MechanicalGraphVerdict::Unsafe;

@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use crate::store::query::{Snapshot, path_record_for_rel};
 
 use super::anchors::{anchor_path_drifted_now, path_drifted};
-use super::persistence::{index_fact, mem_dir};
+use super::persistence::{index_fact, mem_dir, mem_ref};
 
 pub const MAX_FACT_TEXT: usize = 500;
 pub const MAX_ANCHORS: usize = 16;
@@ -200,10 +200,10 @@ impl MemoryHint {
         let suffix = if drifted { " (anchor drifted)" } else { "" };
         Self {
             line: format!(
-                "mem: {}: {} (gz://mem/{}){}",
+                "mem: {}: {} ({}){}",
                 fact.kind.as_str(),
                 preview,
-                fact.id,
+                mem_ref(&fact.id),
                 suffix
             ),
         }

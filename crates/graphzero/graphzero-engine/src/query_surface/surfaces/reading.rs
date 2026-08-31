@@ -304,7 +304,7 @@ fn reading_entry(
     } = edge;
     let ev = evidence.get(edge_idx).copied().unwrap_or_default();
     let evidence_ref = if kind == "target" {
-        format!("gz://node/{}", table.name(symbol_id).unwrap_or(""))
+        format!("node/{}", table.name(symbol_id).unwrap_or(""))
     } else {
         let hash_hex = checked_blob_hash(blob_hashes, ev.blob_idx)?;
         graphzero_store::store::refs::blob_span_ref(&hash_hex, ev.start, ev.end)

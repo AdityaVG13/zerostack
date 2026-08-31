@@ -1,21 +1,4 @@
-//! Canonical shared content-addressed store (fszero-zjt).
-//!
-//! Immutable blobs live at `<store root>/blobs/sha256/<first-two-hex>/<64-hex>`
-//! under the effective ZeroStack store root (project-local `.zerostack` by
-//! default; a machine/team shared root only via explicit
-//! `ZEROSTACK_STORE_ROOT` opt-in — see `zerostack_store.rs`). Object bytes are
-//! the raw content, nothing else: no header, no paths, no provenance, no
-//! mutable metadata — identity is the SHA-256 of the complete bytes
-//! (ZeroRef v1, `docs/design/zeroref-v1-annex.md` §2).
-//!
-//! Ownership: `CasStore` is a thin handle over hub [`zero_store::SharedCas`].
-//! Detect/opt-in (`blobs/` must already exist), the expand ladder, migration,
-//! and local GC (`blobs.gc.lock`) stay here. Put/get publish through the hub
-//! so FS-written objects are readable by other engines at the same store root.
-//!
-//! Read protocol (`get`): the hash must be exactly 64 lowercase hex chars;
-//! hub `get_verified` re-hashes before any byte is served. Damage is a typed
-//! [`CasError::Corrupt`], never silently absorbed.
+//! Canonical shared content-addressed store.
 
 use std::collections::HashSet;
 use std::fmt;
@@ -26,23 +9,24 @@ use std::sync::atomic::{AtomicU64, Ordering};
 /// Bound to hub `zero_store::BLOBS_DIR` so FSZero never forks the layout name.
 pub const CAS_DIR_NAME: &str = zero_store::BLOBS_DIR;
 const ALGO_DIR: &str = "sha256";
-/// Layout contract version for capability negotiation (canonical ADR §10):
-/// peers whose layout version differs would publish objects at different
-/// paths and must refuse interop before payload work. Matches hub
-/// `zero_store::CAS_LAYOUT_VERSION`.
+/// Layout contract version for capability negotiation (canonical ADR §10) peers
+/// whose layout version differs would publish objects at different paths and must
+/// refuse interop before payload work. Matches hub `zero_store::CAS_LAYOUT_VERSION`.
 pub const CAS_LAYOUT_VERSION: u64 = zero_store::CAS_LAYOUT_VERSION;
+/// Maximum object size enforced by the canonical CAS.
+pub const CAS_MAX_OBJECT_BYTES: u64 = zero_store::CAS_MAX_OBJECT_BYTES;
+
 const DEFAULT_GC_GRACE_SECS: u64 = 7 * 24 * 60 * 60;
 
 /// Frozen TokenZero coordinator schema id (zerostack.cas-gc.legacy).
 pub const GC_SCHEMA_VERSION: &str = "zerostack.cas-gc.legacy";
-/// Reachability snapshot record type per shared-cas-gc v1 schema.
+/// Reachability snapshot record type per shared-CAS GC schema.
 pub const GC_RECORD_TYPE_REACHABILITY: &str = "reachability-snapshot";
 /// FSZero engine namespace under `gc/roots/<engine>/…`.
 pub const GC_ENGINE_FSZERO: &str = "fszero";
 
-/// Human/machine-readable layout template, composed from the SAME directory
-/// constants [`CasStore::object_path`] uses, so the advertised layout and the
-/// real on-disk layout cannot drift (fszero-c6q.5).
+/// Human/machine-readable layout template, composed from the SAME directory constants
+/// [`CasStore::object_path`] uses, so the advertised layout and the real on-disk layout cannot drift.
 pub fn cas_layout() -> String {
     // Interop contract is the hub layout string (blobs/sha256/<hh>/<hash>).
     zero_store::CAS_LAYOUT.to_string()
@@ -66,7 +50,7 @@ pub enum CasError {
     /// Bytes on disk do not match the content address. The object was NOT
     /// served (get) / NOT overwritten (put).
     Corrupt { hash: String, detail: String },
-    /// Eviction refused by the 99% slack guard (ZS-CACHE-012): deleting this
+    /// Eviction refused by the 99% slack guard: deleting this
     /// weight would drop retained resident mass below 99% of demanded mass.
     /// Refusal happens BEFORE any state change (zero side effects).
     EvictionRefused {
@@ -75,10 +59,10 @@ pub enum CasError {
         evict_weight: u64,
         slack_ppm: i64,
     },
-    /// Validity-ledger failure (ZS-CACHE-013): the logical record could not
+    /// Validity-ledger failure: the logical record could not
     /// be written/read. Eviction never proceeds without a validity record.
     Validity(String),
-    /// Replication failure (ZS-STORE-007): a declared replica could not
+    /// Replication failure: a declared replica could not
     /// receive the blob before eviction; the local copy is retained.
     Replication(String),
 }
@@ -160,14 +144,7 @@ pub struct CasGcReport {
     pub slack_ppm: i64,
 }
 
-/// Eviction slack guard (ZS-CACHE-012), mirroring hub `EvictionSlack`
-/// (`crates/zerostack/zero-gate/src/residency.rs`): `sigma = W_R - 0.99W`. An eviction
-/// that would push retained resident mass below 99% of demanded mass is
-/// refused, loudly, before any state change.
-///
-/// Deviation from the hub constructor: demanded mass 0 is tolerated here
-/// (floor 0, never refuses) because an empty live set is a legitimate GC
-/// state; the hub rejects 0 as a caller bug in its cache-residency context.
+/// Refuse eviction when retained resident mass would fall below 99% of demand.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct EvictionSlackGuard {
     resident_mass: u64,
@@ -259,10 +236,10 @@ pub fn is_full_lower_hex(s: &str) -> bool {
             .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
 }
 
-/// Full-hash `fz://blob/<64-hex>` key → hash slice (shared recovery/CAS root filter).
+/// Full-hash `z://blob/<64-hex>` key → hash slice (shared recovery/CAS root filter).
 #[inline]
 pub fn full_blob_hash(key: &str) -> Option<&str> {
-    key.strip_prefix("fz://blob/")
+    key.strip_prefix("z://blob/")
         .filter(|h| is_full_lower_hex(h))
 }
 
@@ -283,34 +260,19 @@ fn io_err(hash: &str, context: impl Into<String>, source: std::io::Error) -> Cas
     }
 }
 
-/// Env-gated CAS put/get phase timing (fszero-1q7n). When `FSZERO_CAS_PHASES=1`,
+/// Env-gated CAS put/get phase timing. When `FSZERO_CAS_PHASES=1`,
 /// emit one JSON line on stderr with microsecond stages and byte counts.
 fn cas_phases_enabled() -> bool {
-    #[cfg(test)]
-    if TEST_CAS_PHASES.with(|flag| flag.get()) {
-        return true;
-    }
     match std::env::var("FSZERO_CAS_PHASES") {
         Ok(v) => matches!(v.as_str(), "1" | "true" | "TRUE" | "on" | "yes"),
         Err(_) => false,
     }
 }
 
-#[cfg(test)]
-std::thread_local! {
-    static TEST_CAS_PHASES: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
-    static LAST_CAS_PHASES: std::cell::RefCell<Option<serde_json::Value>> =
-        const { std::cell::RefCell::new(None) };
-}
-
 fn emit_cas_phases(fields: serde_json::Value) {
     if !cas_phases_enabled() {
         return;
     }
-    #[cfg(test)]
-    LAST_CAS_PHASES.with(|cell| {
-        *cell.borrow_mut() = Some(fields.clone());
-    });
     eprintln!("{fields}");
 }
 
@@ -334,10 +296,8 @@ impl CasStore {
         Self::at_blobs_root(store_root.join(CAS_DIR_NAME))
     }
 
-    /// Activation check: the canonical CAS participates only when the
-    /// `blobs/` directory already exists under the effective store root.
-    /// FSZero never creates it implicitly — presence of the directory IS the
-    /// opt-in (documented in `docs/design/shared-cas.md`).
+    /// Activates the canonical CAS only when `blobs/` already exists under the store root.
+    /// FSZero never creates the opt-in directory implicitly.
     pub fn detect(store_root: &Path) -> Option<Self> {
         let blobs = store_root.join(CAS_DIR_NAME);
         if blobs.is_dir() {
@@ -351,16 +311,12 @@ impl CasStore {
         &self.blobs_root
     }
 
-    /// Parent of `blobs/` — the ZeroStack store root that also holds `gc/`.
+    /// Parent of the blobs directory and root of the ZeroStack store.
     pub fn store_root(&self) -> &Path {
         self.hub.store_root()
     }
 
-    /// Capability probe (fszero-c6q.5): can this process create a temp file
-    /// in the attached `blobs/` directory right now? Creates and removes a
-    /// uniquely named `*.tmp` (same suffix family `put` sweeps, so an
-    /// interrupted probe is inert garbage at worst). `false` means the CAS is
-    /// effectively read-only for this process — mints will not dual-write.
+    /// Return whether this process can create a temporary file in the blobs directory.
     pub fn probe_writable(&self) -> bool {
         if !self.blobs_root.is_dir() {
             return false;
@@ -398,10 +354,8 @@ impl CasStore {
         self.put_prehashed(&hash, bytes)
     }
 
-    /// `put` with the hash already computed by the caller over these exact
-    /// bytes (avoids double-hashing on the mint path when the caller already
-    /// digested). Always verifies the digest — never trust the label in
-    /// release (fszero-w2g.26 / .48).
+    /// Store bytes with a caller-computed hash while avoiding duplicate mint-path hashing.
+    /// Always verifies the supplied digest before publication.
     pub fn put_prehashed(&self, hash: &str, bytes: &[u8]) -> Result<CasPutOutcome, CasError> {
         // Never trust the label: verify before lock, hub publish, or ledger.
         // A success-path remap would let a hub regression store bytes under
@@ -420,10 +374,9 @@ impl CasStore {
             .hub
             .put_prehashed(hash, bytes)
             .map_err(|err| map_hub_err(hash, err))?;
-        // Layer validity (ZS-CACHE-013): a put of identical bytes for a
-        // previously evicted blob is a refetch that RESTORES L3 with the
-        // same identity -- never rediscovery. A new blob publishes an
-        // L2-valid record. Digest equality was checked above.
+        // Layer validity: a put of identical bytes for a previously
+        // evicted blob is a refetch that RESTORES L3 with the same identity -- never
+        // rediscovery. A new blob publishes an L2-valid record. Digest equality was checked above.
         self.validity_ledger()
             .publish(hash, bytes.len() as u64)
             .map_err(|e| CasError::Validity(format!("publish {}: {e}", hash)))?;
@@ -512,7 +465,7 @@ impl CasStore {
         n
     }
 
-    /// Count leftover `*.tmp` files (inert; `get` never opens them).
+    /// Count inert orphaned `*.tmp` files; `get` never opens them.
     pub fn tmp_object_count(&self) -> u64 {
         let mut n = 0u64;
         let Ok(shards) = std::fs::read_dir(self.blobs_root.join(ALGO_DIR)) else {
@@ -539,11 +492,8 @@ impl CasStore {
         self.blobs_root.with_extension("gc.lock")
     }
 
-    /// Shared handle on the GC lock, held for the duration of a publish so an
-    /// in-progress [`Cas::gc`] cannot unlink what we are publishing
-    /// (zerostack-rhd). Returns `None` when the lock file cannot be opened or
-    /// locked; a put must not be refused just because the guard is
-    /// unavailable, and no guard is exactly the old behaviour.
+    /// Shared GC lock held through publication so concurrent [`Cas::gc`] cannot unlink
+    /// the object being published.
     fn gc_publish_guard(&self) -> Option<std::fs::File> {
         let lock = std::fs::OpenOptions::new()
             .create(true)
@@ -555,25 +505,9 @@ impl CasStore {
         Some(lock)
     }
 
-    /// Mark-and-sweep published objects. TokenZero shares this layout, so an
-    /// object is removed only when FSZero has no reference or pin AND its mtime
-    /// exceeds the grace window. FSZero refreshes mtime on read/republish; the
-    /// grace interval is the conservative cross-engine safety boundary.
-    ///
-    /// V6-F5 discipline (ZS-CACHE-012/013, ZS-STORE-007/008):
-    /// - every evicted blob is marked **L3-cold** in the validity ledger
-    ///   BEFORE its bytes are deleted (logical record retained, never
-    ///   destroyed); a later refetch of identical bytes restores L3 with the
-    ///   same identity;
-    /// - every eviction consults the [`EvictionSlackGuard`] (99% of demanded
-    ///   mass floor, cumulative across the run); a refusal has zero side
-    ///   effects and is counted in the report;
-    /// - when replication targets are declared, bytes are published to every
-    ///   replica BEFORE local eviction; a replica failure retains the local
-    ///   blob;
-    /// - stale legacy reachability roots are swept (see
-    ///   [`CasStore::gc_legacy_roots`]), never touching validity records or
-    ///   blob mass.
+    /// Mark-and-sweep published objects. TokenZero shares this layout, so an object is removed only
+    /// when FSZero has no reference or pin AND its mtime exceeds the grace window. FSZero refreshes
+    /// mtime on read/republish; the grace interval is the conservative cross-engine safety boundary.
     pub fn gc(
         &self,
         marked: &HashSet<String>,
@@ -582,12 +516,9 @@ impl CasStore {
         self.gc_with_demand(marked, grace, None)
     }
 
-    /// [`CasStore::gc`] with an explicit demanded-mass floor override. `None`
-    /// computes demanded mass from the live set (marked + pins + gc/roots +
-    /// gc/leases): on-disk sizes for resident live hashes, ledger sizes for
-    /// live hashes whose bytes are already gone (so GC never makes an
-    /// under-provisioned store worse). `Some(x)` lets a policy caller pin the
-    /// floor directly.
+    /// [`CasStore::gc`] with an explicit demanded-mass floor override. `None` derives
+    /// demanded mass from the live set, using disk sizes for resident objects and ledger
+    /// sizes for live objects whose bytes are already absent.
     pub fn gc_with_demand(
         &self,
         marked: &HashSet<String>,
@@ -652,10 +583,9 @@ impl CasStore {
                 return;
             }
             let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
-            // Slack guard first: a refusal is fail-loud with zero side
-            // effects -- the blob is untouched (no replica copy, no cold
-            // mark, no delete). Cumulative across the run so two individually
-            // legal evictions cannot jointly breach the floor.
+            // Slack guard first: a refusal is fail-loud with zero side effects -- the blob
+            // is untouched (no replica copy, no cold mark, no delete). Cumulative across
+            // the run so two individually legal evictions cannot jointly breach the floor.
             if let Err(e) = guard.guard_eviction(pending_evict_mass.saturating_add(size)) {
                 report.slack_refused += 1;
                 let _ = e; // typed refusal; counted in the report
@@ -705,9 +635,8 @@ impl CasStore {
             }
         });
 
-        // Legacy-root sweep (STORE-008 residual): stale reachability
-        // snapshots. Removes root records only -- never validity records,
-        // never blob bytes -- so both guards are trivially respected.
+        // Sweep stale legacy reachability snapshots. Remove only root records,
+        // never validity records or blob bytes.
         self.gc_legacy_roots_inner(grace, &mut report);
         Ok(report)
     }
@@ -744,16 +673,7 @@ impl CasStore {
     }
 
     /// Sweep stale legacy reachability roots under
-    /// `<store_root>/gc/roots/<engine>/<project>/` (STORE-008 residual). A
-    /// project root is legacy (removable) only when its `current.json` is
-    /// readable, lists at least one blob hash, EVERY listed hash is absent
-    /// from this CAS, and the project directory is older than `grace`.
-    ///
-    /// Guards: (a) removes root snapshot JSON records only -- the validity
-    /// ledger and all blob bytes are untouched, so L2/L3 records survive;
-    /// (b) removes no bytes, so the eviction slack floor is untouched.
-    /// Unreadable/unparseable roots and roots naming any present blob are
-    /// always kept (fail-closed).
+    /// `<store_root>/gc/roots/<engine>/<project>/`.
     pub fn gc_legacy_roots(&self, grace: std::time::Duration) -> Result<CasGcReport, String> {
         let mut report = CasGcReport::default();
         self.gc_legacy_roots_inner(grace, &mut report);
@@ -792,10 +712,9 @@ impl CasStore {
         }
     }
 
-    /// True when `current.json` is a readable snapshot whose every listed
-    /// blob hash is absent from this CAS and whose list is non-empty.
-    /// Missing/unparseable files and empty lists are never "fully absent"
-    /// (fail-closed: we cannot prove legacy, so we keep).
+    /// True when `current.json` is a readable snapshot whose every listed blob hash is
+    /// absent from this CAS and whose list is non-empty. Missing/unparseable files and
+    /// empty lists are never "fully absent" because uncertain legacy state is retained.
     fn legacy_root_is_fully_absent(&self, current: &Path) -> bool {
         let Ok(text) = std::fs::read_to_string(current) else {
             return false;
@@ -842,7 +761,7 @@ impl CasStore {
     }
 
     /// Repair a missing blob from the first declared replica that holds it
-    /// (ZS-STORE-007). Re-publishes locally through the verified put path,
+    /// . Re-publishes locally through the verified put path,
     /// which restores L3 validity in the ledger with the same identity.
     pub fn repair_from_replicas(
         &self,
@@ -874,9 +793,9 @@ impl CasStore {
         Ok(outcome)
     }
 
-    /// Remove abandoned `*.tmp` files across the whole CAS that are older
-    /// than `max_age`. Returns the number removed. Hub `put` reaps its own
-    /// temps; this walk remains for leftover engine-side temps.
+    /// Remove orphaned `*.tmp` files older than `max_age` across the CAS.
+    /// Returns the count. Hub `put` reaps its own temp files; this walk
+    /// covers engine-created temp files.
     pub fn sweep_stale_temps(&self, max_age: std::time::Duration) -> u64 {
         let mut removed = 0;
         let Ok(shards) = std::fs::read_dir(self.blobs_root.join(ALGO_DIR)) else {
@@ -1062,7 +981,7 @@ fn rfc3339_utc_now() -> String {
     )
 }
 
-/// Result of publishing one FSZero reachability snapshot (fszero-c6q.9).
+/// Result of publishing one FSZero reachability snapshot.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GcRootsPublish {
     /// Absolute path of the published `current.json`.
@@ -1106,14 +1025,9 @@ fn read_gc_roots_epoch(path: &Path) -> u64 {
     v.get("epoch").and_then(|e| e.as_u64()).unwrap_or(0)
 }
 
-/// Publish FSZero reachability roots at
-/// `<store_root>/gc/roots/fszero/<project_id>/current.json` matching
-/// `zerostack.cas-gc.legacy` / `reachability-snapshot.schema.json`.
-///
-/// Atomic publication: unique sibling temp + fsync + rename (hub
-/// [`zero_store::atomic_write_file`]). Epoch is strictly monotonic versus any
-/// readable prior `current.json`. `blob_hashes` are validated, sorted, and
-/// deduped. Callers supply the live root set (live refs + migration manifests).
+/// Publish FSZero reachability roots at `<store_root>/gc/roots/fszero/<project_id>/current.json`
+/// matching `zerostack.cas-gc.legacy` / `reachability-snapshot.schema.json`. Atomic publication:
+/// unique sibling temp + fsync + rename (hub [`zero_store::atomic_write_file`]).
 pub fn publish_fszero_gc_roots(
     store_root: &Path,
     blob_hashes: impl IntoIterator<Item = String>,
@@ -1161,8 +1075,8 @@ pub fn publish_fszero_gc_roots(
 }
 
 impl CasStore {
-    /// Publish this store's FSZero reachability roots for the given live set
-    /// (fszero-c6q.9). See [`publish_fszero_gc_roots`].
+    /// Publish this store's FSZero reachability roots for
+    /// the given live set. See [`publish_fszero_gc_roots`].
     pub fn publish_gc_roots(
         &self,
         blob_hashes: impl IntoIterator<Item = String>,
@@ -1177,9 +1091,8 @@ pub fn hub_shared_cas(store_root: &Path) -> zero_store::SharedCas {
     zero_store::SharedCas::open(store_root)
 }
 
-/// True when a store-root path string is illegally unexpanded (`~` prefix).
-/// Store roots must be absolute or repo-relative; bare `~` is never expanded
-/// silently (RACC-R / fszero-3njg).
+/// True when a store-root path string is illegally unexpanded (`~` prefix). Store roots
+/// must be absolute or repo-relative; bare `~` is never expanded silently.
 pub fn store_root_has_unexpanded_tilde(path: &Path) -> bool {
     path.as_os_str().as_encoded_bytes().starts_with(b"~")
 }

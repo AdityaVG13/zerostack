@@ -1,20 +1,14 @@
-//! V7 ETNF shadow ABI tests (bead zerostack-4lfp).
-//!
-//! Covers the named acceptance criteria: canonical fixtures round-trip;
-//! `Unsafe`/`Unknown` cannot serialize authority; the certificate root binds
-//! evidence, scope, contract, checker version, and resource ledger; shadow
-//! output is observable and comparable but cannot pass any existing
-//! write/permit gate. Shadow artifacts grant no production authority.
+//! ETNF shadow ABI tests.
 
 use serde_json::{Value, json};
 use zero_abi::{
     ApprovalGrant, ApprovalRequirement, CANONICAL_DISPATCH_VERSION, CanonicalOperation,
     CanonicalRegistry, CheckerIdentity, DispatchErrorClass, DispatchMachine,
     ETNF_MAX_EVIDENCE_ITEMS, ETNF_MAX_FALSIFIERS, ETNF_MAX_ID_BYTES, ETNF_MAX_STRING_BYTES,
-    ETNF_MAX_WITNESS_FACTS, EffectClass, EffectGrant, EffectPolicy, EtnfError, EvidenceItem,
-    ExplicitFallback, FallbackKind, Falsifier, FiniteWitness, PermitGrant, PermitRequirement,
-    ProposedAuthorityTransition, ProposedTransitionKind, RegistryEngine, ResourceLedger,
-    RootedEvidence, SafetyVerdict, ShadowCertificate, V7ShadowReport,
+    ETNF_MAX_WITNESS_FACTS, EffectClass, EffectGrant, EffectPolicy, EtnfError, EtnfShadowReport,
+    EvidenceItem, ExplicitFallback, FallbackKind, Falsifier, FiniteWitness, PermitGrant,
+    PermitRequirement, ProposedAuthorityTransition, ProposedTransitionKind, RegistryEngine,
+    ResourceLedger, RootedEvidence, SafetyVerdict, ShadowCertificate,
 };
 
 const ROOT_A: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
@@ -24,16 +18,16 @@ const EVIDENCE_ROOT: &str = "a300c0798e0f0d72e33647fd9afe7bc8173d50d93381a794258
 const LEDGER_ROOT: &str = "db11272c6a8190420dd41c84e76cb2dc7f8b0243a1226b5d2eab2fbf4d18a9b2";
 
 /// Hand-written canonical fixture: Safe verdict with certificate.
-const SAFE_FIXTURE: &str = r#"{"certificate":{"checker":{"id":"w7/verdict_v1","version":"1.0.0"},"contract":"zero.contract/v1","evidence_root":"a300c0798e0f0d72e33647fd9afe7bc8173d50d93381a794258268b755c82c57","resource_ledger_root":"db11272c6a8190420dd41c84e76cb2dc7f8b0243a1226b5d2eab2fbf4d18a9b2","root":"4bee74893b7038ca062abb6a3bd7576dffeb5a08c0ca8e1d9e5c99e2f11a958f","scope":"scope:project/main"},"checker":{"id":"w7/verdict_v1","version":"1.0.0"},"contract":"zero.contract/v1","evidence":{"anchor":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","items":[{"digest":"1111111111111111111111111111111111111111111111111111111111111111","name":"fs.read:r1"}]},"fallback":{"kind":"frozen_raw_baseline","obligation":"run the frozen raw baseline"},"falsifiers":[{"description":"Unsafe issues authority","id":"W7-T01-f1"}],"ledger":{"bytes_read":512,"checks":1,"complete":true,"items_checked":1},"schema":"zerostack/v7-shadow-report/1","scope":"scope:project/main","shadow":true,"transition":{"kind":"reuse_cached_result","target":"2222222222222222222222222222222222222222222222222222222222222222"},"verdict":"safe","witness":{"facts":["fs.read:r1 bytes == receipt"]}}"#;
+const SAFE_FIXTURE: &str = r#"{"certificate":{"checker":{"id":"w7/verdict","version":"1.0.0"},"contract":"zero.contract/base","evidence_root":"a300c0798e0f0d72e33647fd9afe7bc8173d50d93381a794258268b755c82c57","resource_ledger_root":"db11272c6a8190420dd41c84e76cb2dc7f8b0243a1226b5d2eab2fbf4d18a9b2","root":"4bee74893b7038ca062abb6a3bd7576dffeb5a08c0ca8e1d9e5c99e2f11a958f","scope":"scope:project/main"},"checker":{"id":"w7/verdict","version":"1.0.0"},"contract":"zero.contract/base","evidence":{"anchor":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","items":[{"digest":"1111111111111111111111111111111111111111111111111111111111111111","name":"fs.read:r1"}]},"fallback":{"kind":"frozen_raw_baseline","obligation":"run the frozen raw baseline"},"falsifiers":[{"description":"Unsafe issues authority","id":"W7-T01-f1"}],"ledger":{"bytes_read":512,"checks":1,"complete":true,"items_checked":1},"schema":"zerostack/etnf-shadow-report/1","scope":"scope:project/main","shadow":true,"transition":{"kind":"reuse_cached_result","target":"2222222222222222222222222222222222222222222222222222222222222222"},"verdict":"safe","witness":{"facts":["fs.read:r1 bytes == receipt"]}}"#;
 
 /// Hand-written canonical fixture: Unsafe verdict, no certificate.
-const UNSAFE_FIXTURE: &str = r#"{"checker":{"id":"w7/verdict_v1","version":"1.0.0"},"contract":"zero.contract/v1","evidence":{"anchor":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","items":[{"digest":"1111111111111111111111111111111111111111111111111111111111111111","name":"fs.read:r1"}]},"fallback":{"kind":"frozen_raw_baseline","obligation":"run the frozen raw baseline"},"falsifiers":[{"description":"Unsafe issues authority","id":"W7-T01-f1"}],"ledger":{"bytes_read":512,"checks":1,"complete":true,"items_checked":1},"schema":"zerostack/v7-shadow-report/1","scope":"scope:project/main","shadow":true,"verdict":{"unsafe":{"reasons":["premise_falsified"]}},"witness":{"facts":["premise falsified by receipt"]}}"#;
+const UNSAFE_FIXTURE: &str = r#"{"checker":{"id":"w7/verdict","version":"1.0.0"},"contract":"zero.contract/base","evidence":{"anchor":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","items":[{"digest":"1111111111111111111111111111111111111111111111111111111111111111","name":"fs.read:r1"}]},"fallback":{"kind":"frozen_raw_baseline","obligation":"run the frozen raw baseline"},"falsifiers":[{"description":"Unsafe issues authority","id":"W7-T01-f1"}],"ledger":{"bytes_read":512,"checks":1,"complete":true,"items_checked":1},"schema":"zerostack/etnf-shadow-report/1","scope":"scope:project/main","shadow":true,"verdict":{"unsafe":{"reasons":["premise_falsified"]}},"witness":{"facts":["premise falsified by receipt"]}}"#;
 
 /// Hand-written canonical fixture: Unknown verdict, no certificate.
-const UNKNOWN_FIXTURE: &str = r#"{"checker":{"id":"w7/verdict_v1","version":"1.0.0"},"contract":"zero.contract/v1","evidence":{"anchor":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","items":[{"digest":"1111111111111111111111111111111111111111111111111111111111111111","name":"fs.read:r1"}]},"fallback":{"kind":"direct_native_path","obligation":"run the native direct path"},"falsifiers":[{"description":"Unsafe issues authority","id":"W7-T01-f1"}],"ledger":{"bytes_read":512,"checks":1,"complete":false,"items_checked":1},"schema":"zerostack/v7-shadow-report/1","scope":"scope:project/main","shadow":true,"verdict":{"unknown":{"reasons":["missing_evidence"]}},"witness":{"facts":["evidence cone incomplete"]}}"#;
+const UNKNOWN_FIXTURE: &str = r#"{"checker":{"id":"w7/verdict","version":"1.0.0"},"contract":"zero.contract/base","evidence":{"anchor":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","items":[{"digest":"1111111111111111111111111111111111111111111111111111111111111111","name":"fs.read:r1"}]},"fallback":{"kind":"direct_native_path","obligation":"run the native direct path"},"falsifiers":[{"description":"Unsafe issues authority","id":"W7-T01-f1"}],"ledger":{"bytes_read":512,"checks":1,"complete":false,"items_checked":1},"schema":"zerostack/etnf-shadow-report/1","scope":"scope:project/main","shadow":true,"verdict":{"unknown":{"reasons":["missing_evidence"]}},"witness":{"facts":["evidence cone incomplete"]}}"#;
 
 fn checker() -> CheckerIdentity {
-    CheckerIdentity::new("w7/verdict_v1", "1.0.0").unwrap()
+    CheckerIdentity::new("w7/verdict", "1.0.0").unwrap()
 }
 
 fn evidence() -> RootedEvidence {
@@ -64,12 +58,12 @@ fn ledger() -> ResourceLedger {
     ResourceLedger::new(512, 1, 1, true)
 }
 
-fn safe_report() -> V7ShadowReport {
-    V7ShadowReport::new(
+fn safe_report() -> EtnfShadowReport {
+    EtnfShadowReport::new(
         SafetyVerdict::Safe,
         checker(),
         "scope:project/main",
-        "zero.contract/v1",
+        "zero.contract/base",
         evidence(),
         witness(&["fs.read:r1 bytes == receipt"]),
         Some(
@@ -83,14 +77,14 @@ fn safe_report() -> V7ShadowReport {
     .unwrap()
 }
 
-fn unsafe_report() -> V7ShadowReport {
-    V7ShadowReport::new(
+fn unsafe_report() -> EtnfShadowReport {
+    EtnfShadowReport::new(
         SafetyVerdict::Unsafe {
             reasons: vec!["premise_falsified".into()],
         },
         checker(),
         "scope:project/main",
-        "zero.contract/v1",
+        "zero.contract/base",
         evidence(),
         witness(&["premise falsified by receipt"]),
         None,
@@ -101,14 +95,14 @@ fn unsafe_report() -> V7ShadowReport {
     .unwrap()
 }
 
-fn unknown_report() -> V7ShadowReport {
-    V7ShadowReport::new(
+fn unknown_report() -> EtnfShadowReport {
+    EtnfShadowReport::new(
         SafetyVerdict::Unknown {
             reasons: vec!["missing_evidence".into()],
         },
         checker(),
         "scope:project/main",
-        "zero.contract/v1",
+        "zero.contract/base",
         evidence(),
         witness(&["evidence cone incomplete"]),
         None,
@@ -122,7 +116,7 @@ fn unknown_report() -> V7ShadowReport {
 
 #[test]
 fn safe_fixture_round_trips() {
-    let parsed = V7ShadowReport::from_canonical_bytes(SAFE_FIXTURE.as_bytes()).unwrap();
+    let parsed = EtnfShadowReport::from_canonical_bytes(SAFE_FIXTURE.as_bytes()).unwrap();
     assert_eq!(parsed, safe_report());
     assert!(parsed.grants_authority());
     assert!(parsed.certificate.is_some());
@@ -134,7 +128,7 @@ fn safe_fixture_round_trips() {
     // Parsing the canonical bytes again is idempotent.
     let bytes = parsed.to_canonical_bytes().unwrap();
     assert_eq!(
-        V7ShadowReport::from_canonical_bytes(&bytes).unwrap(),
+        EtnfShadowReport::from_canonical_bytes(&bytes).unwrap(),
         parsed
     );
 }
@@ -145,7 +139,7 @@ fn unsafe_and_unknown_fixtures_round_trip_without_authority() {
         (UNSAFE_FIXTURE, unsafe_report()),
         (UNKNOWN_FIXTURE, unknown_report()),
     ] {
-        let parsed = V7ShadowReport::from_canonical_bytes(fixture.as_bytes()).unwrap();
+        let parsed = EtnfShadowReport::from_canonical_bytes(fixture.as_bytes()).unwrap();
         assert_eq!(parsed, expected);
         assert!(!parsed.grants_authority());
         assert!(parsed.certificate.is_none());
@@ -172,7 +166,7 @@ fn unsafe_and_unknown_cannot_issue_certificates() {
                 &verdict,
                 EVIDENCE_ROOT,
                 "scope:project/main",
-                "zero.contract/v1",
+                "zero.contract/base",
                 &checker(),
                 LEDGER_ROOT
             ),
@@ -190,7 +184,7 @@ fn certificate_under_non_safe_verdict_is_rejected_on_parse() {
     value["certificate"] = safe["certificate"].clone();
     let bytes = serde_json::to_vec(&value).unwrap();
     assert_eq!(
-        V7ShadowReport::from_canonical_bytes(&bytes),
+        EtnfShadowReport::from_canonical_bytes(&bytes),
         Err(EtnfError::CertificateWithoutSafe)
     );
 }
@@ -202,7 +196,7 @@ fn safe_verdict_without_certificate_is_rejected_on_parse() {
     value.as_object_mut().unwrap().remove("certificate");
     let bytes = serde_json::to_vec(&value).unwrap();
     assert_eq!(
-        V7ShadowReport::from_canonical_bytes(&bytes),
+        EtnfShadowReport::from_canonical_bytes(&bytes),
         Err(EtnfError::MissingCertificateForSafe)
     );
 }
@@ -230,11 +224,11 @@ fn certificate_root_binds_all_five_fields() {
     // the root while keeping the report canonical and self-consistent.
     let variants = [
         // scope
-        V7ShadowReport::new(
+        EtnfShadowReport::new(
             SafetyVerdict::Safe,
             checker(),
             "scope:project/other",
-            "zero.contract/v1",
+            "zero.contract/base",
             evidence(),
             witness(&["fs.read:r1 bytes == receipt"]),
             transition.clone(),
@@ -244,11 +238,11 @@ fn certificate_root_binds_all_five_fields() {
         )
         .unwrap(),
         // contract
-        V7ShadowReport::new(
+        EtnfShadowReport::new(
             SafetyVerdict::Safe,
             checker(),
             "scope:project/main",
-            "zero.contract/v2",
+            "zero.contract/other",
             evidence(),
             witness(&["fs.read:r1 bytes == receipt"]),
             transition.clone(),
@@ -258,11 +252,11 @@ fn certificate_root_binds_all_five_fields() {
         )
         .unwrap(),
         // checker version
-        V7ShadowReport::new(
+        EtnfShadowReport::new(
             SafetyVerdict::Safe,
-            CheckerIdentity::new("w7/verdict_v1", "2.0.0").unwrap(),
+            CheckerIdentity::new("w7/verdict", "2.0.0").unwrap(),
             "scope:project/main",
-            "zero.contract/v1",
+            "zero.contract/base",
             evidence(),
             witness(&["fs.read:r1 bytes == receipt"]),
             transition.clone(),
@@ -272,11 +266,11 @@ fn certificate_root_binds_all_five_fields() {
         )
         .unwrap(),
         // evidence
-        V7ShadowReport::new(
+        EtnfShadowReport::new(
             SafetyVerdict::Safe,
             checker(),
             "scope:project/main",
-            "zero.contract/v1",
+            "zero.contract/base",
             RootedEvidence::new(
                 ROOT_A,
                 vec![
@@ -293,11 +287,11 @@ fn certificate_root_binds_all_five_fields() {
         )
         .unwrap(),
         // resource ledger
-        V7ShadowReport::new(
+        EtnfShadowReport::new(
             SafetyVerdict::Safe,
             checker(),
             "scope:project/main",
-            "zero.contract/v1",
+            "zero.contract/base",
             evidence(),
             witness(&["fs.read:r1 bytes == receipt"]),
             transition,
@@ -310,7 +304,7 @@ fn certificate_root_binds_all_five_fields() {
     for variant in variants {
         assert_ne!(variant.certificate.as_ref().unwrap().root, certificate.root);
         assert!(
-            V7ShadowReport::from_canonical_bytes(&variant.to_canonical_bytes().unwrap()).is_ok()
+            EtnfShadowReport::from_canonical_bytes(&variant.to_canonical_bytes().unwrap()).is_ok()
         );
     }
 }
@@ -322,7 +316,7 @@ fn tampered_certificate_root_is_rejected() {
     value["certificate"]["root"] = json!(ROOT_A);
     let bytes = serde_json::to_vec(&value).unwrap();
     assert_eq!(
-        V7ShadowReport::from_canonical_bytes(&bytes),
+        EtnfShadowReport::from_canonical_bytes(&bytes),
         Err(EtnfError::CertificateRootMismatch)
     );
 }
@@ -335,7 +329,7 @@ fn shadow_and_schema_markers_are_enforced() {
     value["shadow"] = json!(false);
     let tampered = serde_json::to_vec(&value).unwrap();
     assert_eq!(
-        V7ShadowReport::from_canonical_bytes(&tampered),
+        EtnfShadowReport::from_canonical_bytes(&tampered),
         Err(EtnfError::ShadowMarkerFalse)
     );
 
@@ -343,7 +337,7 @@ fn shadow_and_schema_markers_are_enforced() {
     value["schema"] = json!("zerostack/other/1");
     let tampered = serde_json::to_vec(&value).unwrap();
     assert_eq!(
-        V7ShadowReport::from_canonical_bytes(&tampered),
+        EtnfShadowReport::from_canonical_bytes(&tampered),
         Err(EtnfError::InvalidSchema {
             actual: "zerostack/other/1".into()
         })
@@ -356,7 +350,7 @@ fn non_canonical_bytes_are_rejected() {
     let text = String::from_utf8(bytes).unwrap();
     let noncanonical = text.replacen("\"shadow\":true", "\"shadow\": true", 1);
     assert_eq!(
-        V7ShadowReport::from_canonical_bytes(noncanonical.as_bytes()),
+        EtnfShadowReport::from_canonical_bytes(noncanonical.as_bytes()),
         Err(EtnfError::NonCanonicalBytes)
     );
 }
@@ -397,10 +391,8 @@ fn shadow_output_cannot_pass_write_permit_gates() {
     let op = CanonicalOperation {
         canonical_id: "op.write".into(),
         description: String::new(),
-        aliases: vec![],
         args_schema: json!({"type": "object"}),
         output_schema: None,
-        mcp_tool_name: None,
         effect_policy: EffectPolicy {
             effect_class: EffectClass::Irreversible,
             permit: PermitRequirement::Required,
@@ -412,7 +404,6 @@ fn shadow_output_cannot_pass_write_permit_gates() {
         version: CANONICAL_DISPATCH_VERSION.into(),
         engine: RegistryEngine::TokenZero,
         operations: vec![op],
-        resources: vec![],
     };
     let mut machine = DispatchMachine::new(registry).unwrap();
     machine.resolve("op.write").unwrap();
@@ -446,10 +437,8 @@ fn shadow_output_cannot_pass_write_permit_gates() {
     let op2 = CanonicalOperation {
         canonical_id: "op.write".into(),
         description: String::new(),
-        aliases: vec![],
         args_schema: json!({"type": "object"}),
         output_schema: None,
-        mcp_tool_name: None,
         effect_policy: EffectPolicy {
             effect_class: EffectClass::Irreversible,
             permit: PermitRequirement::Required,
@@ -461,7 +450,6 @@ fn shadow_output_cannot_pass_write_permit_gates() {
         version: CANONICAL_DISPATCH_VERSION.into(),
         engine: RegistryEngine::TokenZero,
         operations: vec![op2],
-        resources: vec![],
     };
     let mut machine2 = DispatchMachine::new(registry2).unwrap();
     machine2.resolve("op.write").unwrap();
@@ -502,13 +490,13 @@ fn shadow_output_is_observable_and_comparable() {
     // still records a proposal grants no authority and carries no certificate.
     assert!(first.grants_authority());
     assert!(first.transition.is_some());
-    let non_safe_with_proposal = V7ShadowReport::new(
+    let non_safe_with_proposal = EtnfShadowReport::new(
         SafetyVerdict::Unknown {
             reasons: vec!["missing_evidence".into()],
         },
         checker(),
         "scope:project/main",
-        "zero.contract/v1",
+        "zero.contract/base",
         evidence(),
         witness(&["evidence cone incomplete"]),
         Some(
@@ -523,11 +511,11 @@ fn shadow_output_is_observable_and_comparable() {
     assert!(!non_safe_with_proposal.grants_authority());
     assert!(non_safe_with_proposal.certificate.is_none());
     // Any difference in evidence is observable in the canonical bytes.
-    let different_evidence = V7ShadowReport::new(
+    let different_evidence = EtnfShadowReport::new(
         SafetyVerdict::Safe,
         checker(),
         "scope:project/main",
-        "zero.contract/v1",
+        "zero.contract/base",
         RootedEvidence::new(
             ROOT_A,
             vec![EvidenceItem::new("fs.read:r1", DIGEST_2).unwrap()],
@@ -583,13 +571,13 @@ fn finiteness_and_shape_bounds_are_enforced() {
         .map(|i| Falsifier::new(format!("f{i}"), "condition").unwrap())
         .collect();
     assert_eq!(
-        V7ShadowReport::new(
+        EtnfShadowReport::new(
             SafetyVerdict::Unknown {
                 reasons: vec!["missing_evidence".into()]
             },
             checker(),
             "scope:project/main",
-            "zero.contract/v1",
+            "zero.contract/base",
             evidence(),
             witness(&["f"]),
             None,
@@ -659,16 +647,16 @@ fn schema_identity_is_constant() {
     let bytes = report.to_canonical_bytes().unwrap();
     let text = String::from_utf8(bytes).unwrap();
     // Independent literal: canonical bytes must contain the protocol-mandated schema.
-    assert!(text.contains("\"schema\":\"zerostack/v7-shadow-report/1\""));
-    assert_eq!(report.schema, "zerostack/v7-shadow-report/1");
+    assert!(text.contains("\"schema\":\"zerostack/etnf-shadow-report/1\""));
+    assert_eq!(report.schema, "zerostack/etnf-shadow-report/1");
 
-    // Fixed compatibility fixture carries the same literal and round-trips.
-    let parsed = V7ShadowReport::from_canonical_bytes(SAFE_FIXTURE.as_bytes()).unwrap();
-    assert_eq!(parsed.schema, "zerostack/v7-shadow-report/1");
+    // The canonical fixture carries the same literal and round-trips.
+    let parsed = EtnfShadowReport::from_canonical_bytes(SAFE_FIXTURE.as_bytes()).unwrap();
+    assert_eq!(parsed.schema, "zerostack/etnf-shadow-report/1");
     assert!(
         String::from_utf8(parsed.to_canonical_bytes().unwrap())
             .unwrap()
-            .contains("\"schema\":\"zerostack/v7-shadow-report/1\"")
+            .contains("\"schema\":\"zerostack/etnf-shadow-report/1\"")
     );
 
     // Unsupported schema is rejected by the parser contract.
@@ -678,7 +666,7 @@ fn schema_identity_is_constant() {
     }
     let tampered = serde_json::to_vec(&value).unwrap();
     assert_eq!(
-        V7ShadowReport::from_canonical_bytes(&tampered),
+        EtnfShadowReport::from_canonical_bytes(&tampered),
         Err(EtnfError::InvalidSchema {
             actual: "zerostack/other/1".into()
         })

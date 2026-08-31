@@ -6,16 +6,11 @@ members = [
     "crates/fszero/*",
     "crates/graphzero/*",
     "tests/support",
-    "tests/fszero",
 ]
 exclude = [
     "fuzz",
     ".rch-tmp",
     ".rch-tmp/*",
-    # Retained ship-test manifests have no standalone crate roots; their live
-    # integration targets are declared by the domain crates.
-    "tests/graphzero",
-    "tests/tokenzero",
 ]
 
 [workspace.package]
@@ -30,70 +25,78 @@ keywords = ["agents", "filesystem", "code-analysis", "tokens", "developer-tools"
 categories = ["development-tools", "filesystem", "command-line-utilities"]
 
 [workspace.dependencies]
-ah-ah-ah = "0.1"
 anyhow = "1.0.104"
-assert_cmd = "2.2.2"
 ast-sgrep-core = { git = "https://github.com/AdityaVG13/ast-sgrep.git", rev = "6b65549bd9db13f253b0f26a9f6b06b661dc41e4" }
-ast-sgrep-lang = { git = "https://github.com/AdityaVG13/ast-sgrep.git", rev = "6b65549bd9db13f253b0f26a9f6b06b661dc41e4" }
 blake3 = "1.8"
 bytemuck = { version = "1.25", features = ["derive"] }
-clap = { version = "4.6.6", features = ["derive", "env"] }
 criterion = { version = "0.8", features = ["html_reports"] }
-flate2 = { version = "1.1.9", default-features = false, features = ["rust_backend"] }
 fs4 = "1.1.0"
+getrandom = "0.3.4"
 git2 = { version = "0.21", default-features = false }
-globset = "0.4.20"
 hdrhistogram = "7"
-memchr = "2.8.3"
 memmap2 = ">=0.9.11"
-predicates = "3.1.4"
 proptest = "1.11.0"
 regex = "1.13.1"
-rusqlite = { version = "0.40.2", features = ["bundled"] }
+rusqlite = { version = "0.40.2", features = ["bundled", "backup"] }
 rustix = { version = "1.1.4", default-features = false, features = ["fs"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
 serial_test = "4"
 sha2 = "0.11.0"
-similar = { version = "3.1.2", default-features = false, features = ["text"] }
 tempfile = "3.27.0"
 thiserror = "2.0.20"
 tiktoken-rs = "0.12"
-toml = "1.1.4"
 tracing = "0.1"
-wait-timeout = "0.2.1"
+crc32fast = "1"
+crossbeam-queue = "0.3"
+fastmcp-rust = { git = "https://github.com/Dicklesworthstone/fastmcp_rust", rev = "1c66097b15dea9550e833ee9e433beeb66eefece" }
+fsqlite = "0.1.19"
+fsqlite-core = "0.1.19"
+libc = "0.2"
+napi = { version = "3.12.1", features = ["serde-json", "napi6"] }
+napi-build = "2.4.1"
+napi-derive = "3.6.3"
+parking_lot = "0.12"
+rayon = "1.12"
+tree-sitter = "0.26.12"
+tree-sitter-javascript = "0.25.0"
+tree-sitter-python = "0.25"
+tree-sitter-rust = "0.24"
+tree-sitter-typescript = "0.23.2"
+unicode-normalization = "0.1"
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Authorization", "Win32_Security_Cryptography", "Win32_Storage_FileSystem", "Win32_System_Diagnostics_ToolHelp", "Win32_System_IO", "Win32_System_JobObjects", "Win32_System_Memory", "Win32_System_Pipes", "Win32_System_SystemServices", "Win32_System_Threading"] }
+xattr = "1"
+zstd = "0.13"
 
 zerostack-test-support = { path = "tests/support" }
 zerostack-conformance = { path = "crates/zerostack/zerostack-conformance" }
-zerostack-install = { path = "crates/zerostack/zerostack-install" }
 zero-abi = { path = "crates/zerostack/zero-abi" }
 zero-cert = { path = "crates/zerostack/zero-cert" }
 zero-codemode = { path = "crates/zerostack/zero-codemode" }
 zero-gate = { path = "crates/zerostack/zero-gate" }
 zero-gauge = { path = "crates/zerostack/zero-gauge" }
 zero-ledger = { path = "crates/zerostack/zero-ledger" }
-zero-kernel = { path = "crates/zerostack/zero-kernel" }
+zero-pulse = { path = "crates/zerostack/zero-pulse" }
+zero-kernel = { path = "crates/zerostack/zero-kernel", default-features = false }
 zero-mcp = { path = "crates/zerostack/zero-mcp" }
 zero-process = { path = "crates/zerostack/zero-process" }
 zero-ref = { path = "crates/zerostack/zero-ref" }
 zero-store = { path = "crates/zerostack/zero-store" }
-zero-machine-permit = { path = "crates/zerostack/zerostack-machine-permit" }
 
-tokenzero-kernel = { path = "crates/tokenzero/tokenzero-kernel" }
+tokenzero-core = { path = "crates/tokenzero/tokenzero-core" }
+zero-token = { path = "crates/zerostack/zero-token" }
 
-fs-zero = { path = "crates/fszero/fs-zero" }
 fszero-core = { path = "crates/fszero/fszero-core" }
-fszero-engine = { path = "crates/fszero/fszero-engine" }
-fszero-kernel = { path = "crates/fszero/fszero-kernel" }
 fszero-store = { path = "crates/fszero/fszero-store" }
+zero-fs = { path = "crates/zerostack/zero-fs" }
 
+graphzero-coverage = { path = "crates/graphzero/graphzero-coverage" }
+graphzero-core = { path = "crates/graphzero/graphzero-core" }
 graphzero-engine = { path = "crates/graphzero/graphzero-engine", default-features = false }
 graphzero-extract = { path = "crates/graphzero/graphzero-extract" }
-graphzero-kernel = { path = "crates/graphzero/graphzero-kernel" }
+zero-graph = { path = "crates/zerostack/zero-graph" }
 graphzero-reserve = { path = "crates/graphzero/graphzero-reserve" }
-graphzero-semantic = { path = "crates/graphzero/graphzero-semantic" }
 graphzero-store = { path = "crates/graphzero/graphzero-store", default-features = false }
-graphzero-test-support = { path = "crates/graphzero/graphzero-test-support" }
 graphzero-types = { path = "crates/graphzero/graphzero-types" }
 
 [workspace.lints.rust]

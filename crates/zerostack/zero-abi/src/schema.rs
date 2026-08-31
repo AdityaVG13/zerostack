@@ -1,9 +1,6 @@
-//! Canonical JSON Schema compare for operation ABI parity.
-//!
-//! Catalogs and bindings must match an engine registry on the full structural
-//! schema (types, requiredness, nested constraints), not merely property-name
-//! sets. Description/title text is ignored so prose edits do not mask real
-//! drift.
+//! Canonical JSON Schema compare for operation ABI parity. Catalogs and bindings must match an
+//! engine registry on the full structural schema (types, requiredness, nested constraints), not
+//! merely property-name sets. Description/title text is ignored so prose edits do not mask real drift.
 
 use serde_json::{Map, Value, json};
 use std::collections::BTreeSet;
@@ -63,12 +60,9 @@ pub fn schema_fingerprint_hex(schema: &Value) -> String {
     sha256_hex(canonical_schema_json(schema).as_bytes())
 }
 
-/// Normalize a schema for structural compare / digest:
-/// - drop documentation keys
-/// - sort object keys (via canonical serialization path)
-/// - sort required arrays
-/// - sort string-only enum arrays (non-string enums preserve order)
-/// - recurse into properties / items / additionalProperties / *Of
+/// Normalize a schema for structural comparison and hashing. Drop documentation keys,
+/// sort required and string-only enum arrays, and recurse through schema children.
+/// Canonical serialization sorts object keys; non-string enum order remains significant.
 pub fn normalize_schema(value: &Value) -> Value {
     match value {
         Value::Object(map) => {

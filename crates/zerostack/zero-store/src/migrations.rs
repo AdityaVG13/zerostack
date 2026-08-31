@@ -1,20 +1,6 @@
-//! Versioned store-format migrations (ZS-OPS-004).
-//!
-//! The on-disk store format carries an explicit version record at
-//! `<store_root>/format_version`. Reads detect that version; a version beyond
-//! the known set is refused loudly (fail closed, never guessed). A migration
-//! run applies an ordered, deterministic chain of steps
-//! (`v(n) -> v(n+1)`, transform function pointer -- no environment, no
-//! clocks), each persisted as an immutable marker before the format version
-//! advances, and emits a [`MigrationReceipt`] binding old/new format-state
-//! roots, the transform digest, and the validation digest of the final state.
-//!
-//! Idempotency: a step whose marker already exists is not re-applied (crash
-//! between transform and version advance is recovered, not repeated), and a
-//! store already at the target version is a no-op. Today the production
-//! registry is empty (format v1 is current), so the only production outcome
-//! is [`MigrationError::SchemaVersionMismatch`] for future versions; the
-//! runner itself is exercised by fixture steps in the unit tests.
+//! Versioned store-format migrations. The on-disk store format carries an explicit
+//! version record at `<store_root>/format_version`. Reads detect that version; a version beyond the
+//! known set is refused loudly (fail closed, never guessed).
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -304,18 +290,15 @@ impl MigrationReceipt {
     }
 }
 
-/// The production migration registry. Format v1 is current, so today it is
-/// empty and the only production outcomes are no-ops and loud
-/// [`MigrationError::SchemaVersionMismatch`] refusals. Future format
-/// changes add their ordered steps here.
+/// Production migration registry. It is empty while the canonical format is current, so this build
+/// admits no-op opens and rejects mismatched schema versions.
 pub fn production_migration_steps() -> Vec<MigrationStep> {
     Vec::new()
 }
 
-/// Detect the on-disk store format version. Absence of the version record
-/// means the implicit v1 default (nothing is written by detection). A present
-/// record is validated canonically; a torn record or an unknown record schema
-/// fails loudly.
+/// Detect the on-disk store format version. Absence of the version record means the
+/// implicit canonical default (nothing is written by detection). A present record is
+/// validated canonically; a torn record or an unknown record schema fails loudly.
 pub fn detect_store_format_version(
     store_root: &Path,
 ) -> Result<Option<StoreFormatVersion>, MigrationError> {
@@ -357,13 +340,9 @@ pub fn ensure_format_supported(store_root: &Path) -> Result<StoreFormatVersion, 
     Ok(version)
 }
 
-/// Run the ordered, idempotent migration chain `steps` on `store_root`.
-///
-/// - The on-disk version is detected first; a version above the union of the
-///   production maximum and every step's target is refused loudly.
-/// - Steps must form a contiguous ascending chain; each step applies at most
-///   once (a persisted marker of the same step is honored as already applied).
-/// - The receipt is persisted under `<store_root>/gc/migrations/receipts/`.
+/// Run the ordered, idempotent migration chain `steps` on `store_root`. The on-disk version is
+/// detected first; a version above the union of the production maximum and every step's target is
+/// refused loudly.
 pub fn run_store_migrations(
     store_root: &Path,
     steps: &[MigrationStep],

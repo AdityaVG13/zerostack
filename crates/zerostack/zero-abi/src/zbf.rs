@@ -1,9 +1,6 @@
-//! Canonical strict bounded Zero Binary Format (ZBF-1) objects and profiles.
-//!
-//! ZBF uses a fixed 192-byte big-endian header. The header binds every object to
-//! one assembly manifest, one durable profile, one producer contract, and one
-//! payload digest. Container payloads are recursively length-delimited and are
-//! decoded under fixed byte, child-count, and depth bounds before allocation.
+//! Canonical strict bounded Zero Binary Format (ZBF-1) objects and profiles. ZBF uses a fixed
+//! 192-byte big-endian header. The header binds every object to one assembly manifest, one durable
+//! profile, one producer contract, and one payload digest.
 
 use std::{error::Error, fmt};
 

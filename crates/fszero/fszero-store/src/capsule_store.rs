@@ -1,8 +1,6 @@
-//! Work Capsule byte storage, exact projections, and storage economics.
-//!
-//! FSZero stores opaque canonical manifests and projection bytes in the
-//! existing CAS. GC planning returns `Unknown` unless support closure is
-//! complete; it never performs deletion.
+//! Work Capsule byte storage, exact projections, and storage economics. FSZero stores
+//! opaque canonical manifests and projection bytes in the existing CAS. GC planning
+//! returns `Unknown` unless support closure is complete; it never performs deletion.
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fmt;

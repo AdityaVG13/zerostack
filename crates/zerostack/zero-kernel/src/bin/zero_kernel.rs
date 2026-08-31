@@ -1,5 +1,6 @@
-use std::io::Read;
-use std::path::PathBuf;
+use std::fs::OpenOptions;
+use std::io::{Read, Write};
+use std::path::{Path, PathBuf};
 #[cfg(feature = "mcp-carrier")]
 use std::sync::Arc;
 #[cfg(feature = "mcp-carrier")]
@@ -7,13 +8,13 @@ use std::time::Duration;
 
 use serde_json::json;
 use zero_abi::KernelBudget;
-use zero_kernel::{ZeroKernel, direct_contract_digest};
+use zero_gate::{ProgramEvidenceError, ProgramEvidenceManifest, assemble_program_evidence};
+use zero_kernel::{Observation, ZeroKernel, direct_contract_digest, paired_savings_report};
 #[cfg(feature = "mcp-carrier")]
 use zero_mcp::{
     FastMcpZeroCarrier, McpDispatchError, McpTransportConfig, ZeroCarrierCapabilities,
     ZeroCarrierExecutor, ZeroCarrierSampling,
 };
-use zero_store::{import_legacy_store, read_and_verify_manifest};
 
 fn main() {
     if let Err(error) = run() {
@@ -26,12 +27,19 @@ fn run() -> Result<(), String> {
     let mut args = std::env::args().skip(1);
     let command = args.next().unwrap_or_else(|| "doctor".into());
     let remaining = args.collect::<Vec<_>>();
-    if matches!(command.as_str(), "help" | "--help" | "-h")
-        || remaining
-            .iter()
-            .any(|argument| matches!(argument.as_str(), "--help" | "-h"))
-    {
+    if matches!(command.as_str(), "help" | "--help" | "-h") {
         print_help();
+        return Ok(());
+    }
+    if remaining
+        .iter()
+        .any(|argument| matches!(argument.as_str(), "--help" | "-h"))
+    {
+        match command.as_str() {
+            "program-evidence" => println!("{PROGRAM_EVIDENCE_USAGE}"),
+            "savings-report" => println!("{SAVINGS_REPORT_USAGE}"),
+            _ => print_help(),
+        }
         return Ok(());
     }
     match command.as_str() {
@@ -39,18 +47,23 @@ fn run() -> Result<(), String> {
             doctor(parse_path_flag(&remaining, "-C").unwrap_or_else(|| PathBuf::from(".")))
         }
         "exec" => execute(parse_path_flag(&remaining, "-C").unwrap_or_else(|| PathBuf::from("."))),
+        "program-evidence" => program_evidence(&remaining),
+        "savings-report" => savings_report(&remaining),
         #[cfg(feature = "mcp-carrier")]
         "mcp" => mcp(parse_path_flag(&remaining, "-C").unwrap_or_else(|| PathBuf::from("."))),
         #[cfg(not(feature = "mcp-carrier"))]
         "mcp" => Err("mcp command requires the `mcp-carrier` feature".into()),
-        "migrate" => migrate(&remaining),
         _ => Err(format!(
-            "unknown command {command:?}; use doctor, health, exec, mcp, or migrate"
+            "unknown command {command:?}; use doctor, health, exec, mcp, program-evidence, or savings-report"
         )),
     }
 }
 
-const HELP: &str = "ZeroKernel\n\nUsage:\n  zero-kernel doctor|health [-C <workspace>]\n  zero-kernel exec [-C <workspace>]\n  zero-kernel mcp [-C <workspace>]\n  zero-kernel migrate <options>\n\nOptions:\n  -h, --help  Show this help and exit";
+const HELP: &str = "ZeroKernel\n\nUsage:\n  zero-kernel doctor|health [-C <workspace>]\n  zero-kernel exec [-C <workspace>]\n  zero-kernel mcp [-C <workspace>]\n  zero-kernel program-evidence --manifest <manifest.json> --out <receipt.json>\n  zero-kernel savings-report --native <native.json> --zero <zero.json>\n\nOptions:\n  -h, --help  Show this help and exit";
+const PROGRAM_EVIDENCE_USAGE: &str =
+    "zero-kernel program-evidence --manifest <manifest.json> --out <receipt.json>";
+const SAVINGS_REPORT_USAGE: &str =
+    "zero-kernel savings-report --native <native.json> --zero <zero.json>";
 
 fn print_help() {
     println!("{HELP}");
@@ -129,6 +142,96 @@ fn execute(root: PathBuf) -> Result<(), String> {
     );
     Ok(())
 }
+fn program_evidence(args: &[String]) -> Result<(), String> {
+    let (manifest_path, out_path) =
+        parse_two_path_flags(args, "--manifest", "--out", PROGRAM_EVIDENCE_USAGE)?;
+    let bytes = std::fs::read(&manifest_path)
+        .map_err(|error| format!("cannot read manifest {}: {error}", manifest_path.display()))?;
+    let manifest =
+        ProgramEvidenceManifest::from_canonical_bytes(&bytes).map_err(|error| error.to_string())?;
+    let receipt =
+        assemble_program_evidence(&manifest, load_evidence).map_err(|error| error.to_string())?;
+    let canonical = receipt
+        .canonical_bytes()
+        .map_err(|error| error.to_string())?;
+    if let Some(parent) = out_path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|error| format!("cannot create {}: {error}", parent.display()))?;
+    }
+    let mut output = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&out_path)
+        .map_err(|error| {
+            format!(
+                "cannot create immutable receipt {}: {error}",
+                out_path.display()
+            )
+        })?;
+    output
+        .write_all(&canonical)
+        .and_then(|()| output.sync_all())
+        .map_err(|error| format!("cannot write {}: {error}", out_path.display()))?;
+    println!("wrote {}", out_path.display());
+    Ok(())
+}
+
+fn load_evidence(path: &Path) -> Result<Vec<u8>, ProgramEvidenceError> {
+    std::fs::read(path)
+        .map_err(|error| ProgramEvidenceError::io(format!("reading {}: {error}", path.display())))
+}
+
+fn savings_report(args: &[String]) -> Result<(), String> {
+    let (native_path, zero_path) =
+        parse_two_path_flags(args, "--native", "--zero", SAVINGS_REPORT_USAGE)?;
+    let native = read_observation(&native_path, "native")?;
+    let zero = read_observation(&zero_path, "zero")?;
+    let report = paired_savings_report(native, zero).map_err(|error| error.to_string())?;
+    println!("{}", report.canonical_render());
+    Ok(())
+}
+
+fn read_observation(path: &Path, label: &str) -> Result<Observation, String> {
+    let bytes = std::fs::read(path).map_err(|error| {
+        format!(
+            "cannot read {label} observation {}: {error}",
+            path.display()
+        )
+    })?;
+    serde_json::from_slice(&bytes).map_err(|error| {
+        format!(
+            "cannot decode {label} observation {}: {error}",
+            path.display()
+        )
+    })
+}
+
+fn parse_two_path_flags(
+    args: &[String],
+    first_flag: &str,
+    second_flag: &str,
+    usage: &str,
+) -> Result<(PathBuf, PathBuf), String> {
+    let mut first = None;
+    let mut second = None;
+    let mut args = args.iter();
+    while let Some(argument) = args.next() {
+        let value = args
+            .next()
+            .ok_or_else(|| format!("{argument} requires a path\n{usage}"))?;
+        let slot = match argument.as_str() {
+            flag if flag == first_flag => &mut first,
+            flag if flag == second_flag => &mut second,
+            other => return Err(format!("unknown argument {other:?}\n{usage}")),
+        };
+        if slot.replace(PathBuf::from(value)).is_some() {
+            return Err(format!("duplicate argument {argument}\n{usage}"));
+        }
+    }
+    let first = first.ok_or_else(|| format!("missing {first_flag}\n{usage}"))?;
+    let second = second.ok_or_else(|| format!("missing {second_flag}\n{usage}"))?;
+    Ok((first, second))
+}
 
 #[cfg(feature = "mcp-carrier")]
 fn mcp(root: PathBuf) -> Result<(), String> {
@@ -140,7 +243,7 @@ fn mcp(root: PathBuf) -> Result<(), String> {
         default_budget(),
     )
     .map_err(|error| error.to_string())?;
-    let digest = native_package_digest();
+    let digest = native_package_digest()?;
     let capabilities = ZeroCarrierCapabilities {
         cancellation: true,
         progress: true,
@@ -184,37 +287,23 @@ impl ZeroCarrierExecutor for KernelStdioExecutor {
 }
 
 #[cfg(feature = "mcp-carrier")]
-fn native_package_digest() -> String {
-    let exe = std::env::current_exe()
-        .ok()
-        .and_then(|path| path.to_str().map(str::to_string))
-        .unwrap_or_else(|| "zero-kernel".into());
-    format!("{}", blake3::hash(exe.as_bytes()).to_hex())
-}
-
-fn migrate(args: &[String]) -> Result<(), String> {
-    let source = required_path_flag(args, "--source")?;
-    let destination = required_path_flag(args, "--destination")?;
-    let manifest = required_path_flag(args, "--manifest")?;
-    let key_hex = required_string_flag(args, "--key-hex")?;
-    let key = parse_key(&key_hex)?;
-    let result = import_legacy_store(&source, &destination, &manifest, &key)
-        .map_err(|error| error.to_string())?;
-    let verified = read_and_verify_manifest(&manifest, &key).map_err(|error| error.to_string())?;
-    if result != verified {
-        return Err("written migration manifest did not verify identically".into());
-    }
-    println!(
-        "{}",
-        serde_json::to_string(&json!({
-            "objects": result.entries.len(),
-            "bytes": result.total_bytes,
-            "manifest": manifest,
-            "signature": result.signature,
-        }))
-        .map_err(|error| error.to_string())?
-    );
-    Ok(())
+fn native_package_digest() -> Result<String, String> {
+    let executable = std::env::current_exe()
+        .map_err(|error| format!("cannot locate zero-kernel executable: {error}"))?;
+    let mut file = std::fs::File::open(&executable).map_err(|error| {
+        format!(
+            "cannot open zero-kernel executable {}: {error}",
+            executable.display()
+        )
+    })?;
+    let mut hasher = blake3::Hasher::new();
+    std::io::copy(&mut file, &mut hasher).map_err(|error| {
+        format!(
+            "cannot hash zero-kernel executable {}: {error}",
+            executable.display()
+        )
+    })?;
+    Ok(hasher.finalize().to_hex().to_string())
 }
 
 fn default_budget() -> KernelBudget {
@@ -232,32 +321,4 @@ fn parse_path_flag(args: &[String], flag: &str) -> Option<PathBuf> {
     args.windows(2)
         .find(|pair| pair[0] == flag)
         .map(|pair| PathBuf::from(&pair[1]))
-}
-
-fn required_path_flag(args: &[String], flag: &str) -> Result<PathBuf, String> {
-    parse_path_flag(args, flag).ok_or_else(|| format!("{flag} requires a path"))
-}
-
-fn required_string_flag(args: &[String], flag: &str) -> Result<String, String> {
-    args.windows(2)
-        .find(|pair| pair[0] == flag)
-        .map(|pair| pair[1].clone())
-        .ok_or_else(|| format!("{flag} requires a value"))
-}
-
-fn parse_key(value: &str) -> Result<[u8; 32], String> {
-    if value.len() != 64
-        || !value
-            .bytes()
-            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
-    {
-        return Err("--key-hex must contain 64 lowercase hex characters".into());
-    }
-    let mut key = [0_u8; 32];
-    for (index, chunk) in value.as_bytes().chunks_exact(2).enumerate() {
-        let text = std::str::from_utf8(chunk).map_err(|error| error.to_string())?;
-        key[index] = u8::from_str_radix(text, 16)
-            .map_err(|_| "--key-hex must contain lowercase hexadecimal".to_string())?;
-    }
-    Ok(key)
 }

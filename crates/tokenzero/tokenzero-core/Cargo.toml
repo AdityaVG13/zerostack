@@ -1,48 +1,49 @@
 [package]
 name = "tokenzero-core"
-version = "1.4.0"
+version.workspace = true
 edition.workspace = true
 license.workspace = true
+publish = false
 repository.workspace = true
-description = "Core compression model and content-addressed exact-recovery refs for TokenZero."
+description = "TokenZero compression, model artifacts, and token accounting primitives."
 homepage.workspace = true
 readme.workspace = true
 keywords.workspace = true
 categories.workspace = true
 rust-version.workspace = true
 autotests = false
+autoexamples = false
 
 [dependencies]
 serde.workspace = true
 serde_json.workspace = true
-sha2.workspace = true
 zero-abi.workspace = true
 zero-gauge.workspace = true
 zero-ledger.workspace = true
 zero-ref.workspace = true
 
 [dev-dependencies]
-ah-ah-ah = "0.1"
-criterion = "0.8"
+criterion = { workspace = true }
 proptest.workspace = true
-tiktoken-rs = "0.12"
-tokenzero-test-support = { path = "../tokenzero-test-support" }
-zero-gauge.workspace = true
+tiktoken-rs = { workspace = true }
 
 [[bench]]
 name = "hotpaths"
 harness = false
 
-# Live contract proofs only. d8c0844 pruned the rest; missing test
-# targets were deleted in Phase 1 rather than left compile-broken.
+# Live contract proof targets.
 [[test]]
 name = "provider_tokenizer_goldens"
-path = "../../../tests/tokenzero/unit/tokenzero-core/provider_tokenizer_goldens.rs"
+path = "../../../tests/tokenzero/core_provider_tokenizer_goldens.rs"
 
 [[test]]
 name = "model_artifact_limits"
-path = "../../../tests/tokenzero/unit/tokenzero-core/model_artifact_limits.rs"
+path = "../../../tests/tokenzero/core_model_artifact_limits.rs"
 
 [[test]]
 name = "representation_economics"
-path = "../../../tests/tokenzero/unit/tokenzero-core/representation_economics.rs"
+path = "../../../tests/tokenzero/core_representation_economics.rs"
+
+[[test]]
+name = "core_decision_contracts"
+path = "../../../tests/tokenzero/core_decision_contracts.rs"

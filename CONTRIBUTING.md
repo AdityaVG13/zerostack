@@ -60,10 +60,7 @@ Contracts live in `contracts/` as a flat machine-readable surface. See
 `crates/zerostack/zerostack-conformance` and proves every engine against the
 same contract. Anything touching `contracts/` or `crates/zerostack/zero-abi`
 changes the surface consumed by all crates. Coordinate the change in this
-repository and update `contracts/` plus the conformance crate together. Digest
-changes to the GraphZero operation ABI require updating
-`contracts/approved_operation_abi_digest.txt` with an explicit entry in
-`contracts/digest_break_approval.json` when the break is intentional. See
+repository and update `contracts/` plus the conformance crate together. See
 `crates/zerostack/zerostack-conformance/CONTRACT.md` for invariants.
 
 ## Reporting issues

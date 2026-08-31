@@ -3,22 +3,21 @@ name = "graphzero-extract"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+publish = false
+description = "Deterministic syntax and fact extraction for GraphZero"
 autotests = false
 
 [dependencies]
 graphzero-types = { workspace = true }
-tree-sitter = "0.26.12"
-tree-sitter-rust = "0.24"
-tree-sitter-typescript = "0.23"
-tree-sitter-python = "0.25"
-rayon = "1.12"
+tree-sitter = { workspace = true }
+tree-sitter-rust = { workspace = true }
+tree-sitter-typescript = { workspace = true }
+tree-sitter-python = { workspace = true }
+rayon = { workspace = true }
 serde_json = { workspace = true }
 
 [dev-dependencies]
 criterion = { workspace = true }
-graphzero-test-support = { workspace = true }
-proptest = { workspace = true }
-tempfile = { workspace = true }
 
 [[bench]]
 name = "extraction_bench"

@@ -1,4 +1,4 @@
-//! IntentReservation v1 (P5.2).
+//! Intent reservation schema.
 
 use serde::{Deserialize, Serialize};
 
@@ -33,7 +33,7 @@ pub struct IntentReservation {
     pub status: ReservationStatus,
     pub created_at: u64,
     pub expires_at: u64,
-    /// Contract nodes (gz://node/...) included in the footprint.
+    /// Bare `node/...` contract refs included in the footprint.
     pub contract_nodes: Vec<String>,
 }
 

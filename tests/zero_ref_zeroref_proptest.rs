@@ -9,7 +9,7 @@ fn hex64() -> impl Strategy<Value = String> {
 }
 
 fn scheme() -> impl Strategy<Value = &'static str> {
-    prop_oneof![Just("fz"), Just("gz"), Just("tz")]
+    Just("z")
 }
 
 fn config() -> Config {

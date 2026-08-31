@@ -1,7 +1,5 @@
-//! `graphzero expand` resolution chain (FR-017, FR-018, ref-contract.md §6):
-//! GraphZero blob store -> git object store (secondary OID key) ->
-//! registered external stores (TokenZero recovery cache, when configured).
-//! The first two steps make every ref resolvable standalone.
+//! Resolves blobs from the local store, secondary Git object IDs, then registered stores.
+//! Local and Git tiers keep references resolvable without an external provider.
 
 use std::path::{Path, PathBuf};
 
@@ -11,10 +9,9 @@ use super::blob_store::{BlobDigestMismatch, BlobStore};
 use super::entity::{EntityId, lookup_entity_with_store};
 use super::memory::load_fact;
 use super::path_safety::read_queries_file;
-use super::path_safety::validate_safe_id;
 use super::query::{Snapshot, canonical_ref_for_loc};
 use super::ref_index;
-use super::refs::{CodeModeExecutionPart, Fragment, GzRef};
+use super::refs::{Fragment, GzRef};
 use super::zeroref::{ZeroFragment, select_fragment};
 
 /// One step of the resolution trace, for structured errors.
@@ -24,14 +21,12 @@ pub struct TraceStep {
     pub result: &'static str,
 }
 
-/// Typed expand failure class (graphzero-m3wx). Stable tokens for harnesses;
-/// `reason` keeps the human/detail string.
+/// Typed expand failure class with stable string tokens.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ExpandErrorKind {
     NotFound,
     WrongRoot,
     Expired,
-    WorkerSkew,
     DigestMismatch,
     InvalidRef,
     Other,
@@ -43,7 +38,6 @@ impl ExpandErrorKind {
             Self::NotFound => "not_found",
             Self::WrongRoot => "wrong_root",
             Self::Expired => "expired",
-            Self::WorkerSkew => "worker_skew",
             Self::DigestMismatch => "digest_mismatch",
             Self::InvalidRef => "invalid_ref",
             Self::Other => "other",
@@ -64,7 +58,6 @@ impl ExpandErrorKind {
             | "node_symbol_has_no_span" => Self::NotFound,
             "wrong_root" => Self::WrongRoot,
             "expired" => Self::Expired,
-            "worker_skew" => Self::WorkerSkew,
             "digest_mismatch" => Self::DigestMismatch,
             "invalid_span"
             | "invalid_entity_id"
@@ -168,8 +161,7 @@ pub struct Resolution {
     pub source: &'static str,
 }
 
-/// Stable failure classes at the external adapter boundary, aligned with the
-/// ZeroRef v1 error registry (docs/adr/002-zeroref-v1.md §6).
+/// Stable failure classes at the external store boundary.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ExternalResolveError {
     /// Object not present in this store. The only outcome that lets the
@@ -188,7 +180,7 @@ pub enum ExternalResolveError {
 }
 
 impl ExternalResolveError {
-    /// Stable class token shared with the ZeroRef v1 registry.
+    /// Stable class token shared with the ZeroRef registry.
     pub fn class(&self) -> &'static str {
         match self {
             Self::NotFound => "not_found",
@@ -250,31 +242,15 @@ impl<'a> BlobRequest<'a> {
     }
 }
 
-/// Pluggable external store (ref-contract.md §8, ZeroRef v1 §6/§7).
-///
-/// Contract for implementers:
-/// - **Identity:** requests carry a validated full 64-hex SHA-256. Return the
-///   complete object bytes for exactly that identity or a typed error. The
-///   resolver re-verifies the digest after every hit, so wrong bytes are
-///   rejected — but returning them is still a contract violation.
-/// - **Errors:** return `NotFound` only for genuine absence; the chain falls
-///   through to the next tier on `NotFound` alone. `Io`, `Malformed`,
-///   `DigestMismatch`, `PolicyDenied`, and `Unsupported` are terminal so
-///   failures and corruption are never masked by a lower tier.
-/// - **Ownership/concurrency:** adapters are owned by the resolver
-///   (`Box<dyn ExternalStore>`), must be `Send + Sync`, and may be called
-///   concurrently from embedded hosts; keep them stateless or internally
-///   synchronized. No process-global handles.
-/// - **Trust:** never leak blob contents in error messages; identify the
-///   store by its short `name()` label, not by unrelated filesystem paths.
+/// Pluggable external store (ref-contract.md §8, ZeroRef §6/§7). Contract for implementers
+/// **Identity:** requests carry a validated full 64-hex SHA-256. Return the complete object bytes
+/// for exactly that identity or a typed error.
 pub trait ExternalStore: Send + Sync {
     fn name(&self) -> &'static str;
     fn get(&self, request: &BlobRequest<'_>) -> Result<Vec<u8>, ExternalResolveError>;
 }
 
-/// Narrow adapter exposing a local GraphZero [`BlobStore`] root through the
-/// [`ExternalStore`] boundary, so embedded and CLI callers can chain legacy
-/// store roots without duplicating ref parsing.
+/// Exposes a local GraphZero BlobStore through the ExternalStore interface.
 pub struct LocalBlobStoreAdapter {
     pub root: PathBuf,
     pub label: &'static str,
@@ -296,51 +272,14 @@ impl ExternalStore for LocalBlobStoreAdapter {
     }
 }
 
-/// Content-addressed directory adapter: looks up `<dir>/<sha256>` (or the
-/// TokenZero recovery-cache spelling `<dir>/<sha256>.txt`) by exact identity.
-#[cfg(feature = "tokenzero")]
-pub struct DirStore {
-    pub dir: PathBuf,
-    pub label: &'static str,
-}
-
-#[cfg(feature = "tokenzero")]
-impl ExternalStore for DirStore {
-    fn name(&self) -> &'static str {
-        self.label
-    }
-
-    fn get(&self, request: &BlobRequest<'_>) -> Result<Vec<u8>, ExternalResolveError> {
-        for candidate in [
-            self.dir.join(request.sha256()),
-            self.dir.join(format!("{}.txt", request.sha256())),
-        ] {
-            match std::fs::read(&candidate) {
-                Ok(bytes) => return Ok(bytes),
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
-                Err(e) => return Err(ExternalResolveError::Io(format!("read cache entry: {e}"))),
-            }
-        }
-        Err(ExternalResolveError::NotFound)
-    }
-}
-
 pub struct ExpandResolver {
     blob_store: BlobStore,
     store_root: PathBuf,
     repo_root: Option<PathBuf>,
     externals: Vec<Box<dyn ExternalStore>>,
-    /// When set, ref-index hits whose store root is outside this set yield
-    /// `wrong_root` instead of following the foreign root (graphzero-m3wx).
+    /// When set, ref-index hits whose store root is outside this
+    /// set yield `wrong_root` instead of following the foreign root.
     authorized_roots: Option<Vec<PathBuf>>,
-    /// Session-bound contract digest expected by the caller (router / harness).
-    expected_contract_digest: Option<String>,
-    /// Digest this owner process actually serves.
-    actual_contract_digest: Option<String>,
-    /// Session-bound worker revision expected by the caller.
-    expected_worker_revision: Option<String>,
-    /// Revision this owner process actually serves.
-    actual_worker_revision: Option<String>,
 }
 
 impl ExpandResolver {
@@ -352,44 +291,14 @@ impl ExpandResolver {
             repo_root: repo_root.map(|p| p.to_path_buf()),
             externals: Vec::new(),
             authorized_roots: None,
-            expected_contract_digest: None,
-            actual_contract_digest: None,
-            expected_worker_revision: None,
-            actual_worker_revision: None,
         };
-        // Project-local canonical CAS (ZeroRef v1 §7) is always chained after
-        // the legacy flat store; a cross-project shared CAS joins only under
-        // the explicit shared-store opt-in.
+        // Chain the project-local canonical CAS before the optional shared CAS.
         resolver
             .externals
             .push(Box::new(super::shared_cas::SharedCas::open_labeled(
                 store_root,
                 "cas-local",
             )));
-        if super::zerostack_store::shared_store_opt_in_from_env()
-            && let Some(root) = super::zerostack_store::STORE_ROOT_ENVS
-                .iter()
-                .find_map(std::env::var_os)
-        {
-            resolver
-                .externals
-                .push(Box::new(super::shared_cas::SharedCas::open_labeled(
-                    PathBuf::from(root),
-                    "cas-shared",
-                )));
-        }
-        #[cfg(feature = "tokenzero")]
-        {
-            if let Ok(dir) = std::env::var("GRAPHZERO_TOKENZERO_CACHE") {
-                let dir = PathBuf::from(dir);
-                if dir.is_dir() {
-                    resolver.externals.push(Box::new(DirStore {
-                        dir,
-                        label: "tokenzero",
-                    }));
-                }
-            }
-        }
         Ok(resolver)
     }
 
@@ -399,36 +308,13 @@ impl ExpandResolver {
         self
     }
 
-    /// Bind expected vs actual worker contract identity for `worker_skew` checks.
-    pub fn with_worker_identity(
-        mut self,
-        expected_contract_digest: impl Into<String>,
-        actual_contract_digest: impl Into<String>,
-        expected_worker_revision: impl Into<String>,
-        actual_worker_revision: impl Into<String>,
-    ) -> Self {
-        self.expected_contract_digest = Some(expected_contract_digest.into());
-        self.actual_contract_digest = Some(actual_contract_digest.into());
-        self.expected_worker_revision = Some(expected_worker_revision.into());
-        self.actual_worker_revision = Some(actual_worker_revision.into());
-        self
-    }
-
     pub fn register_external(&mut self, store: Box<dyn ExternalStore>) {
         self.externals.push(store);
     }
 
-    /// Resolve a whole blob by content-sha256 (or legacy prefix) through the
-    /// documented tier order: (1) local GraphZero blob store, (2) git object
-    /// store via the secondary OID key, (3) registered external stores in
-    /// registration order — project-local canonical CAS, then the shared CAS
-    /// under explicit opt-in, then any host-registered adapters —
-    /// (4) per-user ref-index.
-    ///
-    /// Digest verification (INV-001, ZeroRef v1 §5) gates every full-hash hit
-    /// before bytes reach fragment or presentation code. Corruption and I/O
-    /// failure are terminal: the chain falls through to the next tier only on
-    /// an explicit miss, so a lower tier can never mask a corrupt object.
+    /// Resolve a whole blob by content-sha256 (or legacy prefix) through the documented tier order: (1)
+    /// local GraphZero blob store, (2) git object store via the secondary OID key, (3) registered
+    /// external stores in registration order — project-local canonical CAS, then the shared CAS.
     pub fn resolve_blob(&self, hash_hex: &str, reference: &str) -> Result<Resolution, ExpandError> {
         let mut trace = Vec::new();
 
@@ -441,7 +327,7 @@ impl ExpandResolver {
                 store: "graphzero",
                 result: "miss",
             }),
-            // Corruption is terminal (INV-001): a local blob that fails its
+            // Corruption is terminal: a local blob that fails its
             // own content verification must not fall through to a lower tier
             // where a stale or attacker-controlled copy could mask it.
             Err(e) => {
@@ -533,7 +419,7 @@ impl ExpandResolver {
             }
         } else {
             trace.push(TraceStep {
-                store: "tokenzero",
+                store: "external",
                 result: "miss",
             });
         }
@@ -553,7 +439,7 @@ impl ExpandResolver {
 
         Err(expand_err(
             reference.to_string(),
-            "not_found: tried graphzero, git, tokenzero, ref-index".to_string(),
+            "not_found: tried graphzero, git, external, ref-index".to_string(),
             trace,
         ))
     }
@@ -575,7 +461,7 @@ impl ExpandResolver {
             return Ok(None);
         };
         let bytes = blob.content().to_vec();
-        // Content identity must verify (INV-001): a stale or corrupt OID
+        // Content identity must verify: a stale or corrupt OID
         // mapping for a full-hash request is terminal, never masked.
         if content_hash_hex.len() == 64 {
             let got = crate::ContentHash::of(&bytes).to_hex();
@@ -588,9 +474,8 @@ impl ExpandResolver {
         Ok(Some(bytes))
     }
 
-    /// Resolve any parsed `gz://` ref to its exact bytes.
+    /// Resolve any parsed GraphZero domain ref to its exact bytes.
     pub fn resolve(&self, gz: &GzRef, reference: &str) -> Result<Resolution, ExpandError> {
-        self.check_worker_skew(reference)?;
         match gz {
             GzRef::Blob { hash, fragment } => self.resolve_blob_fragment(hash, fragment, reference),
             GzRef::Node { id } | GzRef::Edge { id } => self.resolve_node_or_edge(id, reference),
@@ -599,34 +484,7 @@ impl ExpandResolver {
             GzRef::Loc { id } => self.resolve_loc(*id, reference),
             GzRef::Mem { id } => self.resolve_mem(id, reference),
             GzRef::Entity { id } => self.resolve_entity(id, reference),
-            GzRef::CodeModeExecution { id, part } => self.resolve_codemode(id, part, reference),
         }
-    }
-
-    fn check_worker_skew(&self, reference: &str) -> Result<(), ExpandError> {
-        if let (Some(expected), Some(actual)) = (
-            self.expected_contract_digest.as_deref(),
-            self.actual_contract_digest.as_deref(),
-        ) {
-            if expected != actual {
-                return Err(self.worker_skew(
-                    reference,
-                    &format!("contract digest mismatch: expected {expected}, got {actual}"),
-                ));
-            }
-        }
-        if let (Some(expected), Some(actual)) = (
-            self.expected_worker_revision.as_deref(),
-            self.actual_worker_revision.as_deref(),
-        ) {
-            if expected != actual {
-                return Err(self.worker_skew(
-                    reference,
-                    &format!("worker revision mismatch: expected {expected}, got {actual}"),
-                ));
-            }
-        }
-        Ok(())
     }
 
     fn resolve_blob_fragment(
@@ -652,14 +510,8 @@ impl ExpandResolver {
         })
     }
 
-    /// Node/edge ids carry their decl/evidence ref inline as
-    /// `<hash>@B<start>-<end>` (see capsule emission); bare ids are either blob
-    /// hashes or symbol names.
-    ///
-    /// Symbol-named node refs (`gz://node/<symbol>`) are minted by orient / snap /
-    /// blast whenever an edge carries no inline evidence span. They must resolve
-    /// on a later call from the durable snapshot, not only inside the minting
-    /// session, so a bare non-hash id is looked up through the locate index.
+    /// Node/edge ids carry their decl/evidence ref inline as `<hash>@B<start>-<end>` (see capsule
+    /// emission); bare ids are either blob hashes or symbol names.
     fn resolve_node_or_edge(&self, id: &str, reference: &str) -> Result<Resolution, ExpandError> {
         let Some((hash, span)) = id.split_once("@B") else {
             if !is_blob_hash_id(id) {
@@ -676,10 +528,7 @@ impl ExpandResolver {
         self.resolve_blob_fragment(hash, &Fragment::Bytes { start, end }, reference)
     }
 
-    /// Resolve `gz://node/<symbol>` through the durable locate index.
-    ///
-    /// The locate index is rebuilt from the published snapshot, so this survives
-    /// process exit and does not depend on any in-process session registry.
+    /// Resolve `node/<symbol>` through the published locate index.
     fn resolve_symbol_node(&self, name: &str, reference: &str) -> Result<Resolution, ExpandError> {
         let snapshot = Snapshot::open(&self.store_root, self.repo_root.as_deref())
             .map_err(|_| self.bad_ref(reference, "snapshot_open_failed"))?;
@@ -697,7 +546,7 @@ impl ExpandResolver {
             .ok_or_else(|| self.bad_ref(reference, "node_symbol_not_found"))?;
         // A symbol whose canonical ref is itself the same bare node ref has no
         // defining span in the snapshot; report that rather than recursing.
-        if canonical == reference || canonical == format!("gz://node/{name}") {
+        if canonical == reference || canonical == format!("node/{name}") {
             return Err(self.bad_ref(reference, "node_symbol_has_no_span"));
         }
         let inner = GzRef::parse(&canonical)
@@ -713,8 +562,8 @@ impl ExpandResolver {
                 source: "graphzero",
             }),
             Err(_) => {
-                // Owner-routed recovery: BlobStore prefix and/or sha256 sidecar →
-                // SharedCas (graphzero-m3wx). Prefer this over opaque handle rewrite.
+                // Owner-routed recovery: BlobStore prefix and/or sha256
+                // sidecar → SharedCas. Prefer this over opaque handle rewrite.
                 if let Some(res) = self.resolve_query_from_owner_cas(id, reference) {
                     return Ok(res);
                 }
@@ -727,8 +576,8 @@ impl ExpandResolver {
         }
     }
 
-    /// Optional `queries/<id>.expires_at` sidecar (unix epoch milliseconds).
-    /// Absent sidecar means no automatic expiry (graphzero-m3wx / ADR 011).
+    /// Optional `queries/<id>.expires_at` sidecar (unix epoch
+    /// milliseconds). An absent sidecar means no automatic expiry.
     fn check_query_lease(&self, id: &str, reference: &str) -> Result<(), ExpandError> {
         let path = self
             .store_root
@@ -825,26 +674,6 @@ impl ExpandResolver {
         self.json_resolution(&record, reference)
     }
 
-    fn resolve_codemode(
-        &self,
-        id: &str,
-        part: &CodeModeExecutionPart,
-        reference: &str,
-    ) -> Result<Resolution, ExpandError> {
-        match self.resolve_codemode_execution(id, part, reference) {
-            Ok(bytes) => Ok(Resolution {
-                bytes,
-                source: "graphzero",
-            }),
-            Err(_) => self
-                .resolve_codemode_execution_from_ref_index(id, part, reference)
-                .map(|bytes| Resolution {
-                    bytes,
-                    source: "ref-index",
-                }),
-        }
-    }
-
     fn json_resolution<T: serde::Serialize>(
         &self,
         value: &T,
@@ -858,32 +687,12 @@ impl ExpandResolver {
         })
     }
 
-    fn resolve_codemode_execution(
-        &self,
-        id: &str,
-        part: &CodeModeExecutionPart,
-        reference: &str,
-    ) -> Result<Vec<u8>, ExpandError> {
-        validate_safe_id(id, reference)
-            .map_err(|_| self.bad_ref(reference, "invalid_execution_id"))?;
-        let dir = self.store_root.join("codemode").join("execution").join(id);
-        let canonical_dir = dir
-            .parent()
-            .and_then(|p| p.canonicalize().ok())
-            .filter(|c| c.starts_with(self.store_root.canonicalize().unwrap_or_default()));
-        if canonical_dir.is_none() {
-            return Err(self.bad_ref(reference, "execution_path_invalid"));
-        }
-        read_codemode_execution_file(&self.store_root, id, part, reference)
-            .map_err(|_| self.bad_ref(reference, "codemode_execution_part_not_found"))
-    }
-
     fn resolve_blob_from_ref_index(
         &self,
         hash_hex: &str,
         reference: &str,
     ) -> Result<Option<Vec<u8>>, ExpandError> {
-        let Some(indexed_root) = ref_index::lookup_store(&format!("gz://blob/{hash_hex}")) else {
+        let Some(indexed_root) = ref_index::lookup_store(&format!("z://blob/{hash_hex}")) else {
             return Ok(None);
         };
         if indexed_root == self.store_root {
@@ -900,7 +709,7 @@ impl ExpandResolver {
         id: &str,
         reference: &str,
     ) -> Result<Vec<u8>, ExpandError> {
-        let canonical = format!("gz://query/{id}");
+        let canonical = format!("query/{id}");
         let indexed_root = ref_index::lookup_store(reference)
             .or_else(|| ref_index::lookup_store(&canonical))
             .ok_or_else(|| self.index_miss(reference, "query_not_found"))?;
@@ -910,28 +719,6 @@ impl ExpandResolver {
         self.ensure_indexed_root_authorized(reference, &indexed_root)?;
         read_queries_file(&indexed_root, &format!("{id}.json"))
             .map_err(|_| self.index_miss(reference, "query_not_found"))
-    }
-
-    fn resolve_codemode_execution_from_ref_index(
-        &self,
-        id: &str,
-        part: &CodeModeExecutionPart,
-        reference: &str,
-    ) -> Result<Vec<u8>, ExpandError> {
-        let canonical = if matches!(part, CodeModeExecutionPart::Execution) {
-            format!("gz://codemode/execution/{id}")
-        } else {
-            format!("gz://codemode/execution/{id}/{}", part.as_str())
-        };
-        let indexed_root = ref_index::lookup_store(reference)
-            .or_else(|| ref_index::lookup_store(&canonical))
-            .ok_or_else(|| self.index_miss(reference, "codemode_execution_part_not_found"))?;
-        if indexed_root == self.store_root {
-            return Err(self.index_miss(reference, "codemode_execution_part_not_found"));
-        }
-        self.ensure_indexed_root_authorized(reference, &indexed_root)?;
-        read_codemode_execution_file(&indexed_root, id, part, reference)
-            .map_err(|_| self.index_miss(reference, "codemode_execution_part_not_found"))
     }
 
     fn root_authorized(&self, indexed_root: &Path) -> bool {
@@ -1007,17 +794,6 @@ impl ExpandResolver {
             }],
         )
     }
-
-    fn worker_skew(&self, reference: &str, detail: &str) -> ExpandError {
-        expand_err(
-            reference.to_string(),
-            format!("worker_skew: {detail}"),
-            vec![TraceStep {
-                store: "graphzero",
-                result: "worker_skew",
-            }],
-        )
-    }
 }
 
 /// True when a bare node/edge id is a content hash (full or prefix) rather than
@@ -1033,47 +809,9 @@ fn canonicalize_loose(path: &Path) -> PathBuf {
     path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
 }
 
-fn read_codemode_execution_file(
-    store_root: &Path,
-    id: &str,
-    part: &CodeModeExecutionPart,
-    reference: &str,
-) -> Result<Vec<u8>, ExpandError> {
-    validate_safe_id(id, reference).map_err(|_| {
-        expand_err(
-            reference.to_string(),
-            "invalid_execution_id".to_string(),
-            Vec::new(),
-        )
-    })?;
-    let dir = store_root.join("codemode").join("execution").join(id);
-    let canonical_store = store_root
-        .canonicalize()
-        .unwrap_or_else(|_| store_root.to_path_buf());
-    let canonical_dir = dir
-        .parent()
-        .and_then(|p| p.canonicalize().ok())
-        .filter(|c| c.starts_with(&canonical_store));
-    if canonical_dir.is_none() {
-        return Err(expand_err(
-            reference.to_string(),
-            "execution_path_invalid".to_string(),
-            Vec::new(),
-        ));
-    }
-    std::fs::read(dir.join(part.as_str())).map_err(|_| {
-        expand_err(
-            reference.to_string(),
-            "codemode_execution_part_not_found".to_string(),
-            Vec::new(),
-        )
-    })
-}
-
-/// Digest-gate a full-hash hit before bytes reach fragment or presentation
-/// code (INV-001, ZeroRef v1 §5). Legacy prefix requests pass through: their
-/// tiers verify by construction (content-addressed filenames) or reject at
-/// parse time in ZeroRef v1.
+/// Digest-gate a full-hash hit before bytes reach fragment or presentation code
+/// (ZeroRef §5). Legacy prefix requests pass through: their tiers verify
+/// by construction (content-addressed filenames) or reject at parse time in ZeroRef.
 fn digest_gate(
     bytes: Vec<u8>,
     source: &'static str,
@@ -1098,12 +836,7 @@ fn digest_gate(
     Ok(Resolution { bytes, source })
 }
 
-/// Slice resolved bytes per fragment. Every expansion surface (CLI, embedded,
-/// MCP/CodeMode, store APIs) funnels through the shared ZeroRef v1 selector
-/// (docs/adr/002-zeroref-v1.md §3/§4): byte spans are zero-based half-open,
-/// line spans one-based inclusive with exact newline retention, bounds error
-/// instead of clamping, and `#L` over non-UTF-8 content is a typed error.
-/// Errors are class-prefixed strings from the v1 registry.
+/// Slice resolved bytes per fragment.
 pub fn apply_fragment(bytes: &[u8], fragment: &Fragment) -> Result<Vec<u8>, String> {
     let (zero_fragment, label) = match *fragment {
         Fragment::None => (ZeroFragment::None, String::new()),

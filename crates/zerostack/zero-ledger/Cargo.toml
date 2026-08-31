@@ -2,15 +2,15 @@
 autobenches = false
 autotests = false
 name = "zero-ledger"
-version = "0.1.0"
+version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "RACC resource gauge, T8 exposure/replay identity, and exact-phase dominance receipt for ZeroStack"
+description = "RACC resource, exposure, replay, and phase-dominance receipts for ZeroStack"
 
 [dependencies]
 serde = { workspace = true }
 serde_json = { workspace = true }
-zero-abi = { path = "../zero-abi" }
+zero-abi = { workspace = true }
 
 [[test]]
 name = "usage"

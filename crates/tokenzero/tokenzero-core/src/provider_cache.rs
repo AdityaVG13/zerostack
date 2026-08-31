@@ -1,8 +1,6 @@
-//! Provider-cache facts with explicit eligibility/telemetry separation.
-//!
-//! Byte-identical stable prefixes are local facts. A provider adapter may
-//! separately declare eligibility under a named policy. Only provider response
-//! telemetry can declare a hit, miss, expiry, or unknown result.
+//! Provider-cache facts with explicit eligibility/telemetry separation. Byte-identical stable
+//! prefixes are local facts. A provider adapter may separately declare eligibility under a named
+//! policy. Only provider response telemetry can declare a hit, miss, expiry, or unknown result.
 
 use crate::decision_view::StablePrefixGeometry;
 use serde::{Deserialize, Serialize};
@@ -313,4 +311,3 @@ fn validate_policy_id(policy_id: String) -> Result<String, ProviderCacheError> {
     }
     Ok(policy_id)
 }
-

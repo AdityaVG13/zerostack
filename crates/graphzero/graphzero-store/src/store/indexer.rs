@@ -1,10 +1,6 @@
-//! Repo indexer: walks the worktree, extracts tier-A facts via
-//! `graphzero-extract` (tree-sitter), converts `BlobFacts` into store
-//! `DefRecord` / `EdgeRecord`, and falls back to lexical defs when parse fails.
-//! Writes a published snapshot: shards + global file + paths sidecar + manifest.
-//!
-//! ADR-001 binding: hybrid shard partitioning, ~4MB content per shard,
-//! blobs packed in path order for locality.
+//! Repo indexer: walks the worktree, extracts tier-A facts via `graphzero-extract` (tree-sitter),
+//! converts `BlobFacts` into store `DefRecord` / `EdgeRecord`, and falls back to lexical defs when
+//! parse fails.
 
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
@@ -46,23 +42,20 @@ use super::trigram::{extract_trigrams, sort_postings};
 
 pub const DEFAULT_EDGE_CONFIDENCE: u8 = 179; // 0.7 * 255
 
-/// Host-timed cold-index phase breakdown (env `GRAPHZERO_INDEX_PHASE_TIMING=1`).
-///
-/// When the env is set, production `op_index` attaches this map as `phases` on the
-/// domain result and eprints a `graphzero_index_phase_timing` JSON line. Callers
-/// may also drain via [`take_index_phase_timings`] after `index_repo`.
+/// Host-timed cold-index phase breakdown (env `GRAPHZERO_INDEX_PHASE_TIMING=1`). When the env is
+/// set, production `op_index` attaches this map as `phases` on the domain result and eprints a
+/// `graphzero_index_phase_timing` JSON line.
 #[derive(Clone, Debug, Default, serde::Serialize)]
 pub struct IndexPhaseTimings {
     pub walk_ms: f64,
     pub extract_ms: f64,
-    /// Content-addressed blob body writes (`put_nosync` path). Dual-write
-    /// SharedCas durability is deferred to [`Self::blob_sync_ms`]
-    /// (graphzero-o1td4); do not treat this as including per-object fsync.
+    /// Content-addressed blob body writes (`put_nosync` path). Dual-write SharedCas durability
+    /// is deferred to [`Self::blob_sync_ms`]; do not treat this as including per-object fsync.
     pub blob_put_ms: f64,
-    /// Batch barrier wall for pending flat + cas-local paths (INV-DUR-1).
+    /// Batch barrier wall for pending flat + cas-local paths.
     pub blob_sync_ms: f64,
-    /// Blob paths drained through the barrier (flat + cas-local dual-write).
-    /// Attribution for IOPS; independent of wall ms (graphzero-qkx1o).
+    /// Blob paths drained through the barrier (flat + cas-local
+    /// dual-write). Attribution for IOPS; independent of wall ms.
     pub blob_fsync_count: u64,
     pub scan_ms: f64,
     pub assemble_ms: f64,
@@ -208,14 +201,9 @@ fn record_index_phases_to_hist() {
 const EXTRACT_FILE_NODE_ID: u32 = 0xFFFF_FFFE;
 static SHARED_QUERY_SET: LazyLock<QuerySet> = LazyLock::new(QuerySet::new);
 
-/// Rolling extraction-reuse sidecar (`records_latest.json` in the store
-/// root). Maps every indexed path to its fingerprint (mtime_nanos + size +
-/// content hash) and the per-blob extraction output, so a re-index can skip
-/// tree-sitter for unchanged files. Purely a cache: missing, stale, or
-/// corrupt sidecars fall open to full extraction. Scan edges (`extract_edges`)
-/// depend on the repo-global def-name set, so they are only reused when
-/// `known_sig` (hash of the sorted def-name set) is unchanged; otherwise the
-/// file is re-read for the tokenize pass but still skips tree-sitter.
+/// Rolling extraction-reuse sidecar (`records_latest.json` in the store root). Maps every indexed
+/// path to its fingerprint (mtime_nanos + size + content hash) and the per-blob extraction output,
+/// so a re-index can skip tree-sitter for unchanged files.
 const RECORDS_SIDECAR_VERSION: u32 = 1;
 
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
@@ -254,9 +242,8 @@ struct SidecarFile {
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 struct RecordsSidecar {
     version: u32,
-    /// Highest log `generation_nanos` incorporated into this tip. Used so
-    /// load can apply only newer append-log deltas without rewriting the tip
-    /// on every 1-file reindex (`graphzero-c7dmu`).
+    /// Highest log `generation_nanos` incorporated into this tip. Used so load can apply
+    /// only newer append-log deltas without rewriting the tip on every 1-file reindex (``).
     #[serde(default)]
     generation_nanos: i64,
     known_sig: String,
@@ -506,10 +493,8 @@ fn append_records_sidecar_log(
 
 const GRAPH_HISTORY_VERSION: u32 = 1;
 
-/// Maximum retained `graph_history.jsonl` delta lines (graphzero-xjq75).
-///
-/// Tip checkpoint is independent; this bounds append-log growth and full-log
-/// scans for historical queries. Oldest deltas are dropped on prune.
+/// Maximum retained `graph_history.jsonl` delta lines. Tip checkpoint is independent; this bounds
+/// append-log growth and full-log scans for historical queries. Oldest deltas are dropped on prune.
 pub const GRAPH_HISTORY_LOG_MAX_GENERATIONS: usize = 256;
 
 /// Soft byte ceiling for `graph_history.jsonl` before prune (4 MiB).
@@ -527,16 +512,7 @@ struct GraphHistoryEntry {
     vanished_nodes: Vec<String>,
     appeared_edges: Vec<String>,
     vanished_edges: Vec<String>,
-    /// Full checkpoints are optional on log lines. New writers keep them empty
-    /// in the append log and persist the tip via `graph_history_tip.json`
-    /// instead, which cuts log growth by ~the state size.
-    ///
-    /// **Intentional ceiling (graphzero-8hk8y):** every non-empty structural
-    /// change still rewrites the tip with full `state_nodes`/`state_edges`
-    /// (serialize + zstd + fsync). Cost is O(|V|+|E|) per change by design so
-    /// crash recovery can reopen without replaying the full append log. Unchanged
-    /// graphs short-circuit. See scale curve unit test
-    /// `graph_history_tip_write_scale_curve_documents_ceiling`.
+    /// Full checkpoints are optional on log lines.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     state_nodes: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -551,10 +527,8 @@ fn graph_history_tip_path(store_root: &Path) -> PathBuf {
     store_root.join("graph_history_tip.json")
 }
 
-/// Sidecar recording the highest generation present in the append log.
-///
-/// Written on every successful append so tip authority checks are O(1) and do
-/// not `read_to_string` the full JSONL (graphzero-xjq75).
+/// Sidecar recording the highest generation present in the append log. Written on every
+/// successful append so tip authority checks are O(1) and do not `read_to_string` the full JSONL.
 fn graph_history_log_max_path(store_root: &Path) -> PathBuf {
     store_root.join("graph_history_log_max")
 }
@@ -584,9 +558,8 @@ fn read_graph_history_log_max(store_root: &Path) -> Option<i64> {
     text.trim().parse().ok()
 }
 
-/// Persist full tip checkpoint (serialize + zstd + fsync + rename + dir sync).
-///
-/// Wall cost scales with tip state size (see graphzero-8hk8y scale curve). Not a
+/// Persist full tip checkpoint (serialize + zstd + fsync + rename + dir
+/// sync). Wall cost scales with tip state size (see scale curve). Not a
 /// delta write: callers pass the full current `state_nodes`/`state_edges`.
 fn write_graph_history_tip(store_root: &Path, entry: &GraphHistoryEntry) -> Result<()> {
     let text = serde_json::to_vec(entry).context("serialize graph history tip")?;
@@ -625,11 +598,9 @@ fn read_graph_history_tip(store_root: &Path) -> Option<GraphHistoryEntry> {
     (entry.version == GRAPH_HISTORY_VERSION).then_some(entry)
 }
 
-/// Max generation from a bounded tail read of the append log (not full O(G)).
-///
-/// Each log line is a compact delta (no full tip state), so the last complete
-/// JSON line sits in a small trailing window. Partial first line after seek is
-/// skipped by parse failure.
+/// Max generation from a bounded tail read of the append log (not full O(G)). Each log
+/// line is a compact delta (no full tip state), so the last complete JSON line sits in
+/// a small trailing window. Partial first line after seek is skipped by parse failure.
 fn last_log_line_generation(store_root: &Path) -> Option<i64> {
     use std::io::{Read, Seek, SeekFrom};
 
@@ -655,10 +626,8 @@ fn last_log_line_generation(store_root: &Path) -> Option<i64> {
     None
 }
 
-/// Max append-log generation without full-file scan when possible.
-///
-/// Order: log-max sidecar, then bounded tail parse, then full scan + sidecar
-/// backfill (legacy / corrupted tail only).
+/// Max append-log generation without full-file scan when possible. Order: log-max sidecar,
+/// then bounded tail parse, then full scan + sidecar backfill (legacy / corrupted tail only).
 fn max_graph_history_log_generation(store_root: &Path) -> Option<i64> {
     let sidecar = read_graph_history_log_max(store_root);
     let tail = last_log_line_generation(store_root);
@@ -693,8 +662,8 @@ fn max_graph_history_log_generation(store_root: &Path) -> Option<i64> {
 
 fn latest_graph_history_entry(store_root: &Path) -> Option<GraphHistoryEntry> {
     let tip = read_graph_history_tip(store_root);
-    // O(1) authority check via log-max sidecar (graphzero-xjq75). Full JSONL
-    // scan only when sidecar is missing (backfill) or tip lags the log.
+    // O(1) authority check via log-max sidecar. Full JSONL scan
+    // only when sidecar is missing (backfill) or tip lags the log.
     let max_log_gen = max_graph_history_log_generation(store_root);
     // Prefer tip only when it is at least as new as the append log. After a
     // crash window (log append ok, tip publish interrupted) the tip can lag;
@@ -724,10 +693,9 @@ fn latest_graph_history_entry(store_root: &Path) -> Option<GraphHistoryEntry> {
     Some(entry)
 }
 
-/// Drop oldest append-log lines when over generation or byte ceiling.
-///
-/// Tip checkpoint is unchanged; historical queries on pruned generations
-/// return incomplete timelines (documented ceiling, not silent infinite retain).
+/// Drop oldest append-log lines when over generation or byte ceiling. Tip
+/// checkpoint is unchanged; historical queries on pruned generations return
+/// incomplete timelines (documented ceiling, not silent infinite retain).
 fn prune_graph_history_log_if_needed(store_root: &Path) -> Result<()> {
     let path = graph_history_path(store_root);
     let meta = match fs::metadata(&path) {
@@ -1005,9 +973,8 @@ fn blast_radius_in_state(
     seeds: &[String],
     depth: usize,
 ) -> Vec<String> {
-    // Reverse adjacency once: O(|E|) parse, then BFS O(frontier×degree) per hop
-    // (matches live CSR reverse-index complexity). Previously each depth level
-    // scanned every edge string — O(depth×|E|).
+    // Build reverse adjacency in O(|E|), then traverse each frontier in
+    // O(frontier × degree) per hop.
     let mut reverse: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
     for edge in &state.edges {
         let Some((src, dst)) = edge_history_src_dst(edge) else {
@@ -1357,10 +1324,6 @@ pub struct IndexData {
 
 impl Clone for IndexData {
     fn clone(&self) -> Self {
-        // graphzero-93570: deep-clone of retained defs/edges is test-visible so a
-        // dual-ownership put-back cannot silently reintroduce O(|defs|+|edges|).
-        #[cfg(test)]
-        bump_index_data_clone(self.defs.len(), self.edges.len());
         Self {
             blobs: self.blobs.clone(),
             blob_order: self.blob_order.clone(),
@@ -1457,9 +1420,7 @@ fn tokenize<'a>(line: &'a str) -> Vec<(&'a str, usize)> {
     out
 }
 
-/// Pass 2: find call edges. For each occurrence of a known symbol name
-/// followed by `(`, emit a calls edge from the enclosing definition.
-/// One edge per (src, dst) pair per blob.
+/// Emits one call edge per source-destination pair when a known symbol is invoked inside a definition.
 pub fn extract_edges(
     blob: &ContentHash,
     content: &[u8],
@@ -1754,7 +1715,6 @@ fn append_rust_api_surface_edges(
         let src_dir = base.join("src");
         let surface = api_surface_node(&crate_name);
         for path in files.iter().filter(|path| path.starts_with(&src_dir)) {
-            bump_rust_api_source_read();
             let content = match fs::read(path) {
                 Ok(content) if !content.is_empty() && content.len() <= 4 * 1024 * 1024 => content,
                 _ => continue,
@@ -1951,23 +1911,9 @@ fn append_cargo_manifest_edges(
     Ok(())
 }
 
-/// GRAPH-001: declared dependency edges derivable from source shape alone.
-///
-/// Only relationships directly observable in the worktree are emitted; a
-/// generated-file marker alone names no derivable producer, so marker-only
-/// files emit nothing rather than fabricated edges.
-///
-/// - `BUILD_DEPENDS`: manifest -> package sources. A Cargo.toml with a
-///   `[package]` section governs every `.rs` file in its tree (nested
-///   packages excluded); a workspace-root Cargo.toml governs its member
-///   manifests; package.json / pyproject.toml / setup.py / go.mod govern
-///   sibling sources with the package's language extension.
-/// - `SCHEMA_DEPENDS`: a consumer with a literal `include!("...")` -> the
-///   included file, when the literal resolves to an indexed path (build-time
-///   schema/codegen dependency).
-/// - `EFFECT_MAY_TOUCH`: conservative overapprox. A package `build.rs` may
-///   touch any sibling crate source; a file calling `set_var(` may touch
-///   sibling crate sources that read `env::var(`.
+/// Emits source-derived `BUILD_DEPENDS`, `SCHEMA_DEPENDS`, and `EFFECT_MAY_TOUCH` edges.
+/// Manifests govern package sources; literal includes bind indexed files; build and
+/// environment effects conservatively cover siblings. Markers alone emit no edges.
 fn append_declared_dependency_edges(
     repo_root: &Path,
     files: &[PathBuf],
@@ -2369,9 +2315,8 @@ fn extract_tier_a_records(
     if !facts.parse_ok {
         return (extract_defs(blob, content), Vec::new(), false);
     }
-    // Typed-edge fusion (graphzero-5k03): when an LSP-backed resolver is
-    // installed, replace name-matched structural call edges with call-accurate
-    // typed edges. Structural-only when no resolver is installed.
+    // Typed-edge fusion: when an LSP-backed resolver is installed, replace name-matched
+    // structural call edges with call-accurate typed edges. Structural-only when no resolver is installed.
     fuse_installed_typed_edges(&mut facts, Some(rel_path), content);
 
     let defs = facts
@@ -2471,7 +2416,7 @@ pub fn reset_extraction_call_count() {
     EXTRACTION_CALL_COUNT.store(0, Ordering::SeqCst);
 }
 
-/// Re-point manifest to a matching snapshot without calling `collect` (FR-023).
+/// Re-point manifest to a matching snapshot without calling `collect`.
 pub fn try_repoint_active(store_root: &Path, repo_root: &Path) -> Result<Option<SnapshotEntry>> {
     let id = super::git::repoint_active_snapshot(store_root, repo_root)?;
     let Some(id) = id else {
@@ -2520,10 +2465,9 @@ fn cert_field<'a>(cert: &'a str, key: &str) -> Option<&'a str> {
         .find_map(|line| line.strip_prefix(&prefix).map(str::trim))
 }
 
-/// Convert an expanded FSZero edit certificate plus its expanded post bytes into
-/// a GraphZero speculative overlay. Active FSZero world IDs remain owned by
-/// FSZero; this adapter consumes the durable per-edit cert payload that a world
-/// exposes, preserving the no-disk-mutation boundary.
+/// Convert an expanded FSZero edit certificate plus its expanded post bytes into a GraphZero
+/// speculative overlay. Active FSZero world IDs remain owned by FSZero; this adapter consumes
+/// the durable per-edit cert payload that a world exposes, preserving the no-disk-mutation boundary.
 pub fn overlay_from_fszero_edit_cert(
     repo_root: &Path,
     cert: &str,
@@ -2554,12 +2498,9 @@ fn normalize_overlay_path(path: &str) -> String {
         .join("/")
 }
 
-/// Build an in-memory graph for a planned edit without mutating the worktree or store.
-///
-/// This is the store-level primitive behind FSZero-world blast: callers resolve a world
-/// into changed file bytes, pass them here, and GraphZero parses that overlay as if it
-/// existed on disk. The function intentionally avoids blob-store writes, sidecar updates,
-/// graph-history appends, and manifest publication.
+/// Build an in-memory graph for a planned edit without mutating the worktree or store. This is the
+/// store-level primitive behind FSZero-world blast: callers resolve a world into changed file
+/// bytes, pass them here, and GraphZero parses that overlay as if it existed on disk.
 pub fn collect_with_content_overlays(
     repo_root: &Path,
     overlays: &[SpeculativeFileOverlay],
@@ -2738,8 +2679,8 @@ fn known_from_sidecar_files(sidecar_files: &[SidecarFile]) -> BTreeMap<String, (
     known
 }
 
-// Process-held prior IndexData for watch delta materialize (graphzero-93570).
-// Ownership moves out for a batch and returns only after durable publication;
+// Process-held prior IndexData for watch delta materialize. Ownership
+// moves out for a batch and returns only after durable publication;
 // failures leave the slot empty so the next batch bootstraps from sidecars.
 thread_local! {
     static HELD_INDEX_DATA: std::cell::RefCell<Option<HeldIndexData>> = const { std::cell::RefCell::new(None) };
@@ -2825,69 +2766,6 @@ fn commit_held_index_data(
 fn clear_held_index_data() {
     HELD_INDEX_DATA.with(|slot| *slot.borrow_mut() = None);
 }
-
-#[cfg(test)]
-fn held_record_storage() -> Option<(usize, usize)> {
-    HELD_INDEX_DATA.with(|slot| {
-        slot.borrow().as_ref().map(|held| {
-            (
-                held.data.defs.as_ptr() as usize,
-                held.data.edges.as_ptr() as usize,
-            )
-        })
-    })
-}
-
-// Test counters for graphzero-93570:
-// - sidecar files converted (unchanged files must stay 0 on delta)
-// - IndexData::clone def/edge counts (1-file stable-known_sig must stay 0)
-#[cfg(test)]
-thread_local! {
-    static MATERIALIZE_FILE_CONVERSIONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
-    static INDEX_DATA_CLONE_DEFS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
-    static INDEX_DATA_CLONE_EDGES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
-    static RUST_API_SOURCE_READS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
-}
-
-#[cfg(test)]
-pub(crate) fn take_materialize_file_conversions() -> usize {
-    MATERIALIZE_FILE_CONVERSIONS.with(|counter| counter.replace(0))
-}
-
-#[cfg(test)]
-pub(crate) fn take_index_data_clone_counts() -> (usize, usize) {
-    (
-        INDEX_DATA_CLONE_DEFS.with(|c| c.replace(0)),
-        INDEX_DATA_CLONE_EDGES.with(|c| c.replace(0)),
-    )
-}
-
-#[cfg(test)]
-fn take_rust_api_source_reads() -> usize {
-    RUST_API_SOURCE_READS.with(|counter| counter.replace(0))
-}
-
-#[cfg(test)]
-fn bump_materialize_file_conversion() {
-    MATERIALIZE_FILE_CONVERSIONS.with(|counter| counter.set(counter.get() + 1));
-}
-
-#[cfg(test)]
-fn bump_index_data_clone(defs: usize, edges: usize) {
-    INDEX_DATA_CLONE_DEFS.with(|c| c.set(c.get() + defs));
-    INDEX_DATA_CLONE_EDGES.with(|c| c.set(c.get() + edges));
-}
-
-#[cfg(not(test))]
-fn bump_materialize_file_conversion() {}
-
-#[cfg(test)]
-fn bump_rust_api_source_read() {
-    RUST_API_SOURCE_READS.with(|counter| counter.set(counter.get() + 1));
-}
-
-#[cfg(not(test))]
-fn bump_rust_api_source_read() {}
 
 fn append_layer(
     data: &mut IndexData,
@@ -3066,7 +2944,6 @@ fn patch_rust_api_layer(
         .filter(|rel| path_is_rust_api_input(rel))
     {
         let path = repo_root.join(rel);
-        bump_rust_api_source_read();
         let content = match fs::read(&path) {
             Ok(content) if !content.is_empty() && content.len() <= 4 * 1024 * 1024 => content,
             _ => continue,
@@ -3163,7 +3040,6 @@ fn materialize_index_data_from_sidecar(
     let mut refreshed_scan_edges = false;
 
     for file in sidecar_files {
-        bump_materialize_file_conversion();
         let Some(hash) = ContentHash::from_hex(&file.hash) else {
             continue;
         };
@@ -3285,7 +3161,6 @@ fn try_delta_materialize(
         let Some(file) = by_path.get(rel.as_str()) else {
             continue;
         };
-        bump_materialize_file_conversion();
         let Some(hash) = ContentHash::from_hex(&file.hash) else {
             return Ok(None);
         };
@@ -3506,12 +3381,9 @@ fn extract_sidecar_file(
     )))
 }
 
-/// Patch the indexed graph for a small set of saved/deleted files.
-///
-/// This is the watch-mode primitive: it consumes the append-only records sidecar,
-/// reparses only the changed paths, reuses all unchanged file facts, and emits the
-/// same IndexData shape as collect. If no sidecar exists yet, it falls back to a
-/// full collect so callers can bootstrap without a separate code path.
+/// Patch the indexed graph for a small set of saved/deleted files. This is the watch-mode
+/// primitive: it consumes the append-only records sidecar, reparses only the changed paths, reuses
+/// all unchanged file facts, and emits the same IndexData shape as collect.
 pub fn collect_changed_paths(
     repo_root: &Path,
     store_root: &Path,
@@ -3669,9 +3541,8 @@ pub fn collect(repo_root: &Path, store_root: &Path) -> Result<IndexData> {
 
     let queries: &QuerySet = &SHARED_QUERY_SET;
     let mut data = IndexData::default();
-    // Hashes whose bodies were freshly extracted this run. Content bytes are
-    // NOT retained across extract batches (peak RSS was O(sum new blob sizes)
-    // until scan — graphzero-rjqhr). Scan re-reads from blob store / worktree.
+    // Keep only hashes between extraction batches. The scan re-reads content
+    // from the blob store or worktree, bounding peak resident bytes.
     let mut extract_scan_hashes: BTreeSet<ContentHash> = BTreeSet::new();
     let mut known: BTreeMap<String, ()> = BTreeMap::new();
     let mut defs_by_blob: BTreeMap<ContentHash, Vec<DefRecord>> = BTreeMap::new();
@@ -3701,10 +3572,9 @@ pub fn collect(repo_root: &Path, store_root: &Path) -> Result<IndexData> {
             .map(|d| d.as_nanos())
             .unwrap_or(0);
 
-        // Candidate for extraction reuse: mtime+size match prior sidecar.
-        // INV-WARM-1: still read+hash before reuse — same-size rewrite with
-        // preserved mtime must not keep stale defs/edges. Hash match skips
-        // tree-sitter; mismatch falls through to re-extract.
+        // Candidate for extraction reuse: mtime+size match prior sidecar.: still
+        // read+hash before reuse — same-size rewrite with preserved mtime must not keep
+        // stale defs/edges. Hash match skips tree-sitter; mismatch falls through to re-extract.
         if let Some(sf) = prior_by_path.get(rel.as_str())
             && mtime_nanos != 0
             && sf.mtime_nanos == mtime_nanos
@@ -3904,8 +3774,7 @@ pub fn collect(repo_root: &Path, store_root: &Path) -> Result<IndexData> {
         t.blob_put_ms += blob_put_ms;
     });
     if wrote_local_blob {
-        // Crash window: put_nosync done, blob bytes not yet fsynced.
-        // Manifest publish must not happen if we die here (INV-DUR-1).
+        // The manifest must not publish before the unsynced blob reaches durable storage.
         maybe_crash("before_blob_sync");
         let pending_fsync = blob_store.pending_unsynced_count() as u64;
         let sync_t0 = Instant::now();
@@ -3917,22 +3786,16 @@ pub fn collect(repo_root: &Path, store_root: &Path) -> Result<IndexData> {
         maybe_crash("after_blob_sync");
     }
 
-    // Scan edges depend on the repo-global def-name set; prior results are
-    // valid only if that set is unchanged. Otherwise unchanged files are
-    // re-read for the tokenize pass (still skipping tree-sitter).
-    //
-    // This second pass is intentional graph coverage, not dead work: tree-sitter
-    // extract cannot see cross-file `ident(` calls until the global known-name
-    // set exists. Fusing or skipping it can drop edges. Measure scan_ms vs
-    // extract_ms on cold and known-signature-miss runs before any fusion
-    // (docs/hygiene/second-pass-extract.md).
+    // Scan edges depend on the repo-global def-name set; prior results are valid only if that set is
+    // unchanged. Otherwise unchanged files are re-read for the tokenize pass (still skipping
+    // tree-sitter).
     let known_sig = known_signature(&known);
     let scan_reuse_ok = known_sig == prior_known_sig;
     let known_set: HashSet<&str> = known.keys().map(String::as_str).collect();
 
     // Parallel lexical scan for blobs that need it (new content or known-set drift).
     // Fresh extracts re-load bytes from CAS (preferred) or worktree so extract
-    // batches can free content after put (graphzero-rjqhr).
+    // batches can free content after put.
     let mut scan_jobs: Vec<(ContentHash, Vec<u8>)> = Vec::new();
     for hash in &data.blob_order {
         if extract_scan_hashes.contains(hash) {
@@ -3946,7 +3809,7 @@ pub fn collect(repo_root: &Path, store_root: &Path) -> Result<IndexData> {
                     }
                 }
             };
-            // Identity check: worktree may have changed under us; skip drift.
+            // Skip worktree content whose hash differs from the indexed identity.
             if ContentHash::of(&content) != *hash {
                 continue;
             }
@@ -3973,9 +3836,8 @@ pub fn collect(repo_root: &Path, store_root: &Path) -> Result<IndexData> {
     let assemble_t0 = Instant::now();
     let sidecar_files = profiled_assemble(|| -> Result<Vec<SidecarFile>> {
         let mut sidecar_files: Vec<SidecarFile> = Vec::with_capacity(data.blob_order.len());
-        // Dedup keys use interned name ids so we do not clone src/dst String per edge
-        // (was HashSet<(String,String,...)> — O(|E|) temporary pairs on top of edge ownership).
-        // Scan edges are taken from the map (remove) instead of edges.clone() per blob.
+        // Interned name IDs avoid cloning source and destination strings per edge.
+        // Removing scan edges from the map avoids cloning every blob's edge list.
         let mut name_ids: HashMap<String, u32> = HashMap::new();
         let mut seen_edges: HashSet<(u32, u32, u8, ContentHash, u32, u32)> = HashSet::new();
         for hash in &data.blob_order {
@@ -4055,25 +3917,6 @@ fn def_defining_range(d: &DefRecord) -> (u32, u32) {
     }
 }
 
-/// Mint EntityKey/EntityId for each def span at publish; persist sidecar and
-/// register so `gz://node` + blob span evidence resolve to `gz://entity/<id>`.
-fn mint_entities_from_defs(
-    store_root: &Path,
-    shards_dir: &Path,
-    snapshot_id: u64,
-    data: &IndexData,
-) -> Result<usize> {
-    let blob_store = BlobStore::open(store_root)?;
-    let mut content_cache: BTreeMap<ContentHash, Option<Vec<u8>>> = BTreeMap::new();
-    mint_entities_from_defs_with_cache(
-        shards_dir,
-        snapshot_id,
-        data,
-        &blob_store,
-        &mut content_cache,
-    )
-}
-
 /// Mint entities using a shared per-blob content cache (shared with lexical
 /// publish so multi-def files are CAS-fetched once).
 fn mint_entities_from_defs_with_cache(
@@ -4106,7 +3949,7 @@ fn mint_entities_from_defs_with_cache(
         mints.push(SymbolSpanMint {
             symbol: d.name.clone(),
             content_digest: digest,
-            node_ref: format!("gz://node/{}", d.name),
+            node_ref: format!("node/{}", d.name),
             blob_span_ref: blob_span_ref(&blob_hex, d.start, d.end),
         });
     }
@@ -4158,10 +4001,9 @@ thread_local! {
     static ARMED_CRASH_POINT: RefCell<Option<ArmedCrashPoint>> = const { RefCell::new(None) };
 }
 
-/// Process-local crash authorization for one test thread.
-///
-/// The guard is available only in a `crash-injection` build and is deliberately
-/// not `Send`. Environment variables alone cannot arm a fresh child process.
+/// Process-local crash authorization for one test thread. The guard is
+/// available only in a `crash-injection` build and is deliberately not
+/// `Send`. Environment variables alone cannot arm a fresh child process.
 #[cfg(feature = "crash-injection")]
 pub struct CrashAuthorizationGuard {
     _not_send: std::rc::Rc<()>,
@@ -4174,12 +4016,9 @@ impl Drop for CrashAuthorizationGuard {
     }
 }
 
-/// Arm one known boundary with an explicit per-run capability.
-///
-/// The harness must also pass the same capability as
-/// `GRAPHZERO_CRASH_CAPABILITY` to the intended child. A child that merely
-/// inherits the two environment variables has no process-local guard and
-/// cannot crash.
+/// Arm a known boundary with a per-run capability. The caller must pass the same capability as
+/// `GRAPHZERO_CRASH_CAPABILITY` to the child. Inherited environment variables alone cannot arm a
+/// crash because the child has no process-local guard.
 #[cfg(feature = "crash-injection")]
 pub fn authorize_crash_point(point: &str, capability: &str) -> Result<CrashAuthorizationGuard> {
     anyhow::ensure!(
@@ -4210,11 +4049,9 @@ pub fn authorize_crash_point(point: &str, capability: &str) -> Result<CrashAutho
     })
 }
 
-/// Crash-injection hook for recovery testing (FR-015).
-///
-/// Default builds compile this to a no-op. Chaos builds require all three
-/// gates: the non-default feature, a process-local authorization guard, and a
-/// matching point plus capability passed explicitly to the intended child.
+/// Crash-injection hook for recovery testing. Default builds compile this to a
+/// no-op. Chaos builds require all three gates: the non-default feature, a process-local
+/// authorization guard, and a matching point plus capability passed explicitly to the intended child.
 #[cfg(feature = "crash-injection")]
 pub fn maybe_crash(point: &str) {
     if std::env::var("GRAPHZERO_CRASH_POINT").as_deref() != Ok(point) {
@@ -4249,10 +4086,9 @@ pub fn paths_file_name(snapshot_id: u64) -> String {
     format!("paths_{snapshot_id:08}.txt")
 }
 
-/// Serialize IndexData into shards + global + paths sidecar, then publish
-/// the manifest atomically. `segment_ids` lists wal segments folded into
-/// this snapshot.
-/// Build the global symbol table and owned name→id map used by spans/CSR/sidecars.
+/// Serialize IndexData into shards + global + paths sidecar, then publish the
+/// manifest atomically. `segment_ids` lists wal segments folded into this
+/// snapshot. Build the global symbol table and owned name→id map used by spans/CSR/sidecars.
 fn write_snapshot_symbol_table(
     data: &IndexData,
 ) -> Result<crate::store::symbol_table::BuiltSymbolTable> {
@@ -4267,7 +4103,7 @@ fn write_snapshot_symbol_table(
     stb.build()
 }
 
-/// Name → dense id without cloning every name into map keys (graphzero-nyqv4).
+/// Name → dense id without cloning every name into map keys.
 fn symbol_id_map(names: &[String]) -> HashMap<&str, u32> {
     names
         .iter()
@@ -4459,7 +4295,7 @@ fn write_snapshot_search_sidecars(
     symbol_names: &[String],
     id_of: &HashMap<&str, u32>,
 ) -> Result<()> {
-    // Publish-time name-bigram sidecar (graphzero-lrin).
+    // Publish-time name-bigram sidecar.
     {
         let path_pairs: Vec<(String, String)> = data
             .blob_order
@@ -4475,11 +4311,9 @@ fn write_snapshot_search_sidecars(
         )?;
         crate::store::query::NameBigramIndex::write_published(shards_dir, snapshot_id, &bigram)?;
     }
-    // Publish-time lexical semantic sidecar (graphzero-nmf).
-    //
-    // One CAS get (+sha256 re-verify) per unique def blob, shared with entity
-    // mint below. Prior code re-fetched every def — multi-def files paid O(|defs|)
-    // full object reads during write_snapshot (graphzero-xcxo9).
+    // Publish-time lexical semantic sidecar. One CAS get (+sha256 re-verify) per
+    // unique def blob, shared with entity mint below. Prior code re-fetched every
+    // def — multi-def files paid O(|defs|) full object reads during write_snapshot.
     {
         use crate::store::query::lexical::{LexicalDocSource, LexicalIndexBuilder};
         let blob_store = BlobStore::open(store_root)?;
@@ -4540,8 +4374,8 @@ pub fn write_snapshot(
             write_snapshot_csr_with_provenance(store_root, data, &blob_idx_of, &id_of, name_count)?;
         (spans, csr)
     };
-    // Move names out before packing the global shard (on-disk uses name_bytes).
-    // Avoids a third full Vec<String> clone for search sidecars (graphzero-nyqv4).
+    // Move names out before packing the global shard (on-disk uses
+    // name_bytes). Avoids a third full Vec<String> clone for search sidecars.
     let symbol_names = std::mem::take(&mut symbols.names);
     let (coverage, coverage_blobs) = write_snapshot_coverage(data);
     let shard_groups = write_snapshot_partition_blobs(data);
@@ -4560,13 +4394,6 @@ pub fn write_snapshot(
     let global_hash = global.write_to_with_sync(&global_path, false)?;
     shard_paths.push(global_path);
     // One durability barrier for all shard/global writes before manifest publish.
-    write_snapshot_fsync_barrier(&shard_paths)?;
-
-    let ordinal_sidecar =
-        crate::store::ordinals::OrdinalSidecar::build(snapshot_id, &symbol_names, &data.edges)?;
-    let ordinal_path = ordinal_sidecar.write_published(&shards_dir, snapshot_id, &data.edges)?;
-    shard_paths.push(ordinal_path);
-    // The ordinal sidecar is part of the pre-manifest snapshot set.
     write_snapshot_fsync_barrier(&shard_paths)?;
 
     write_snapshot_paths_sidecar(&shards_dir, data, snapshot_id)?;
@@ -4594,10 +4421,9 @@ pub fn write_snapshot(
     Ok(WrittenSnapshot { entry })
 }
 
-/// Shards carry trigram postings + coverage for their blob range; the
-/// symbol graph (symbols/spans/edges) lives only in the global file.
-/// Per-shard graph duplication blew the NFR-003 size budget; all sections
-/// remain present in the format (empty), so readers are unchanged.
+/// Shards carry trigram postings + coverage for their blob range; the symbol graph
+/// (symbols/spans/edges) lives only in the global file. Per-shard graph duplication blew the
+/// size budget; all sections remain present in the format (empty), so readers are unchanged.
 pub fn build_shard(
     blobs: &[ContentHash],
     data: &IndexData,
@@ -4708,7 +4534,7 @@ impl Drop for IndexBudgetGuard {
 }
 
 /// Full index: collect facts, write snapshot, publish manifest, clean up
-/// superseded snapshot files and wal segments (FR-014 publish semantics).
+/// superseded snapshot files and wal segments (publish semantics).
 pub fn index_repo(repo_root: &Path, store_root: &Path) -> Result<SnapshotEntry> {
     index_repo_with_budget(repo_root, store_root, None, None)
 }
@@ -4746,19 +4572,6 @@ pub fn index_repo_with_budget(
     cancelled: Option<Arc<AtomicBool>>,
 ) -> Result<SnapshotEntry> {
     let _guard = IndexBudgetGuard::install(IndexBudget::new(deadline, cancelled));
-    let entry = index_repo_locked(repo_root, store_root)?;
-    // Publication is complete and the writer lock is gone before touching the
-    // daemon socket. A resident process reloads the just-published generation.
-    super::daemon::notify_index_change(store_root)?;
-    Ok(entry)
-}
-
-/// Full reconciliation for a resident daemon that already owns reload
-/// coordination. This deliberately does not perform socket I/O.
-pub(crate) fn reconcile_repo_without_notify(
-    repo_root: &Path,
-    store_root: &Path,
-) -> Result<SnapshotEntry> {
     index_repo_locked(repo_root, store_root)
 }
 
@@ -4843,7 +4656,7 @@ fn index_repo_locked_with_mode(
     manifest.snapshots.push(written.entry.clone());
     prune_manifest_to_retained_snapshots(store_root, &mut manifest)?;
     manifest.atomic_publish(store_root)?;
-    // P0 graphzero-ea8i: append blob hashes to the MMR transparency log.
+    // Append blob hashes to the MMR transparency log.
     {
         let mut tl =
             super::mmr::TransparencyLog::open(store_root).context("open transparency log")?;
@@ -4868,24 +4681,8 @@ fn index_repo_locked_with_mode(
     Ok(written.entry)
 }
 
-/// Publish a new durable snapshot from a watcher-provided path set.
-///
-/// Unlike [`index_repo`], this path deliberately does not walk the worktree or
-/// refresh every fingerprint. Correctness relies on uninterrupted watcher
-/// continuity; daemon startup, watcher errors, and ambiguous directory events
-/// must use the full reconciliation path instead.
+/// Publish a durable snapshot from a supplied changed-path set.
 pub fn index_changed_paths(
-    repo_root: &Path,
-    store_root: &Path,
-    changed_paths: &[PathBuf],
-) -> Result<IncrementalIndex> {
-    let indexed = index_changed_paths_locked(repo_root, store_root, changed_paths)?;
-    // Never perform socket I/O while the writer lock is held.
-    super::daemon::notify_index_change(store_root)?;
-    Ok(indexed)
-}
-
-pub(crate) fn index_changed_paths_without_notify(
     repo_root: &Path,
     store_root: &Path,
     changed_paths: &[PathBuf],
@@ -4974,7 +4771,7 @@ fn index_changed_paths_locked(
     manifest.snapshots.push(written.entry.clone());
     prune_manifest_to_retained_snapshots(store_root, &mut manifest)?;
     manifest.atomic_publish(store_root)?;
-    // P0 graphzero-ea8i: append blob hashes to the MMR transparency log.
+    // Append blob hashes to the MMR transparency log.
     {
         let mut tl =
             super::mmr::TransparencyLog::open(store_root).context("open transparency log")?;
@@ -5025,9 +4822,6 @@ fn index_changed_paths_locked(
 /// and size are unchanged. Changed/new files are read and hashed; deletions are
 /// detected by the worktree walk.
 const WORKTREE_FINGERPRINT_VERSION: u32 = 3;
-
-#[cfg(test)]
-static FINGERPRINT_READ_COUNT: AtomicUsize = AtomicUsize::new(0);
 
 #[derive(serde::Serialize, serde::Deserialize)]
 struct WorktreeFingerprintFile {
@@ -5106,10 +4900,8 @@ fn collect_worktree_fingerprints(
         .iter()
         .map(|fingerprint| (fingerprint.path.as_str(), fingerprint))
         .collect();
-    // One stat per file, shared by both consumers (graphzero perf): the
-    // git-clean pre-pass used to stat every file and then the hash loop
-    // stat'ed them all again (~2x syscalls on the warm-index scan). Metadata
-    // is captured once here and consulted by both passes.
+    // Capture metadata once per file and share it between the Git-clean pre-pass
+    // and hash pass.
     let metas: Vec<(String, std::fs::Metadata)> = files
         .iter()
         .filter_map(|path| {
@@ -5166,8 +4958,6 @@ fn collect_worktree_fingerprints(
                 {
                     return Ok((rel, mtime_nanos, size, prior.content_hash.clone()));
                 }
-                #[cfg(test)]
-                FINGERPRINT_READ_COUNT.fetch_add(1, Ordering::SeqCst);
                 let content = fs::read(path).with_context(|| {
                     format!("read worktree file for fingerprint {}", path.display())
                 })?;
@@ -5221,12 +5011,9 @@ fn save_worktree_fingerprint_files(
         .with_context(|| format!("write worktree fingerprint under {}", store_root.display()))
 }
 
-/// Refresh only watcher-reported paths after an incremental collect.
-///
-/// The records sidecar is the authority for which paths belong in the index;
-/// paths deleted or filtered by that collect are removed from the fingerprint.
-/// A missing/incompatible fingerprint stays cold-safe instead of minting a
-/// partial file that could authorize a warm skip.
+/// Refresh only watcher-reported paths after an incremental collect. The records sidecar is the
+/// authority for which paths belong in the index; paths deleted or filtered by that collect are
+/// removed from the fingerprint.
 fn refresh_changed_worktree_fingerprints(
     repo_root: &Path,
     store_root: &Path,
@@ -5285,8 +5072,6 @@ fn refresh_changed_worktree_fingerprints(
             .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
             .map(|duration| duration.as_nanos())
             .unwrap_or(0);
-        #[cfg(test)]
-        FINGERPRINT_READ_COUNT.fetch_add(1, Ordering::SeqCst);
         let content = fs::read(&path).with_context(|| {
             format!(
                 "read worktree file for fingerprint refresh {}",
@@ -5337,12 +5122,10 @@ fn try_fast_warm_index(
 
 /// Content identity for warm publish short-circuit after collect.
 /// Must hash blob order *and* def/edge payloads — counts alone collide when
-/// two distinct graphs share the same blob set and cardinality (INV-SIG-1).
+/// two distinct graphs share the same blob set and cardinality.
 fn index_content_signature(data: &IndexData) -> String {
-    // Stream into Sha256 (same digest as ContentHash::of of the concatenated
-    // lines) so we never materialize one giant String of all def+edge lines.
-    // Def/edge lines are still formatted + sorted for order-independent
-    // stability; each Vec is dropped before the next stage to cut peak RSS.
+    // Stream sorted definition and edge lines into SHA-256 without concatenating them.
+    // Dropping each stage before the next bounds peak resident memory.
     use sha2::{Digest, Sha256};
     let mut hasher = Sha256::new();
 
@@ -5527,19 +5310,14 @@ fn prune_retention_dir(
 
 fn prune_transient_artifacts_locked(store_root: &Path) -> Result<()> {
     let pins = collect_retention_pin_text(store_root)?;
-    let retain_count =
-        retention_env_usize("GZ_CODEMODE_RETAIN_COUNT", DEFAULT_TRANSIENT_RETAIN_COUNT);
+    let retain_count = retention_env_usize(
+        "GRAPHZERO_TRANSIENT_RETAIN_COUNT",
+        DEFAULT_TRANSIENT_RETAIN_COUNT,
+    );
     let retain_days = retention_env_usize(
-        "GZ_CODEMODE_RETAIN_DAYS",
+        "GRAPHZERO_TRANSIENT_RETAIN_DAYS",
         DEFAULT_TRANSIENT_RETAIN_DAYS as usize,
     ) as u64;
-    prune_retention_dir(
-        &store_root.join("codemode").join("execution"),
-        &pins,
-        retain_count,
-        retain_days,
-        true,
-    )?;
     prune_retention_dir(
         &store_root.join("queries"),
         &pins,
@@ -5549,7 +5327,7 @@ fn prune_transient_artifacts_locked(store_root: &Path) -> Result<()> {
     )
 }
 
-/// Opportunistically prune unpinned CodeMode executions and query spills.
+/// Opportunistically prune unpinned query spills.
 /// The timestamp marker avoids taking the store lock on every query.
 pub fn prune_transient_artifacts(store_root: &Path) -> Result<()> {
     let marker = store_root.join("retention_prune.timestamp");
@@ -5652,65 +5430,4 @@ pub fn cleanup(store_root: &Path, manifest: &Manifest, folded_segments: &[u64]) 
         }
     }
     Ok(())
-}
-
-#[cfg(test)]
-mod stale_repair_tests {
-    use super::*;
-    use crate::Snapshot;
-
-    #[test]
-    fn forced_repair_bypasses_a_matching_stale_fingerprint() {
-        let temp = tempfile::tempdir().unwrap();
-        let repo = temp.path().join("repo");
-        let store = temp.path().join("store");
-        fs::create_dir_all(repo.join("src")).unwrap();
-        fs::write(repo.join("src/lib.rs"), "pub fn live() {}\n").unwrap();
-        fs::write(repo.join("src/stale.rs"), "pub fn stale() {}\n").unwrap();
-
-        let first = index_repo(&repo, &store).unwrap();
-        fs::rename(repo.join("src/stale.rs"), repo.join("retired.bin")).unwrap();
-
-        let fingerprint_path = worktree_fingerprint_path(&store);
-        let mut fingerprint: serde_json::Value =
-            serde_json::from_slice(&fs::read(&fingerprint_path).unwrap()).unwrap();
-        fingerprint["files"]
-            .as_array_mut()
-            .unwrap()
-            .retain(|file| file["path"] != "src/stale.rs");
-        fs::write(&fingerprint_path, serde_json::to_vec(&fingerprint).unwrap()).unwrap();
-
-        let stale = Snapshot::open(&store, Some(&repo)).unwrap();
-        assert_eq!(
-            stale.staleness_diagnostic().as_deref(),
-            Some("missing_file:src/stale.rs")
-        );
-
-        let repaired = repair_repo_in_process(&repo, &store, None, None).unwrap();
-        assert!(repaired.snapshot_id > first.snapshot_id);
-        let fresh = Snapshot::open(&store, Some(&repo)).unwrap();
-        assert!(fresh.freshness_verified());
-        assert!(fresh.staleness_diagnostic().is_none());
-    }
-
-    #[test]
-    fn malformed_query_evidence_never_blocks_or_deletes_cleanup() {
-        let temp = tempfile::tempdir().unwrap();
-        let store = temp.path().join("store");
-        let query_dir = store.join("queries");
-        let shards_dir = store.join("shards");
-        fs::create_dir_all(&query_dir).unwrap();
-        fs::create_dir_all(&shards_dir).unwrap();
-        fs::write(
-            query_dir.join("malformed.json"),
-            b"{\"snapshot_id\":7,\"diagnostics\":{,}}",
-        )
-        .unwrap();
-        let retained = shards_dir.join("global_99.bin");
-        fs::write(&retained, b"retain on uncertain evidence").unwrap();
-
-        cleanup(&store, &Manifest::default(), &[]).unwrap();
-
-        assert!(retained.is_file());
-    }
 }

@@ -1,0 +1,55 @@
+[package]
+name = "zero-fs"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Typed FSZero FileEngine implementation for ZeroKernel"
+autotests = false
+publish = false
+
+[dependencies]
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+fszero-store.workspace = true
+zero-abi.workspace = true
+zero-store.workspace = true
+
+[dev-dependencies]
+parking_lot = { workspace = true }
+tempfile = { workspace = true }
+
+[[test]]
+name = "capsule_adapter"
+path = "../../../tests/fszero/adapter_capsule_adapter.rs"
+
+[[test]]
+name = "stale_preimage"
+path = "../../../tests/fszero/adapter_stale_preimage.rs"
+
+[[test]]
+name = "file_engine_restore"
+path = "../../../tests/fszero/adapter_file_engine_restore.rs"
+
+[[test]]
+name = "cancel_after_publish"
+path = "../../../tests/fszero/adapter_cancel_after_publish.rs"
+
+[[test]]
+name = "file_engine_patch"
+path = "../../../tests/fszero/adapter_file_engine_patch.rs"
+
+[[test]]
+name = "lookup_budget"
+path = "../../../tests/fszero/adapter_lookup_budget.rs"
+
+[[test]]
+name = "special_file_mutation"
+path = "../../../tests/fszero/adapter_special_file_mutation.rs"
+
+[[test]]
+name = "symlink_replace"
+path = "../../../tests/fszero/adapter_symlink_replace.rs"
+
+[[test]]
+name = "hardlink_replace"
+path = "../../../tests/fszero/adapter_hardlink_replace.rs"

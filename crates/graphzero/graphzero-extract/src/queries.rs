@@ -1,6 +1,4 @@
-//! Tree-sitter query loading and compilation (FR-003, ADR-005).
-//!
-//! .scm files are embedded at build time via include_str!.
+//! Tree-sitter queries embedded from `.scm` files.
 
 use std::error::Error;
 use std::fmt;
@@ -65,11 +63,7 @@ impl Default for QuerySet {
 }
 
 impl QuerySet {
-    /// Compile all embedded query files at crate init.
-    ///
-    /// The embedded query files are build-time invariants, so this compatibility
-    /// constructor still aborts on failure. Runtime callers that need structured
-    /// diagnostics should use QuerySet::try_new.
+    /// Compiles embedded queries and panics on a mismatch with a pinned grammar.
     pub fn new() -> Self {
         Self::try_new().unwrap_or_else(|err| panic!("{err}"))
     }

@@ -1,9 +1,4 @@
 //! Shared, versioned cross-engine ZeroRef capability contract.
-//!
-//! Source anchors: FSZero `src/core/capability.rs` emits `hash.algo` and
-//! `shared_cas.version`; GraphZero
-//! `crates/graphzero/graphzero-store/src/store/zeroref_capability.rs` emits
-//! `hash.algorithm` and `shared_cas.layout_version`.
 
 use std::num::NonZeroU64;
 
@@ -56,7 +51,6 @@ impl LayoutVersion {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct HashCapability {
-    #[serde(alias = "algo")]
     pub algorithm: HashAlgorithm,
 }
 
@@ -65,7 +59,6 @@ pub struct HashCapability {
 #[serde(deny_unknown_fields)]
 pub struct SharedCasCapability {
     pub layout: CasLayout,
-    #[serde(alias = "version")]
     pub layout_version: LayoutVersion,
 }
 

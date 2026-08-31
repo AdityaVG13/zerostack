@@ -141,18 +141,6 @@ impl RecoveryStore {
             }
         }
     }
-    #[cfg(test)]
-    pub fn edit_intent_count(&self) -> usize {
-        self.intent_connection()
-            .ok()
-            .and_then(|c| c.query("SELECT COUNT(*) FROM edit_intents").ok())
-            .and_then(|r| r.first().cloned())
-            .and_then(|r| match r.get(0) {
-                Some(SqliteValue::Integer(v)) => Some(*v as usize),
-                _ => None,
-            })
-            .unwrap_or(0)
-    }
     pub fn has_edit_intent(&self, root: &str, path: &str) -> bool {
         self.intent_connection()
             .ok()
@@ -293,52 +281,5 @@ impl RecoveryStore {
             Some(e) => Err(e),
             None => Ok(()),
         }
-    }
-}
-
-#[cfg(all(test, unix))]
-mod tests {
-    use super::*;
-    use std::os::unix::fs::FileTypeExt;
-    use std::path::Path;
-    use std::sync::mpsc;
-    use std::time::Duration;
-
-    #[test]
-    fn reconcile_edit_intents_refuses_fifo_without_blocking() {
-        let dir = tempfile::tempdir().unwrap();
-        let workspace = dir.path().join("ws");
-        fs::create_dir(&workspace).unwrap();
-        let fifo = workspace.join("pipe.fifo");
-        let status = std::process::Command::new("mkfifo")
-            .arg(&fifo)
-            .status()
-            .expect("spawn mkfifo");
-        assert!(status.success(), "mkfifo failed: {status}");
-
-        let db = dir.path().join("store.sqlite3");
-        let root = workspace.to_str().expect("utf8 workspace").to_string();
-        let (tx, rx) = mpsc::channel();
-        std::thread::spawn(move || {
-            let store = RecoveryStore::with_durable(&db);
-            store
-                .create_edit_intent(&root, "pipe.fifo", b"pre", b"post", "", "", 0, 0, "{}")
-                .expect("insert edit intent");
-            let _ = tx.send(store.reconcile_edit_intents(Path::new(&root)));
-        });
-        let result = rx
-            .recv_timeout(Duration::from_millis(1500))
-            .expect("reconcile_edit_intents hung on FIFO instead of failing closed");
-        let err = result.expect_err("FIFO reconcile must fail closed");
-        assert!(
-            err.contains("unsupported file kind") && err.contains("fifo"),
-            "expected unsupported file kind fifo, got {err}"
-        );
-        let meta = fs::symlink_metadata(&fifo).expect("fifo metadata");
-        assert!(
-            meta.file_type().is_fifo(),
-            "{} must remain a FIFO",
-            fifo.display()
-        );
     }
 }

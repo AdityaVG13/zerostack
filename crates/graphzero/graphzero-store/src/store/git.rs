@@ -1,4 +1,4 @@
-//! Git HEAD/index reader and branch re-point (P2.3 FR-020–FR-023).
+//! Git HEAD and index reader with branch repointing.
 //! No network access; dirty paths come from the index vs HEAD tree.
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -13,7 +13,7 @@ use crate::ContentHash;
 use super::manifest::{Manifest, SnapshotEntry};
 use super::overlay;
 
-/// Warm-daemon test shim (FR-021): increments when the index is touched.
+/// Warm-daemon test shim: increments when the index is touched.
 static REFRESH_COUNT: AtomicUsize = AtomicUsize::new(0);
 
 pub fn refresh_count() -> usize {
@@ -354,14 +354,14 @@ fn try_repoint_from_head_branch_map(store_root: &Path, repo_root: &Path) -> Resu
 }
 
 /// Re-point the active manifest entry when HEAD tree paths match an existing
-/// snapshot without running `collect` / full extraction (FR-023).
+/// snapshot without running `collect` / full extraction.
 pub fn repoint_active_snapshot(store_root: &Path, repo_root: &Path) -> Result<Option<u64>> {
     if let Some(id) = try_repoint_from_head_branch_map(store_root, repo_root)? {
         return Ok(Some(id));
     }
 
-    // Match on HEAD tree only — worktree walks include leftover untracked files
-    // after checkout (e.g. feature.rs) and would never match an older snapshot.
+    // Match only HEAD. Worktree walks include untracked files from later checkouts
+    // that cannot match an older snapshot.
     let tree_paths = head_tree_content_hashes(repo_root)?;
     let mut manifest = Manifest::load(store_root)?;
     if manifest.snapshots.is_empty() {
@@ -379,7 +379,7 @@ pub fn repoint_active_snapshot(store_root: &Path, repo_root: &Path) -> Result<Op
     )
 }
 
-/// Index dirty tracked paths into the worktree overlay (FR-022).
+/// Index dirty tracked paths into the worktree overlay.
 pub fn sync_dirty_overlay(
     store_root: &Path,
     worktree_id: &str,

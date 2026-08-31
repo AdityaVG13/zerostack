@@ -6,14 +6,12 @@ It minimizes total task cost while keeping exact recovery available when visible
 
 ## Handles
 
-Model-facing recovery uses `z.read` on a `z://blob/<digest>` handle. Engine-local schemes remain inside their stores.
+Model-facing and engine recovery use `z.read` with a canonical
+`z://blob/<digest>` handle. Retired engine-specific schemes fail closed.
 
 | Ref | Producer | Typical content |
 | --- | --- | --- |
-| `z://blob/<digest>` | ZeroKernel / TokenZero | Bounded projections, large reads, exact recovery |
-| `tz://` | TokenZero (engine-local) | Compacted logs, search output, shell output |
-| `fz://` | FSZero (engine-local) | File reads, searches, plans, mutation receipts |
-| `gz://` | GraphZero (engine-local) | Graph snapshots, impact paths, orientation results |
+| `z://blob/<digest>` | ZeroKernel and domain engines | Bounded projections, large reads, and exact recovery |
 
 Handles are useful only when consumers preserve type and recovery path. Expand the smallest sufficient range. Surface an explicit error when a handle is unavailable or expired. Do not copy full payloads back into context, and do not write an outline or preview back as source bytes.
 
@@ -38,7 +36,7 @@ TokenZero may omit payload text from the visible capsule only when one of these 
 
 Exact handles are identifiers, not model-readable payloads. A response that only emits a handle has high visible savings, but honest evaluation must count any later expansion.
 
-Capsule emission validates this rule at runtime. Exact recovery evidence must be a visible handle with a concrete byte, line, or symbol selector (`z://blob/<digest>` at the ZeroKernel boundary; engine-local `tz://` inside TokenZero). Protected-anchor evidence must name a visible `[[anchor:...]]`. A capsule without either must set `mode: lossy`, provide non-empty `lossy_spans` whose entries declare `recovery_may_be_needed: true`, and name a stable `lossy_policy_id`. The visible text repeats the lossy declaration so consumers that render only capsule text cannot drop the warning.
+Capsule emission validates this rule at runtime. Exact recovery evidence must be a visible `z://blob/<digest>` handle with a concrete byte, line, or symbol selector. Protected-anchor evidence must name a visible `[[anchor:...]]`. A capsule without either must set `mode: lossy`, provide non-empty `lossy_spans` whose entries declare `recovery_may_be_needed: true`, and name a stable `lossy_policy_id`. The visible text repeats the lossy declaration so consumers that render only capsule text cannot drop the warning.
 
 For an impossibly small token budget, the complete declaration may exceed the budget rather than degrade to unclassified text such as `omitted`.
 

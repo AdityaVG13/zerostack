@@ -1,16 +1,4 @@
-//! Per-user recovery ref index for cross-root `gz://` expansion.
-//!
-//! The index records only ref id -> store root pointers. Payload bytes remain
-//! in the store that minted the ref.
-//!
-//! Platform notes (bead 1ghi.5): shards are append-only NDJSON whose readers
-//! tolerate a torn final line, so appends need no lock on any OS. Compaction
-//! writes a uniquely named sibling temp file, syncs it, and publishes it via
-//! [`super::replace_file`], which retries classified transient
-//! Windows sharing violations with bounded backoff. The old shard stays
-//! complete and valid until the replacement lands. On Unix the index files
-//! are created `0o600`/`0o700`; on Windows they rely on the user-profile
-//! directory ACLs — Unix modes are never faked.
+//! Cross-root recovery index from ref ids to the stores that own their payload bytes.
 
 use std::collections::HashMap;
 use std::fs::{self, OpenOptions};
@@ -163,7 +151,7 @@ fn compact_shard(shard: &Path) -> Result<()> {
     let tmp = unique_compaction_temp(shard);
     let write = write_compacted_shard(&tmp, shard, &values);
     if write.is_err() {
-        // The temp is ours; the old shard is still complete and valid.
+        // Failed compaction may remove its owned temp; the prior shard remains valid.
         let _ = fs::remove_file(&tmp);
     }
     write

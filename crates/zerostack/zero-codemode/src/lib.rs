@@ -1,10 +1,8 @@
 #![forbid(unsafe_code)]
 
-//! Restricted interpreter used by ZeroKernel.
-//!
-//! This crate owns JavaScript evaluation, finite limits, promise scheduling,
-//! and the direct host-call seam. It exposes no engine namespace, command catalog, transport adapter,
-//! or compatibility runtime.
+//! Restricted interpreter used by ZeroKernel. This crate owns JavaScript evaluation,
+//! finite limits, promise scheduling, and the direct host-call seam. It exposes no
+//! engine namespace, command catalog, transport adapter, or compatibility runtime.
 
 pub mod guest;
 mod host;

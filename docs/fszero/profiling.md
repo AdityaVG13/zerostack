@@ -9,7 +9,7 @@ Use the repository `release-perf` profile with frame pointers. Maintainers offlo
 ```bash
 rch exec -- env \
   CARGO_TARGET_DIR="${RCH_TARGET_BASE:-${TMPDIR:-/tmp}}/rch_target_fszero_profile" \
-  ./scripts/profile_build.sh -p fszero-cli --bin fszero
+  ./scripts/profile_build.sh -p zero-kernel --bin zero-kernel
 ```
 
 Record the exact commit, binary digest, profile, toolchain, host class, corpus, command, and sample count beside every promoted result.
@@ -22,17 +22,15 @@ Use a tool appropriate for the operating system:
 - `perf` on Linux;
 - Instruments or `/usr/bin/sample` on macOS.
 
-Capture a named standalone CLI or benchmark-harness scenario. Do not profile retired MCP or engine-local CodeMode entrypoints.
+Capture a named ZeroKernel or benchmark-harness scenario.
 
 ```bash
 RUN_ID=$(date -u +%Y%m%dT%H%M%SZ)-index-build
 OUT_DIR=tests/artifacts/perf/${RUN_ID}
 mkdir -p "$OUT_DIR"
 samply record --save-only -o "$OUT_DIR/cpu.json" -- \
-  ./target/release-perf/fszero --help
+  ./target/release-perf/zero-kernel exec -C "$PWD" benchmarks/zero-kernel-reference.cjs
 ```
-
-Replace the help probe with the actual named workload before using the output as evidence.
 
 ## Artifact locations
 

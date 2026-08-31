@@ -1,7 +1,6 @@
-//! Independent, fail-closed durable-store integrity gate.
-//!
-//! Stock SQLite validates an existing DB/WAL snapshot before fsqlite can open
-//! or mutate it. Failure recovery only writes unique sibling destinations.
+//! Independent, fail-closed durable-store integrity gate. Stock SQLite
+//! validates an existing DB/WAL snapshot before fsqlite can open or
+//! mutate it. Failure recovery only writes unique sibling destinations.
 
 use rusqlite::{Connection as OracleConnection, ErrorCode, OpenFlags, types::Value};
 use serde::{Deserialize, Serialize};
@@ -111,12 +110,8 @@ pub(super) struct IntegrityGuard {
     _connection: OracleConnection,
 }
 
-/// Why the gate refused to hand over the store.
-///
-/// The router used to recover this from substring matching on a rendered
-/// message, which made "another engine holds it right now" indistinguishable
-/// from "the file is destroyed". The variant is the channel; the payload is
-/// the operator-facing detail.
+/// Typed integrity-gate refusal. The variant distinguishes repair failure, data loss,
+/// and contention; the payload carries operator detail.
 #[derive(Debug)]
 pub(super) enum GateError {
     /// Findings were repairable in principle but the repair did not hold.
@@ -136,8 +131,8 @@ impl GateError {
     }
 
     /// Destructive findings plus "this is not a SQLite file at all".
-    /// Permission / missing-parent failures stay fail-closed: those are not
-    /// a cache we can safely replace.
+    /// Permission and missing-parent failures stay fail-closed because their stores
+    /// cannot be replaced safely.
     pub(super) fn is_resettable_live_file(&self) -> bool {
         match self {
             Self::Destructive(_) => true,
@@ -178,16 +173,12 @@ fn is_busy_error(error: &rusqlite::Error) -> bool {
 }
 
 pub(super) fn gate_existing_store(db_path: &Path) -> Result<IntegrityGuard, GateError> {
-    // Snapshot siblings are only ever created by this gate, so store open is the
-    // one place that always observes them. Pruning here keeps the bound automatic
-    // rather than a manual cleanup step, and failures must never block a healthy
-    // store from opening.
+    // Snapshot siblings are only ever created by this gate, so store open is the one
+    // place that always observes them. Pruning here keeps the bound automatic rather
+    // than a manual cleanup step, and failures must never block a healthy store from opening.
     let _ = prune_snapshot_destinations(db_path);
-    // The gate takes a writer-excluding lock, so under multi-engine contention
-    // it is the first thing to block. It waits only one ATTEMPT slice, not the
-    // caller's whole budget: the retry loop in `open_durable_store_retrying`
-    // owns the total wall and re-runs the gate until that wall is spent.
-    // Sharing one budget here made the retry loop unreachable.
+    // The gate takes a writer-excluding lock, so under multi-engine contention it is the first thing
+    // to block.
     gate_existing_store_with_timeout(
         db_path,
         super::durable_busy_attempt_wait().min(BUSY_TIMEOUT),
@@ -239,11 +230,9 @@ fn gate_existing_store_with_timeout(
     Ok(IntegrityGuard { _connection: conn })
 }
 
-/// The non-`ok` lines of an `integrity_check` report.
-///
-/// SQLite returns the whole report as a single row with embedded newlines,
-/// led by a `*** in database main ***` banner. Classifying the raw rows would
-/// therefore see one opaque blob and never recognise anything.
+/// The non-`ok` lines of an `integrity_check` report. SQLite returns the whole report as
+/// a single row with embedded newlines, led by a `*** in database main ***` banner.
+/// Classifying the raw rows would therefore see one opaque blob and never recognise anything.
 fn integrity_findings(rows: &[String]) -> Vec<&str> {
     rows.iter()
         .flat_map(|row| row.lines())
@@ -256,19 +245,9 @@ fn integrity_findings(rows: &[String]) -> Vec<&str> {
         .collect()
 }
 
-/// True for findings stock SQLite can repair without losing rows.
-///
-/// Three shapes were observed on real shared stores, all structural rather than
-/// data loss:
-/// * `Page N: never used` - fsqlite grew the page count without linking the
-///   tail pages into the freelist. Nothing references them.
-/// * `rowid N out of order` - a table b-tree whose cells are mis-ordered; the
-///   rows are all present and `VACUUM` rewrites the tree in rowid order.
-/// * `wrong # of entries in index X` - index-only divergence that `REINDEX`
-///   rebuilds from the table.
-///
-/// Every other finding is treated as destructive. Repair is still only trusted
-/// when the post-repair report is `ok` and no table lost rows.
+/// True for findings stock SQLite can repair without losing rows. Three shapes were observed on
+/// real shared stores, all structural rather than data loss * `Page N: never used` - fsqlite grew
+/// the page count without linking the tail pages into the freelist.
 fn is_repairable_finding(row: &str) -> bool {
     is_leaked_page_finding(row)
         || is_row_order_finding(row)
@@ -319,12 +298,9 @@ fn gate_while_locked(conn: &OracleConnection, db_path: &Path) -> Result<(), Gate
     .map_err(GateError::OpenFailed)
 }
 
-/// Repair a purely leaked-page report in place, or quarantine.
-///
-/// Quarantining a benign finding was catastrophic: every process that opened
-/// the store made a full raw+logical+salvage copy of it, so N respawns cost N
-/// copies of the DB and its packs. Returns the post-VACUUM fingerprint, which
-/// the caller must attest instead of the pre-VACUUM one.
+/// Repair a purely leaked-page report in place, or quarantine. Quarantining a benign finding was
+/// catastrophic: every process that opened the store made a full raw+logical+salvage copy of it, so
+/// N respawns cost N copies of the DB and its packs.
 fn self_heal_repairable_findings(
     conn: &OracleConnection,
     db_path: &Path,
@@ -344,10 +320,9 @@ fn self_heal_repairable_findings(
     let before_counts = table_row_counts(conn)
         .map_err(|error| GateError::Destructive(quarantine_locked(db_path, error)))?;
 
-    // VACUUM cannot run inside the gate's BEGIN IMMEDIATE, so commit, repair,
-    // and immediately re-acquire. The lock is briefly released, which is why
-    // integrity_check is re-run under the re-acquired lock below rather than
-    // trusting the repair to have been the last write.
+    // VACUUM cannot run inside the gate's BEGIN IMMEDIATE, so commit, repair, and immediately
+    // re-acquire. The lock is briefly released, which is why integrity_check is re-run under
+    // the re-acquired lock below rather than trusting the repair to have been the last write.
     if let Err(error) = conn.execute_batch("COMMIT; VACUUM; REINDEX; BEGIN IMMEDIATE") {
         return Err(GateError::Destructive(quarantine_locked(
             db_path,
@@ -961,11 +936,9 @@ fn write_mutation_epoch(db_path: &Path, epoch: u64) -> Result<(), String> {
     sync_dir(path.parent().unwrap_or_else(|| Path::new(".")))
 }
 
-/// Logical mutation counter used as the integrity-gate attestation identity.
-///
-/// Read-only fsqlite opens bump DB/WAL/SHM mtimes without changing payload
-/// bytes. Fingerprinting those mtimes forced a full `integrity_check` on every
-/// reopen (fszero-kflx.6). Missing sidecar == epoch 0.
+/// Logical mutation counter used as the integrity-gate attestation identity. Read-only
+/// fsqlite opens bump DB/WAL/SHM mtimes without changing payload bytes. Fingerprinting
+/// those mtimes forced a full `integrity_check` on every reopen. Missing sidecar == epoch 0.
 pub(super) fn bump_mutation_epoch(db_path: &Path) -> Result<(), String> {
     write_mutation_epoch(db_path, read_mutation_epoch(db_path).saturating_add(1))
 }
@@ -984,11 +957,9 @@ fn fingerprint_store(db_path: &Path) -> Result<BTreeMap<String, String>, String>
     Ok(result)
 }
 
-/// Size-only identity of durable files for forensic snapshot dedup.
-///
-/// Omits mtime (read-only opens bump it) and SHM (a lock file, not payload).
-/// Distinct from the gate fingerprint: two corrupt DBs at epoch 0 must not
-/// collapse to one snapshot.
+/// Size-only identity of durable files for forensic snapshot dedup. Omits mtime
+/// (read-only opens bump it) and SHM (a lock file, not payload). Distinct from the
+/// gate fingerprint: two corrupt DBs at epoch 0 must not collapse to one snapshot.
 fn snapshot_identity(db_path: &Path) -> Result<BTreeMap<String, String>, String> {
     let mut result = BTreeMap::new();
     for path in store_files(db_path)? {
@@ -1057,12 +1028,9 @@ fn existing_snapshot_destinations(db_path: &Path) -> Result<Vec<PathBuf>, String
     Ok(found)
 }
 
-/// Delete oldest forensic/salvage siblings until a new pair can be created
-/// without exceeding [`MAX_SNAPSHOT_DESTINATIONS`].
-///
-/// The newest sibling always survives: it is the only copy that can still
-/// explain the current refusal. If even that leaves no room for two more
-/// directories, the caller must still refuse.
+/// Delete oldest forensic/salvage siblings until a new pair can be created without exceeding
+/// [`MAX_SNAPSHOT_DESTINATIONS`]. The newest sibling always survives: it is the only copy that can
+/// still explain the current refusal.
 fn make_room_for_snapshot_pair(db_path: &Path) -> Result<(), String> {
     const PAIR: usize = 2;
     loop {
@@ -1114,14 +1082,8 @@ fn rename_or_copy_file(source: &Path, dest: &Path) -> Result<(), String> {
     }
 }
 
-/// Quarantine the live store after a destructive integrity finding so
-/// CreateOrOpen can mint a fresh durable file.
-///
-/// The workspace is the source of truth; this store is a cache. Leaving a
-/// malformed live file in place bricks every future open once the snapshot
-/// cap fills (or once an identical forensic already exists). The corrupt
-/// bytes are never discarded: they move under `<parent>/quarantine/reset-*`
-/// and a forensic sibling is retained when possible.
+/// Quarantine the live store after a destructive integrity finding so CreateOrOpen can mint a fresh
+/// durable file. The workspace is the source of truth; this store is a cache.
 pub(super) fn reset_live_store_after_destructive(
     db_path: &Path,
     reason: &str,
@@ -1171,7 +1133,7 @@ pub(super) fn reset_live_store_after_destructive(
     }
 
     let event = serde_json::json!({
-        "schema": "fszero-store-reset/v1",
+        "schema": "fszero-store-reset",
         "reason": reason,
         "moved": moved,
         "note": "live store will be recreated empty; workspace files are the source of truth; forensic/salvage siblings retained when possible",
@@ -1189,9 +1151,8 @@ pub(super) fn reset_live_store_after_destructive(
 }
 
 /// Nanosecond creation stamp encoded in a snapshot sibling name.
-///
-/// Sorting by name alone groups by kind before time, so forensic and salvage
-/// siblings of the same incident would not stay adjacent in age order.
+/// Sorting by name alone groups by kind before time, so forensic and
+/// salvage siblings of the same incident would not stay adjacent in age order.
 fn snapshot_stamp(path: &Path) -> u128 {
     let name = path.file_name().unwrap_or_default().to_string_lossy();
     let Some((_, rest)) = name
@@ -1249,12 +1210,8 @@ fn prune_snapshot_destinations(db_path: &Path) -> Result<u64, String> {
     prune_snapshot_destinations_to(db_path, snapshot_retention_budget())
 }
 
-/// Indices into a newest-first `stats` slice that a retention pass must delete
-/// so the survivors satisfy both the byte budget and the sibling count cap.
-///
-/// Deletion proceeds oldest-first (highest index) and stops when both
-/// constraints hold; the newest entry (index 0) always survives even when it
-/// alone exceeds the budget.
+/// Indices into a newest-first `stats` slice that a retention pass must delete so the survivors
+/// satisfy both the byte budget and the sibling count cap.
 fn gc_target_indices(stats: &[(PathBuf, u64)], budget: u64, count_cap: usize) -> Vec<usize> {
     let mut delete = Vec::new();
     let mut total: u64 = stats.iter().map(|(_, bytes)| *bytes).sum();
@@ -1271,12 +1228,8 @@ fn gc_target_indices(stats: &[(PathBuf, u64)], budget: u64, count_cap: usize) ->
     delete
 }
 
-/// Delete snapshot siblings oldest-first until the retained set satisfies both
-/// the byte budget and the sibling count cap.
-///
-/// The newest sibling always survives even when it alone exceeds the budget: the
-/// most recent evidence of a rejected store is the only copy that can still
-/// explain the current refusal.
+/// Delete snapshot siblings oldest-first until the retained set satisfies both the byte budget and
+/// the sibling count cap.
 fn prune_snapshot_destinations_to(db_path: &Path, budget: u64) -> Result<u64, String> {
     let stats = snapshot_storage_stats(db_path)?;
     let targets = gc_target_indices(&stats, budget, MAX_SNAPSHOT_DESTINATIONS);
@@ -1379,10 +1332,8 @@ pub fn store_gc_plan(db_path: &Path, budget_bytes: u64) -> Result<StoreGcPlan, S
     build_store_gc_plan(db_path, budget_bytes)
 }
 
-/// Apply the store-gc retention pass: delete siblings oldest-first until both
-/// the byte budget and the count cap hold, always keeping the newest sibling.
-/// Only `<store>.forensic-*` / `<store>.salvage-*` sibling directories are
-/// ever removed; the live store and unrelated files are untouched.
+/// Apply the store-gc retention pass: delete siblings oldest-first until both the byte budget and
+/// the count cap hold, always keeping the newest sibling.
 pub fn store_gc_apply(db_path: &Path, budget_bytes: u64) -> Result<StoreGcPlan, String> {
     let plan = build_store_gc_plan(db_path, budget_bytes)?;
     let parent = db_path.parent().unwrap_or_else(|| Path::new("."));
@@ -1474,7 +1425,3 @@ fn sync_dir(path: &Path) -> Result<(), String> {
         Ok(())
     }
 }
-
-#[cfg(test)]
-#[path = "../../../../../tests/fszero/unit/fszero-store/durable_integrity_tests.rs"]
-mod tests;

@@ -1,8 +1,6 @@
-//! Opt-in stage latency histograms (`GRAPHZERO_STAGE_HISTOGRAM=1`).
-//!
-//! Records `stage_ms` samples into named HDR histograms so multi-run p50/p95/p99
-//! tails are available without a metrics exporter. Default off: zero Instant or
-//! histogram work on the hot path when the env is unset (graphzero-rzu6s).
+//! Opt-in stage latency histograms (`GRAPHZERO_STAGE_HISTOGRAM=1`). Records `stage_ms` samples
+//! into named HDR histograms so multi-run p50/p95/p99 tails are available without a metrics
+//! exporter. Default off: zero Instant or histogram work on the hot path when the env is unset.
 
 use std::collections::BTreeMap;
 use std::sync::Mutex;
@@ -26,7 +24,6 @@ pub fn stage_histogram_enabled() -> bool {
 }
 
 /// Record one stage latency sample in milliseconds.
-///
 /// No-op when the env flag is off. Clamps non-finite / negative values to 0.
 pub fn record_stage_ms(stage: &str, ms: f64) {
     if !stage_histogram_enabled() && !crate::store::perf_profile::perf_profile_enabled() {
@@ -46,7 +43,6 @@ pub fn record_stage_ms(stage: &str, ms: f64) {
 }
 
 /// Record every non-zero field of a flat `*_ms` map under a stage prefix.
-///
 /// Keys become `{prefix}.{field}` (e.g. `index.walk_ms`).
 pub fn record_phase_map(prefix: &str, fields: &[(&str, f64)]) {
     if !stage_histogram_enabled() && !crate::store::perf_profile::perf_profile_enabled() {

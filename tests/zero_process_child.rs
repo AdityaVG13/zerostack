@@ -1,17 +1,5 @@
-//! Focused tests for hub-owned verified child identity and tree ownership.
-//!
-//! Mutant map: deleting a guard makes the named test(s) fail.
-//! - Linux pre-exec owner-death binding (PR_SET_PDEATHSIG) / Darwin kqueue
-//!   watcher -> `spawn_tree_owner_sigkill_reaps_descendant_leaf`
-//! - tree fixture shape (root plus a grandchild leaf, both spawn-tree bound)
-//!   -> `spawn_tree_owner_sigkill_reaps_descendant_leaf`
-//!
-//! Fixtures are self-spawns of this test binary (`fixture_runner`), so every
-//! test is runnable natively on macOS and Linux. The owner-death tree test is
-//! the lock for `zerostack-5bei`: a SIGKILLed spawn_tree owner must reap the
-//! root AND the descendant leaf that is not a direct child of the owner. The
-//! direct-leaf tests (`7afx` / `xk4c`) do not cover a tree; this fixture is
-//! the missing lock.
+//! Focused tests for hub-owned verified child identity and tree ownership. Mutant map: deleting a
+//! guard makes the named test(s) fail.
 
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
@@ -22,9 +10,7 @@ use std::time::{Duration, Instant};
 use zero_process::ProcessIdentity;
 use zero_process::VerifiedChild;
 
-// ---------------------------------------------------------------------------
 // Self-spawn fixtures (current test binary)
-// ---------------------------------------------------------------------------
 
 const FIXTURE_ENV: &str = "ZERO_PROCESS_CHILD_FIXTURE";
 const ROOT_PID_ENV: &str = "ZERO_PROCESS_ROOT_PID_FILE";
@@ -50,14 +36,7 @@ fn fixture_command(role: &str) -> Command {
     command
 }
 
-/// Fixture entry point for self-spawned children. Runs as a no-op test in the
-/// normal suite; when spawned by a fixture command it executes the role named
-/// in `ZERO_PROCESS_CHILD_FIXTURE`:
-/// - "leaf": report the pid, then stay alive.
-/// - "tree-root": spawn a "leaf" via `VerifiedChild::spawn_tree` (the leaf is
-///   therefore not a direct child of the owner), then stay alive.
-/// - "owner": spawn a "tree-root" via `VerifiedChild::spawn_tree`, report the
-///   root pid, then stay alive.
+/// Fixture entry point for self-spawned children.
 #[test]
 fn fixture_runner() {
     let Ok(role) = std::env::var(FIXTURE_ENV) else {
@@ -82,10 +61,8 @@ fn fixture_runner() {
             }
         }
         "owner" => {
-            // This fixture *is* the owner: it spawn_tree's the tree root so
-            // the root gets Linux PR_SET_PDEATHSIG bound to this process
-            // (Darwin: a forked kqueue watcher). The parent test SIGKILLs us;
-            // the root and its descendant leaf must not stay live.
+            // This fixture owns the spawned tree, binding root lifetime to this process.
+            // Killing the fixture must also terminate the root and descendant leaf.
             let mut command = fixture_command("tree-root");
             if let Ok(pid_file) = std::env::var(LEAF_PID_ENV) {
                 command.env(LEAF_PID_ENV, pid_file);
@@ -104,10 +81,9 @@ fn fixture_runner() {
     }
 }
 
-/// The leaf writes its pid to `ZERO_PROCESS_LEAF_PID_FILE` after finishing
-/// role setup, so the parent only proceeds once the leaf is fully ready and
-/// inside the tree. A file, not stdout: libtest's no-newline progress prefix
-/// can merge with child stdout on a shared pipe.
+/// The leaf writes its pid to `ZERO_PROCESS_LEAF_PID_FILE` after finishing role setup, so
+/// the parent only proceeds once the leaf is fully ready and inside the tree. A file, not
+/// stdout: libtest's no-newline progress prefix can merge with child stdout on a shared pipe.
 fn report_own_pid() {
     if let Ok(path) = std::env::var(LEAF_PID_ENV) {
         std::fs::write(&path, std::process::id().to_string()).expect("write leaf pid file");
@@ -141,10 +117,9 @@ fn wait_for_pid_file(pid_file: &std::path::Path) -> u32 {
     }
 }
 
-/// Identity-bound liveness: the process is gone only when the captured
-/// identity no longer matches a live process at the pid. A recycled pid
-/// carries a different start identity, so it can never be reported as the
-/// same process (no false green).
+/// Identity-bound liveness: the process is gone only when the captured identity no
+/// longer matches a live process at the pid. A recycled pid carries a different
+/// start identity, so it can never be reported as the same process (no false green).
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 fn process_is_gone(identity: &ProcessIdentity) -> bool {
     !identity.is_live().unwrap_or(false)
@@ -195,12 +170,8 @@ fn wait_for_exit_does_not_report_a_live_child_as_exited() {
     );
 }
 
-/// Linux/Darwin: SIGKILL of the spawn_tree owner must reap the tree root AND
-/// the descendant leaf -- a grandchild that is not a direct child of the
-/// owner. Linux reaps by per-descendant PR_SET_PDEATHSIG (every spawn_tree
-/// root is bound to its spawning parent, so the tree collapses by
-/// construction); Darwin by per-level kqueue watchers. `zerostack-5bei`:
-/// direct-leaf-only tests are not this bead.
+/// Linux/Darwin: SIGKILL of the spawn_tree owner must reap the tree root AND the descendant leaf --
+/// a grandchild that is not a direct child of the owner.
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 #[test]
 fn spawn_tree_owner_sigkill_reaps_descendant_leaf() {
@@ -231,9 +202,8 @@ fn spawn_tree_owner_sigkill_reaps_descendant_leaf() {
         "descendant leaf {leaf_pid} must be live before owner SIGKILL"
     );
 
-    // SAFETY: SIGKILL the owner fixture we just spawned (an unreaped direct
-    // child, so its pid is pinned). The root is bound to that owner and the
-    // leaf is bound to the root the same way.
+    // SAFETY: the owner is an unreaped direct child with a pinned pid. The root
+    // and leaf identities are bound through the same ownership chain.
     let rc = unsafe { libc::kill(owner.id() as libc::pid_t, libc::SIGKILL) };
     assert_eq!(rc, 0, "SIGKILL owner");
     let _ = owner.wait();

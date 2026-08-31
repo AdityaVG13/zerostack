@@ -1,6 +1,6 @@
-//! Exact-arithmetic fixtures for the W8 exact Q99 + child-image repair shadow
-//! reporter (`zerostack-e7dz`): pass, deny, repair, zero-weight, missing
-//! evidence, and provider-hit-only cases, with L1/L2/L3 never aliased.
+//! Exact-arithmetic fixtures for the exact Q99 + child-image repair shadow reporter (): pass,
+//! deny, repair, zero-weight, missing evidence, and provider-hit-only cases, with L1/L2/L3 never
+//! aliased.
 
 use zero_abi::{Sha256Digest, sha256};
 use zero_gate::{
@@ -11,9 +11,7 @@ use zero_gate::{
     hypothetical_child, layer_ledger_from_manifest, simulate_action_guard,
 };
 
-// ---------------------------------------------------------------------------
 // Helpers
-// ---------------------------------------------------------------------------
 
 fn d(tag: u8) -> Sha256Digest {
     Sha256Digest::from_bytes(sha256(&[tag]))
@@ -124,9 +122,7 @@ fn manifest_layer_ledger_preserves_only_valid_l2_state() {
     );
 }
 
-// ---------------------------------------------------------------------------
 // Pass: valid mass already covers >= 99/100 of next demand
-// ---------------------------------------------------------------------------
 
 #[test]
 fn pass_action_holds_q99_exact() {
@@ -176,10 +172,7 @@ fn pass_action_holds_q99_exact() {
     );
 }
 
-// ---------------------------------------------------------------------------
-// Repair: g_min per the W8 design; missing-evidence additions never add
-// valid mass
-// ---------------------------------------------------------------------------
+// Repair: g_min per the design; missing-evidence additions never add valid mass
 
 #[test]
 fn repair_required_with_g_min_and_missing_evidence_add() {
@@ -232,9 +225,7 @@ fn repair_required_with_g_min_and_missing_evidence_add() {
     assert!(!sim.has_authority());
 }
 
-// ---------------------------------------------------------------------------
 // Deny: provider-hit-only demand is never valid mass, so no repair exists
-// ---------------------------------------------------------------------------
 
 #[test]
 fn deny_provider_hit_only_never_valid() {
@@ -286,9 +277,7 @@ fn deny_provider_hit_only_never_valid() {
     );
 }
 
-// ---------------------------------------------------------------------------
 // Deny: repair that cannot restore the obligation fails closed
-// ---------------------------------------------------------------------------
 
 #[test]
 fn deny_insufficient_repair() {
@@ -331,9 +320,7 @@ fn deny_insufficient_repair() {
     assert!(!sim.has_authority());
 }
 
-// ---------------------------------------------------------------------------
 // Deny: replenish branch not simulated
-// ---------------------------------------------------------------------------
 
 #[test]
 fn deny_when_replenish_not_simulated() {
@@ -362,9 +349,7 @@ fn deny_when_replenish_not_simulated() {
     );
 }
 
-// ---------------------------------------------------------------------------
 // Zero-weight: impossibility reported, never a fake number
-// ---------------------------------------------------------------------------
 
 #[test]
 fn zero_weight_envelope_unavailable_never_fake() {
@@ -404,9 +389,7 @@ fn zero_weight_envelope_unavailable_never_fake() {
     );
 }
 
-// ---------------------------------------------------------------------------
 // Exact-rational coverage + slack on a mixed envelope, L1/L2/L3 distinct
-// ---------------------------------------------------------------------------
 
 #[test]
 fn coverage_and_slack_exact_rational_no_aliasing() {
@@ -481,9 +464,7 @@ fn coverage_and_slack_exact_rational_no_aliasing() {
     assert_eq!(c_row.l3_resident, Some(true), "L3 residency stays distinct");
 }
 
-// ---------------------------------------------------------------------------
 // Warm-swap: deterministic child, preserved old root, prewarm ledger
-// ---------------------------------------------------------------------------
 
 #[test]
 fn warm_swap_report_deterministic_child_and_prewarm_ledger() {
@@ -581,15 +562,10 @@ fn warm_swap_report_deterministic_child_and_prewarm_ledger() {
         "unselected work is ledged"
     );
     assert_eq!(report.prewarm_rows.len(), 2);
-    assert_eq!(
-        report.schema_version,
-        "zerostack.project_image.shadow.q99.v1"
-    );
+    assert_eq!(report.schema_version, "zerostack.project_image.shadow.q99");
 }
 
-// ---------------------------------------------------------------------------
 // Warm-swap validation: exactly one selected branch matching the child root
-// ---------------------------------------------------------------------------
 
 #[test]
 fn warm_swap_rejects_invalid_prewarm_rows() {
@@ -661,9 +637,7 @@ fn warm_swap_rejects_invalid_prewarm_rows() {
     assert!(err.to_string().contains("is not the child root"), "{err}");
 }
 
-// ---------------------------------------------------------------------------
 // Input validation and determinism
-// ---------------------------------------------------------------------------
 
 #[test]
 fn action_guard_rejects_invalid_actions() {

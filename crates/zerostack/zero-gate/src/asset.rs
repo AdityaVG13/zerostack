@@ -1,38 +1,4 @@
-//! Verified capability subsystem (ZS-CAP-001..006, ZS-METRIC-009/010).
-//!
-//! Capabilities are learned procedural assets accumulated from accepted
-//! episodes. A capability becomes executable only when it carries the
-//! 11-field core (exact scope, rooted preconditions, declared
-//! reads/writes/effects, postcondition and verifier, successor-safety
-//! obligation, fallback/rollback, dependency pins, freshness policy) and has
-//! passed shadow-mode promotion behind the same baseline firewall. This is
-//! deliberately last in the program: capability authority depends on every
-//! preceding truth and authority layer.
-//!
-//! Fail-closed laws:
-//! - CAP-001: a captured asset is NEVER authoritative until separately
-//!   proved. No constructor or transition produces `Promoted` without
-//!   passing through `Shadow`; `use_asset` returns `Executable` only for
-//!   `Promoted` AND `Matched`.
-//! - CAP-002: scope is exact (operation class AND input shape digest).
-//!   Cross-project tasks never match (leakage kill condition); a changed or
-//!   missing pinned dependency invalidates the asset and demands revocation.
-//! - CAP-003: promotion is decided only by shadow trials with complete cost
-//!   accounting (capture + maintenance + trial costs); any protected
-//!   regression (negative transfer) or miss denies promotion. A `Promoted`
-//!   asset still runs behind the baseline firewall and the verifier gate;
-//!   promotion never grants execution authority by itself.
-//! - CAP-004: failure syndromes are append-only (no delete API); a syndrome
-//!   recorded for a `Promoted` (or `Shadow`) asset forces demotion.
-//! - CAP-005: an expired or revoked asset can only ADD cost, never worsen a
-//!   protected result. There is no execution path for a non-`Promoted`
-//!   asset: `use_asset` returns `BaselineRequired` with the standing cost.
-//! - METRIC-009: the lifetime-value ledger retires negative-value assets
-//!   automatically once observed across a threshold of epochs.
-//! - METRIC-010: per-epoch benefit is clamped to the certified
-//!   unavoidable-work lower bound `(actual baseline cost - certified
-//!   minimum)`; a claim above the bound fails closed and records the
-//!   clamped benefit.
+//! Verified procedural capabilities accumulated from accepted episodes.
 
 use std::{error::Error, fmt};
 
@@ -54,15 +20,9 @@ pub enum AssetError {
     InvalidSyndrome(String),
     InvalidLedger(String),
     InvalidRevocation(String),
-    InvalidTransition {
-        from: AssetState,
-        to: AssetState,
-    },
+    InvalidTransition { from: AssetState, to: AssetState },
     ScopeMismatch(String),
-    ClampedBenefit {
-        claimed: u64,
-        allowed: u64,
-    },
+    ClampedBenefit { claimed: u64, allowed: u64 },
 }
 
 impl fmt::Display for AssetError {
@@ -80,7 +40,9 @@ impl fmt::Display for AssetError {
                 write!(formatter, "invalid freshness policy: {detail}")
             }
             Self::InvalidTrial(detail) => write!(formatter, "invalid shadow trial: {detail}"),
-            Self::InvalidSyndrome(detail) => write!(formatter, "invalid failure syndrome: {detail}"),
+            Self::InvalidSyndrome(detail) => {
+                write!(formatter, "invalid failure syndrome: {detail}")
+            }
             Self::InvalidLedger(detail) => write!(formatter, "invalid asset ledger: {detail}"),
             Self::InvalidRevocation(detail) => write!(formatter, "invalid revocation: {detail}"),
             Self::InvalidTransition { from, to } => {
@@ -107,7 +69,7 @@ fn is_lower_hex_64(value: &str) -> bool {
 }
 
 /// Exact task-scope descriptor. Scope equality is exact: operation class AND
-/// input shape digest must both match (CAP-002).
+/// input shape digest must both match.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Scope {
@@ -243,7 +205,7 @@ impl FreshnessPolicy {
     }
 }
 
-/// Capture and maintenance cost (complete cost accounting, CAP-003).
+/// Complete capture and per-epoch maintenance cost.
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Cost {
@@ -252,7 +214,7 @@ pub struct Cost {
 }
 
 /// Lifecycle state. `Captured` is NEVER authoritative; only `Promoted`
-/// assets may execute, and only after passing through `Shadow` (CAP-001).
+/// assets may execute, and only after passing through `Shadow`.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AssetState {
@@ -266,8 +228,7 @@ pub enum AssetState {
 
 /// The allowed state machine. There is NO path back to `Promoted` except via
 /// `Shadow`; `Revoked` is reachable from any state (revocation trigger), and
-/// `Demoted`/`Revoked`/`Expired` have no outgoing edges toward `Shadow` or
-/// `Promoted`.
+/// `Demoted`/`Revoked`/`Expired` have no outgoing edges toward `Shadow` or `Promoted`.
 pub fn allowed_asset_transition(from: AssetState, to: AssetState) -> bool {
     use AssetState::*;
     match (from, to) {
@@ -279,10 +240,9 @@ pub fn allowed_asset_transition(from: AssetState, to: AssetState) -> bool {
     }
 }
 
-/// A verified capability asset: the 11-field core (scope, preconditions,
-/// reads, writes, effects, postconditions, verifier, successor relation,
-/// rollback, dependencies, freshness) plus identity, capture cost, lifecycle
-/// state, and revocation reason.
+/// A verified capability asset: the 11-field core (scope, preconditions, reads,
+/// writes, effects, postconditions, verifier, successor relation, rollback,
+/// dependencies, freshness) plus identity, capture cost, lifecycle state, and revocation reason.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct CapabilityAsset {
@@ -434,7 +394,7 @@ impl CapabilityAsset {
     }
 
     /// Shadow -> Promoted, only after a passing promotion decision. Still
-    /// runs behind the baseline firewall and verifier gate (CAP-003).
+    /// runs behind the baseline firewall and verifier gate.
     pub fn promote(&mut self) -> Result<(), AssetError> {
         self.transition(AssetState::Promoted)
     }
@@ -449,7 +409,7 @@ impl CapabilityAsset {
         self.transition(AssetState::Expired)
     }
 
-    /// Any state -> Revoked on a revocation trigger (CAP-005). The trigger
+    /// Any state -> Revoked on a revocation trigger. The trigger
     /// and reason are recorded on the asset.
     pub fn revoke_for(
         &mut self,
@@ -468,7 +428,7 @@ impl CapabilityAsset {
     }
 }
 
-/// Revocation triggers (CAP-005): dependency, contract, verifier, or epoch
+/// Revocation triggers: dependency, contract, verifier, or epoch
 /// change.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum RevocationTrigger {
@@ -489,7 +449,7 @@ impl fmt::Display for RevocationTrigger {
     }
 }
 
-/// Task matching result (CAP-002). Only `Matched` may execute, and only for
+/// Task matching result. Only `Matched` may execute, and only for
 /// a `Promoted` asset.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum MatchOutcome {
@@ -521,7 +481,11 @@ pub fn match_task(
             .find(|(name, _)| name == &pin.name);
         match current {
             Some((_, digest)) if digest == &pin.digest_hex => {}
-            _ => return MatchOutcome::StaleDependency { name: pin.name.clone() },
+            _ => {
+                return MatchOutcome::StaleDependency {
+                    name: pin.name.clone(),
+                };
+            }
         }
     }
     if asset
@@ -536,7 +500,6 @@ pub fn match_task(
 }
 
 /// One shadow trial comparing the baseline outcome to the shadow outcome
-/// (CAP-003).
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ShadowTrial {
@@ -590,7 +553,7 @@ impl ShadowTrial {
     }
 }
 
-/// Promotion report with COMPLETE cost accounting (CAP-003): capture cost,
+/// Promotion report with COMPLETE cost accounting: capture cost,
 /// maintenance so far, and all trial costs.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -608,14 +571,18 @@ pub struct PromotionReport {
 /// verifier gate.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum PromotionDecision {
-    Promote { report: PromotionReport },
-    Deny { report: PromotionReport, reasons: Vec<String> },
+    Promote {
+        report: PromotionReport,
+    },
+    Deny {
+        report: PromotionReport,
+        reasons: Vec<String>,
+    },
 }
 
-/// Shadow-mode promotion (CAP-003). Denies on: no trials, insufficient
-/// trials, any protected regression (negative transfer -- demotion demanded),
-/// or any miss. One shadow trial counts as one observed epoch for
-/// maintenance accounting.
+/// Shadow-mode promotion. Denies on: no trials, insufficient trials,
+/// any protected regression (negative transfer -- demotion demanded), or any
+/// miss. One shadow trial counts as one observed epoch for maintenance accounting.
 pub fn evaluate_promotion(
     asset: &CapabilityAsset,
     trials: &[ShadowTrial],
@@ -630,7 +597,10 @@ pub fn evaluate_promotion(
         .iter()
         .filter(|trial| trial.baseline_outcome_digest_hex != trial.shadow_outcome_digest_hex)
         .count() as u64;
-    let regressions = observed.iter().filter(|trial| trial.protected_regression).count() as u64;
+    let regressions = observed
+        .iter()
+        .filter(|trial| trial.protected_regression)
+        .count() as u64;
     let strict_rescues = observed.iter().filter(|trial| trial.strict_rescue).count() as u64;
     let trial_cost: u64 = observed.iter().map(|trial| trial.cost_units).sum();
     let maintenance = asset
@@ -655,7 +625,9 @@ pub fn evaluate_promotion(
     if trials_observed == 0 {
         reasons.push("no_shadow_trials".into());
     } else if trials_observed < min_trials {
-        reasons.push(format!("insufficient_trials:{trials_observed}:{min_trials}"));
+        reasons.push(format!(
+            "insufficient_trials:{trials_observed}:{min_trials}"
+        ));
     }
     if regressions > 0 {
         reasons.push(format!(
@@ -673,7 +645,7 @@ pub fn evaluate_promotion(
     }
 }
 
-/// Use outcome (CAP-001/005). `Executable` exists ONLY for `Promoted` AND
+/// Use outcome (005). `Executable` exists ONLY for `Promoted` AND
 /// `Matched`; every other combination adds cost and returns to baseline,
 /// never worsening a protected result.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -684,9 +656,8 @@ pub enum UseOutcome {
 
 impl CapabilityAsset {
     /// The ONLY execution admission point. A non-`Promoted` asset (Captured,
-    /// Shadow, Demoted, Revoked, Expired) always adds its standing cost and
-    /// falls back to the baseline; it can never execute and can never worsen
-    /// a protected result.
+    /// Shadow, Demoted, Revoked, Expired) always adds its standing cost and falls
+    /// back to the baseline; it can never execute and can never worsen a protected result.
     pub fn use_asset(&self, outcome: &MatchOutcome) -> UseOutcome {
         if self.state == AssetState::Promoted && *outcome == MatchOutcome::Matched {
             UseOutcome::Executable
@@ -700,7 +671,7 @@ impl CapabilityAsset {
     }
 }
 
-/// One recorded failure syndrome (CAP-004).
+/// One recorded failure syndrome.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Syndrome {
@@ -731,7 +702,8 @@ impl Syndrome {
     }
 
     pub fn validate(&self) -> Result<(), AssetError> {
-        if self.syndrome_id.is_empty() || self.asset_id.is_empty() || self.failure_class.is_empty() {
+        if self.syndrome_id.is_empty() || self.asset_id.is_empty() || self.failure_class.is_empty()
+        {
             return Err(AssetError::InvalidSyndrome(
                 "syndrome_id, asset_id, and failure_class must be nonempty".into(),
             ));
@@ -740,7 +712,7 @@ impl Syndrome {
     }
 }
 
-/// Append-only failure syndrome store (CAP-004). There is no delete API.
+/// Append-only failure syndrome store. There is no delete API.
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct SyndromeStore {
@@ -781,7 +753,7 @@ impl SyndromeStore {
     }
 
     /// Record a syndrome and auto-demote the asset when it is `Promoted` or
-    /// `Shadow` (CAP-004: a syndrome on a promoted asset forces demotion).
+    /// `Shadow` (a syndrome on a promoted asset forces demotion).
     pub fn record_for(
         &mut self,
         syndrome: Syndrome,
@@ -795,7 +767,7 @@ impl SyndromeStore {
     }
 }
 
-/// Certified unavoidable-work lower bound (METRIC-010): an epoch's benefit
+/// Certified unavoidable-work lower bound: an epoch's benefit
 /// may never exceed `actual baseline cost - certified minimum`.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -845,7 +817,7 @@ pub struct LedgerEntry {
     pub capture_units: u64,
 }
 
-/// Capability asset lifetime-value ledger (METRIC-009/010).
+/// Capability asset lifetime-value ledger (010).
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct AssetValueLedger {
@@ -854,7 +826,9 @@ pub struct AssetValueLedger {
 
 impl AssetValueLedger {
     pub fn new() -> Self {
-        Self { entries: Vec::new() }
+        Self {
+            entries: Vec::new(),
+        }
     }
 
     /// Record the one-time capture cost at the capture epoch.
@@ -869,11 +843,9 @@ impl AssetValueLedger {
         Ok(())
     }
 
-    /// Record one epoch's benefit, clamped to the certified unavoidable-work
-    /// lower bound (METRIC-010). A claim above `actual baseline cost -
-    /// certified minimum` fails closed with `ClampedBenefit` and the clamped
-    /// benefit is what the ledger records. The certified bound's scope must
-    /// equal the asset's scope.
+    /// Record one epoch's benefit, clamped to the certified unavoidable-work lower bound.
+    /// A claim above `actual baseline cost certified minimum` fails closed with `ClampedBenefit` and
+    /// the clamped benefit is what the ledger records.
     pub fn record_benefit(
         &mut self,
         asset: &CapabilityAsset,
@@ -921,26 +893,28 @@ impl AssetValueLedger {
 
     /// Assets whose cumulative lifetime value is negative after being
     /// observed across at least `threshold_epochs` distinct epochs
-    /// (METRIC-009). Sorted for determinism.
+    /// . Sorted for determinism.
     pub fn retire_negative(&self, threshold_epochs: u64) -> Vec<String> {
-        let mut per_asset: std::collections::BTreeMap<String, (std::collections::BTreeSet<u64>, i128)> =
-            std::collections::BTreeMap::new();
+        let mut per_asset: std::collections::BTreeMap<
+            String,
+            (std::collections::BTreeSet<u64>, i128),
+        > = std::collections::BTreeMap::new();
         for entry in &self.entries {
             let slot = per_asset.entry(entry.asset_id.clone()).or_default();
             slot.0.insert(entry.epoch);
-            slot.1 += entry.benefit_units as i128 - entry.maintenance_units as i128 - entry.capture_units as i128;
+            slot.1 += entry.benefit_units as i128
+                - entry.maintenance_units as i128
+                - entry.capture_units as i128;
         }
         per_asset
             .into_iter()
-            .filter(|(_, (epochs, value))| {
-                epochs.len() as u64 >= threshold_epochs && *value < 0
-            })
+            .filter(|(_, (epochs, value))| epochs.len() as u64 >= threshold_epochs && *value < 0)
             .map(|(asset_id, _)| asset_id)
             .collect()
     }
 
     /// Apply retirement: transition `Shadow`/`Promoted` assets with negative
-    /// lifetime value to `Demoted` automatically (METRIC-009). Returns the
+    /// lifetime value to `Demoted` automatically. Returns the
     /// ids actually transitioned.
     pub fn apply_retirement(
         &mut self,
@@ -961,13 +935,8 @@ impl AssetValueLedger {
     }
 }
 
-/// Hub-side CAS read gate (ZS-SEC-005): a verified capability asset names the
-/// exact content it authorizes, and reads through the gate are refused
-/// fail-closed BEFORE any object lookup. Cross-project reads (guessed roots),
-/// content the asset does not authorize, non-`Promoted` assets, and stale
-/// capabilities are all refused with `PolicyDenied` and return no bytes.
-/// This is the runtime wiring that promotes the W7 shadow-mode capability
-/// contract into the zero-store read path.
+/// Hub-side CAS read gate: a verified capability asset names the exact content it
+/// authorizes, and reads through the gate are refused fail-closed BEFORE any object lookup.
 #[derive(Clone, Debug)]
 pub struct CasCapabilityGate {
     asset: CapabilityAsset,
@@ -1009,7 +978,7 @@ impl CasCapabilityGate {
 
 impl zero_store::CasReadGate for CasCapabilityGate {
     fn authorize_read(&self, sha256: &str) -> Result<(), zero_store::CasError> {
-        // Project equality first (CAP-002 leakage kill): a caller may guess
+        // Project equality first (leakage kill): a caller may guess
         // another project's root hash, but the gate refuses before lookup.
         if self.caller_project_id != self.asset.project_id {
             return Err(zero_store::CasError::PolicyDenied(format!(
@@ -1017,7 +986,7 @@ impl zero_store::CasReadGate for CasCapabilityGate {
                 self.caller_project_id, self.asset.project_id
             )));
         }
-        // CAP-001: only a Promoted asset is authoritative for reads.
+        // Only a promoted asset is authoritative for reads.
         if self.asset.state != AssetState::Promoted {
             return Err(zero_store::CasError::PolicyDenied(format!(
                 "capability gate: asset state {:?} is not promoted",
@@ -1052,4 +1021,3 @@ impl zero_store::CasReadGate for CasCapabilityGate {
         Ok(())
     }
 }
-

@@ -1,11 +1,6 @@
 #![allow(unsafe_code)]
-//! Canonical BLAKE3 CAS for ZeroKernel.
-//!
-//! The only unsafe operation is creation of a read-only memory map. Invariant:
-//! the mapped file is a verified regular immutable CAS object, opened read-only,
-//! bounded before mapping, never mutated by this API, and re-hashed after the
-//! map is established. Publication replaces whole paths atomically, so an
-//! existing inode backing a map is never modified in place.
+//! Canonical BLAKE3 CAS for ZeroKernel. The only unsafe operation is creation of a read-only memory
+//! map.
 
 use std::collections::BTreeMap;
 use std::fs::{self, File};

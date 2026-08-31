@@ -1,8 +1,9 @@
 [package]
 autobenches = false
 autotests = false
+autobins = false
 name = "zero-cert"
-version = "0.1.0"
+version.workspace = true
 edition.workspace = true
 license.workspace = true
 description = "Pure verification of proof-carrying RACC evidence certificates"
@@ -10,8 +11,8 @@ description = "Pure verification of proof-carrying RACC evidence certificates"
 [dependencies]
 serde = { workspace = true }
 serde_json = { workspace = true }
-zero-abi = { path = "../zero-abi" }
-zero-ref = { path = "../zero-ref" }
+zero-abi = { workspace = true }
+zero-ref = { workspace = true }
 
 [lints]
 workspace = true

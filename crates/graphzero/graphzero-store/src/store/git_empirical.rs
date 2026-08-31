@@ -1,4 +1,4 @@
-//! Tier-C git-empirical edges: co-change, churn/hot-set (P3.2).
+//! Tier-C Git evidence for co-change, churn, and hot sets.
 //! Read-only git history; evidence spans cite commit-message bytes in the blob store.
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -54,12 +54,12 @@ pub struct TierCEdgeDraft {
     pub confidence: u8,
 }
 
-/// Open repo read-only and walk commits reachable from HEAD (FR-001).
+/// Open repo read-only and walk commits reachable from HEAD.
 pub fn open_readonly(repo_root: &Path) -> Result<Repository> {
     Repository::discover(repo_root).context("git discover")
 }
 
-/// HEAD path -> content_sha256 (FR-002), same filters as indexer.
+/// HEAD path -> content_sha256, same filters as indexer.
 pub fn path_to_content_hash(repo_root: &Path) -> Result<BTreeMap<String, String>> {
     super::git::head_tree_content_hashes(repo_root)
 }
@@ -153,7 +153,7 @@ fn replay_commits_detailed(repo_root: &Path, max_commits: usize) -> Result<Vec<R
     Ok(out)
 }
 
-/// Replay commits (newest first), cap at `max_commits` (FR-003).
+/// Replay commits (newest first), cap at `max_commits`.
 pub fn replay_commits(repo_root: &Path, max_commits: usize) -> Result<Vec<(String, Vec<String>)>> {
     Ok(replay_commits_detailed(repo_root, max_commits)?
         .into_iter()
@@ -185,7 +185,7 @@ fn store_commit_evidence(
     Ok((hash, 0, end))
 }
 
-/// Mine co-change pairs with min support; emit undirected pair once (FR-004, FR-005).
+/// Mine co-change pairs with min support; emit undirected pair once.
 fn accumulate_cochange_pairs(replay: &[(String, Vec<String>)]) -> CochangePairMaps {
     let mut pair_support: BTreeMap<(String, String), usize> = BTreeMap::new();
     let mut pair_commit: BTreeMap<(String, String), String> = BTreeMap::new();
@@ -248,7 +248,7 @@ pub fn mine_cochange_edges(
     tier_c_drafts_from_pairs(&repo, blob_store, pair_support, &pair_commit, min_support)
 }
 
-/// Churn scores from replay (FR-006).
+/// Churn scores from replay.
 pub fn compute_churn(replay: &[(String, Vec<String>)]) -> BTreeMap<String, f64> {
     let mut scores: BTreeMap<String, f64> = BTreeMap::new();
     for (_, paths) in replay {
@@ -378,7 +378,7 @@ fn history_complete_after_replay(
     Ok(commits_processed >= total_commits.min(max_commits))
 }
 
-/// Append tier-C edges into `IndexData` and mark tier C coverage on touched blobs (FR-012).
+/// Append tier-C edges into `IndexData` and mark tier C coverage on touched blobs.
 pub fn append_tier_c_to_index(
     data: &mut IndexData,
     store_root: &Path,
@@ -416,7 +416,7 @@ pub fn append_tier_c_to_index(
     Ok(state)
 }
 
-/// Incremental: apply only HEAD commit churn delta (FR-009).
+/// Incremental: apply only HEAD commit churn delta.
 pub fn apply_latest_commit(
     store_root: &Path,
     repo_root: &Path,
@@ -440,7 +440,7 @@ pub fn apply_latest_commit(
     Ok((state, start.elapsed()))
 }
 
-/// Blame-linked edge when blame hits the def's start line (FR-008).
+/// Blame-linked edge when blame hits the def's start line.
 pub fn blame_link_for_def(
     repo_root: &Path,
     store_root: &Path,

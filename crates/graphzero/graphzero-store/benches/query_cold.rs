@@ -1,4 +1,4 @@
-//! FR-009 / NFR-002: cold query path benchmark (open + freshness + query).
+//! Cold query-path benchmark covering open, freshness, and query.
 //! Budget: p99 < 10ms.
 
 mod common;

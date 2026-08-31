@@ -1,50 +1,4 @@
-//! V7 shadow checkers over the ETNF certificate ABI (bead `zerostack-3cdn`,
-//! program `zerostack-vcqk`).
-//!
-//! Three total, finite, versioned checkers consume untrusted bytes and emit a
-//! [`V7ShadowReport`] over the trivalent certificate ABI from [`crate::etnf`]:
-//!
-//! | Checker | Theorem | Claim checked |
-//! |---|---|---|
-//! | [`check_certificate_chain`] | W7-T03 Certificate Composition | adjacent certificate-chain binding |
-//! | [`check_causal_closure`] | W7-T11 Executable Causal Closure | demanded output is in the declared closure |
-//! | [`check_savings_provenance`] | W7-T13 Savings Provenance | baseline transcript segments map 1:1 to a savings category |
-//!
-//! # Totality and finiteness
-//!
-//! Every checker is total on every byte string: no `unwrap`, no `expect`,
-//! no unchecked indexing, no slicing, no recursion, and no loop over input
-//! that has not first been bounded. All
-//! inputs are capped by the `VCQK_MAX_*` bounds; a document that exceeds a
-//! bound yields `Unknown` ("input_exceeds_checker_bounds") because the finite
-//! checker version cannot complete it -- an oversized declaration is missing
-//! evidence, never a falsification. Parse failures are likewise `Unknown`
-//! ("unparseable_input" / "unparseable_link"): unreadable bytes are missing
-//! evidence. Only *parsed* declarations that positively contradict the claim
-//! yield `Unsafe`. Empty inputs are `Unknown` (fail-closed vacuity law:
-//! no premises, no `Safe`).
-//!
-//! # Authority law
-//!
-//! Checkers issue a [`crate::etnf::ShadowCertificate`] only for a `Safe`
-//! verdict, exactly as the ABI requires; `Unsafe`/`Unknown` cannot serialize
-//! authority. The returned report is shadow evidence only: it is not accepted
-//! by any write/permit gate, never alters runtime routing or permits, and
-//! always names the frozen raw baseline as the explicit fallback, so the
-//! baseline remains available. The resource ledger records every byte read,
-//! item checked, and check run; an `Unknown` verdict cannot close the ledger
-//! (`complete: false`).
-//!
-//! # Kill metrics
-//!
-//! [`KillMetrics`] accumulates the named kills: false authority (a `Safe`
-//! certificate root later refuted), non-converging counterexamples (the same
-//! counterexample root re-issued beyond [`VCQK_KILL_NONCONVERGENCE_MAX_ISSUES`]
-//! times), and savings overhead (consumed units exceed the claimed saving).
-//! Learning/refinement has **no publish authority**: there is no API to raise
-//! [`KillMetrics::learning_publications`] (always zero), no constructor
-//! accepts refinement output as a premise, and refinement evidence is
-//! observable only.
+//! ETNF certificate checkers.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -53,40 +7,38 @@ use serde_json::Value;
 
 use crate::digest::sha256_hex;
 use crate::etnf::{
-    CheckerIdentity, ETNF_MAX_ID_BYTES, EtnfError, EvidenceItem, ExplicitFallback, FallbackKind,
-    Falsifier, FiniteWitness, ProposedAuthorityTransition, ProposedTransitionKind, ResourceLedger,
-    RootedEvidence, V7ShadowReport,
+    CheckerIdentity, ETNF_MAX_ID_BYTES, EtnfError, EtnfShadowReport, EvidenceItem,
+    ExplicitFallback, FallbackKind, Falsifier, FiniteWitness, ProposedAuthorityTransition,
+    ProposedTransitionKind, ResourceLedger, RootedEvidence,
 };
 use crate::verdict::SafetyVerdict;
 
-// ---------------------------------------------------------------------------
 // Identity, contracts, and finiteness bounds
-// ---------------------------------------------------------------------------
 
-/// Checker identity of the certificate-chain checker (W7-T03).
-pub const VCQK_CHECKER_CHAIN_ID: &str = "w7/chain_v1";
-/// Checker identity of the causal-closure checker (W7-T11).
-pub const VCQK_CHECKER_CAUSAL_ID: &str = "w7/causal_v1";
-/// Checker identity of the savings-provenance checker (W7-T13).
-pub const VCQK_CHECKER_SAVINGS_ID: &str = "w7/savings_v1";
+/// Checker identity of the certificate-chain checker.
+pub const VCQK_CHECKER_CHAIN_ID: &str = "etnf/chain";
+/// Checker identity of the causal-closure checker.
+pub const VCQK_CHECKER_CAUSAL_ID: &str = "etnf/causal";
+/// Checker identity of the savings-provenance checker.
+pub const VCQK_CHECKER_SAVINGS_ID: &str = "etnf/savings";
 /// Version of every checker in this module. The version is bound into each
 /// certificate root, so a checker upgrade invalidates prior shadow
 /// certificates.
 pub const VCQK_CHECKER_VERSION: &str = "1.0.0";
 
 /// Shadow scope of the certificate-chain check.
-pub const VCQK_SCOPE_CHAIN: &str = "scope:v7/certificate-chain";
+pub const VCQK_SCOPE_CHAIN: &str = "scope:etnf/certificate-chain";
 /// Shadow scope of the causal-closure check.
-pub const VCQK_SCOPE_CAUSAL: &str = "scope:v7/causal-closure";
+pub const VCQK_SCOPE_CAUSAL: &str = "scope:etnf/causal-closure";
 /// Shadow scope of the savings-provenance check.
-pub const VCQK_SCOPE_SAVINGS: &str = "scope:v7/savings-provenance";
+pub const VCQK_SCOPE_SAVINGS: &str = "scope:etnf/savings-provenance";
 
 /// Shadow contract of the certificate-chain check.
-pub const VCQK_CONTRACT_CHAIN: &str = "zero.contract/v7-chain";
+pub const VCQK_CONTRACT_CHAIN: &str = "zero.contract/etnf-chain";
 /// Shadow contract of the causal-closure check.
-pub const VCQK_CONTRACT_CAUSAL: &str = "zero.contract/v7-causal-closure";
+pub const VCQK_CONTRACT_CAUSAL: &str = "zero.contract/etnf-causal-closure";
 /// Shadow contract of the savings-provenance check.
-pub const VCQK_CONTRACT_SAVINGS: &str = "zero.contract/v7-savings-provenance";
+pub const VCQK_CONTRACT_SAVINGS: &str = "zero.contract/etnf-savings-provenance";
 
 /// Maximum certificate-chain links per check (one evidence item per link,
 /// bounded by `ETNF_MAX_EVIDENCE_ITEMS`).
@@ -107,7 +59,7 @@ pub const VCQK_MAX_SAVINGS_ENTRIES: usize = 256;
 pub const VCQK_MAX_IDENTIFIER_BYTES: usize = ETNF_MAX_ID_BYTES;
 
 /// A counterexample root re-issued more than this many times is a
-/// non-converging counterexample kill (W7-T10).
+/// non-converging counterexample kill.
 pub const VCQK_KILL_NONCONVERGENCE_MAX_ISSUES: u64 = 3;
 /// Maximum certificate roots the kill tracker remembers as `Safe`.
 pub const VCQK_KILL_MAX_TRACKED_ROOTS: usize = 4096;
@@ -117,9 +69,7 @@ pub const VCQK_KILL_MAX_TRACKED_COUNTEREXAMPLES: usize = 4096;
 /// observable, never a certificate source.
 pub const VCQK_LEARNING_REFINEMENT_PUBLISH_AUTHORITY: bool = false;
 
-// ---------------------------------------------------------------------------
 // Input documents (bounded, deny_unknown_fields)
-// ---------------------------------------------------------------------------
 
 /// One declared causal-closure node. `kind` is observational only; it never
 /// influences the verdict.
@@ -138,10 +88,9 @@ pub struct ClosureEdge {
     pub to: String,
 }
 
-/// Bounded causal-closure declaration (W7-T11 checker input).
-///
-/// Demanded outputs are opaque identifiers; the checker derives digest
-/// evidence from them, so no hex requirement is imposed on the wire.
+/// Bounded causal-closure declaration (checker input). Demanded outputs are opaque
+/// identifiers; the checker derives digest evidence from them, so no hex requirement is imposed on
+/// the wire.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct CausalClosureDocument {
@@ -166,7 +115,7 @@ pub struct SavingsEntry {
     pub category: String,
 }
 
-/// Bounded savings-provenance declaration (W7-T13 checker input).
+/// Bounded savings-provenance declaration (checker input).
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct SavingsProvenanceDocument {
@@ -174,19 +123,19 @@ pub struct SavingsProvenanceDocument {
     pub savings: Vec<SavingsEntry>,
 }
 
-/// The six trace-auditable savings classifications (W7-T13).
+/// The six trace-auditable savings classifications.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SavingsCategory {
     /// The cached baseline result was reused byte-for-byte.
     Reused,
-    /// Work ran privately until a preauthorized policy escaped (family 1).
+    /// Work ran privately until a preauthorized policy escaped.
     PrivateExecution,
     /// The segment was proved irrelevant to the demanded outputs.
     ProvedIrrelevant,
-    /// A verifier collapsed several segments into one decision (family 2).
+    /// A verifier collapsed several segments into one decision.
     VerifierCollapsed,
-    /// The observation was preauthorized by policy (family 1, W7-T04).
+    /// The observation was preauthorized by policy.
     PolicyPreauthorized,
     /// No saving was claimed; the baseline segment was preserved.
     BaselinePreserved,
@@ -204,7 +153,7 @@ impl SavingsCategory {
     ];
 
     /// Total wire-name classifier: `None` for any undeclared category, which
-    /// the checker treats as a positive falsification (W7-T13-f1).
+    /// the checker treats as a positive falsification.
     pub fn classify(value: &str) -> Option<SavingsCategory> {
         match value {
             "reused" => Some(SavingsCategory::Reused),
@@ -230,19 +179,7 @@ impl SavingsCategory {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Kill metrics
-// ---------------------------------------------------------------------------
-
-/// Accumulated kill metrics for the V7 shadow checkers.
-///
-/// Kills are the sharp conditions that would end a deployable theorem:
-/// false authority (a `Safe` certificate whose root is later refuted),
-/// non-converging counterexamples (W7-T10 refinement that never converges),
-/// and savings overhead (the check consumed more than the claimed saving).
-/// All internal tracking is bounded; beyond capacity, new observations are
-/// counted as untracked instead of growing without limit. Every method is
-/// total and deterministic.
+/// Accumulated checker outcomes and counterexamples.
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct KillMetrics {
@@ -274,7 +211,7 @@ impl KillMetrics {
 
     /// Observe one shadow report. `Safe` reports have their certificate root
     /// tracked so a later refutation can be attributed as false authority.
-    pub fn observe_report(&mut self, report: &V7ShadowReport) {
+    pub fn observe_report(&mut self, report: &EtnfShadowReport) {
         match &report.verdict {
             SafetyVerdict::Safe => {
                 self.safe_reports += 1;
@@ -300,10 +237,9 @@ impl KillMetrics {
         }
     }
 
-    /// Record one issue of a counterexample root (W7-T10 refinement loop).
-    /// The same root issued more than [`VCQK_KILL_NONCONVERGENCE_MAX_ISSUES`]
-    /// times is counted once as a non-converging counterexample; further
-    /// issues are reissues, and reissue events are counted separately.
+    /// Record one a counterexample root (refinement loop). The same root issued more
+    /// than [`VCQK_KILL_NONCONVERGENCE_MAX_ISSUES`] times is counted once as a non-converging
+    /// counterexample; further issues are reissues, and reissue events are counted separately.
     pub fn observe_counterexample(&mut self, counterexample_root: &str) {
         let tracked = !self.counted_nonconverging.contains(counterexample_root)
             && self.counterexample_issues.len() < VCQK_KILL_MAX_TRACKED_COUNTEREXAMPLES;
@@ -391,9 +327,7 @@ impl KillMetrics {
     }
 }
 
-// ---------------------------------------------------------------------------
 // Shared helpers (all total; constants cannot fail construction)
-// ---------------------------------------------------------------------------
 
 fn checker(id: &'static str) -> Result<CheckerIdentity, EtnfError> {
     CheckerIdentity::new(id, VCQK_CHECKER_VERSION)
@@ -406,10 +340,9 @@ fn fallback() -> Result<ExplicitFallback, EtnfError> {
     )
 }
 
-/// Equal-or-descendant path chaining used for adjacent scopes and contracts
-/// (W7-T03): `parent` chains to `child` when `child == parent` or `child` is
-/// `parent` followed by `/`. Total on all strings; the boundary byte is read
-/// through `get`, never by indexing.
+/// Equal-or-descendant path chaining used for adjacent scopes and contracts:
+/// `parent` chains to `child` when `child == parent` or `child` is `parent` followed by
+/// `/`. Total on all strings; the boundary byte is read through `get`, never by indexing.
 fn chains_from(parent: &str, child: &str) -> bool {
     child == parent
         || (child.len() > parent.len()
@@ -424,23 +357,23 @@ fn identifier_within_bounds(value: &str) -> bool {
 fn chain_falsifiers() -> Result<Vec<Falsifier>, EtnfError> {
     Ok(vec![
         Falsifier::new(
-            "W7-T03-f1",
+            "etnf-chain-f1",
             "adjacent root binding: successor evidence anchor must equal the predecessor certificate root",
         )?,
         Falsifier::new(
-            "W7-T03-f2",
+            "etnf-chain-f2",
             "adjacent scope chaining: successor scope must equal the predecessor scope or extend it as a path descendant",
         )?,
         Falsifier::new(
-            "W7-T03-f3",
+            "etnf-chain-f3",
             "adjacent contract chaining: successor contract must equal the predecessor contract or extend it as a path descendant",
         )?,
         Falsifier::new(
-            "W7-T03-f4",
+            "etnf-chain-f4",
             "checker identity must be identical along the chain: an upgrade invalidates prior certificates",
         )?,
         Falsifier::new(
-            "W7-T03-f5",
+            "etnf-chain-f5",
             "every chain link must be a Safe report carrying a live certificate",
         )?,
     ])
@@ -449,11 +382,11 @@ fn chain_falsifiers() -> Result<Vec<Falsifier>, EtnfError> {
 fn causal_falsifiers() -> Result<Vec<Falsifier>, EtnfError> {
     Ok(vec![
         Falsifier::new(
-            "W7-T11-f1",
+            "etnf-causal-f1",
             "a demanded output is absent from the declared closure",
         )?,
         Falsifier::new(
-            "W7-T11-f2",
+            "etnf-causal-f2",
             "a dependency edge references a node the declared closure does not contain",
         )?,
     ])
@@ -462,19 +395,19 @@ fn causal_falsifiers() -> Result<Vec<Falsifier>, EtnfError> {
 fn savings_falsifiers() -> Result<Vec<Falsifier>, EtnfError> {
     Ok(vec![
         Falsifier::new(
-            "W7-T13-f1",
+            "etnf-savings-f1",
             "a savings entry declares a category outside the six trace-auditable classifications",
         )?,
         Falsifier::new(
-            "W7-T13-f2",
+            "etnf-savings-f2",
             "a baseline segment is mapped by more than one savings entry",
         )?,
         Falsifier::new(
-            "W7-T13-f3",
+            "etnf-savings-f3",
             "a savings entry references a segment that is not in the baseline",
         )?,
         Falsifier::new(
-            "W7-T13-f4",
+            "etnf-savings-f4",
             "the baseline itself repeats a segment identifier",
         )?,
     ])
@@ -491,8 +424,8 @@ fn build_report(
     proposal: Option<ProposedAuthorityTransition>,
     falsifiers: Vec<Falsifier>,
     ledger: ResourceLedger,
-) -> Result<V7ShadowReport, EtnfError> {
-    V7ShadowReport::new(
+) -> Result<EtnfShadowReport, EtnfError> {
+    EtnfShadowReport::new(
         verdict,
         checker,
         scope,
@@ -520,7 +453,7 @@ fn unknown_report(
     falsifiers: Vec<Falsifier>,
     bytes_read: u64,
     items_checked: u64,
-) -> Result<V7ShadowReport, EtnfError> {
+) -> Result<EtnfShadowReport, EtnfError> {
     build_report(
         SafetyVerdict::Unknown {
             reasons: vec![reason.to_string()],
@@ -536,33 +469,11 @@ fn unknown_report(
     )
 }
 
-// ---------------------------------------------------------------------------
-// Checker 1: W7-T03 adjacent certificate-chain binding
-// ---------------------------------------------------------------------------
+// Checker 1: adjacent certificate-chain binding
 
-/// W7-T03 Certificate Composition (shadow): adjacent certificate-chain
-/// binding.
-///
-/// Input bytes are a JSON array of canonical [`V7ShadowReport`] documents.
-/// Each element that parses as a `Safe` report with a live certificate is a
-/// chain link; its certificate root was already recomputed over evidence
-/// root, scope, contract, checker, and resource ledger by the ABI. The
-/// checker then binds every adjacent pair:
-///
-/// 1. **Roots**: the successor evidence anchor equals the predecessor
-///    certificate root.
-/// 2. **Scopes**: the successor scope chains from the predecessor scope
-///    (equal or path-descendant).
-/// 3. **Contracts**: the successor contract chains from the predecessor
-///    contract (equal or path-descendant).
-/// 4. **Checker**: identity and version are identical along the chain.
-///
-/// A parsed element without a certificate positively falsifies the chain
-/// (W7-T03-f5). An element that fails to parse is missing evidence for that
-/// link (`Unknown`, "unparseable_link"). An empty chain, an unparseable
-/// document, or an oversized chain is `Unknown`; one valid link is a
-/// well-formed single-link chain (`Safe`).
-pub fn check_certificate_chain(bytes: &[u8]) -> Result<V7ShadowReport, EtnfError> {
+/// Certificate Composition (shadow): adjacent certificate-chain binding. Input bytes are a
+/// JSON array of canonical [`EtnfShadowReport`] documents.
+pub fn check_certificate_chain(bytes: &[u8]) -> Result<EtnfShadowReport, EtnfError> {
     let bytes_read = bytes.len() as u64;
     let falsifiers = chain_falsifiers()?;
     let anchor = sha256_hex(bytes);
@@ -622,9 +533,9 @@ pub fn check_certificate_chain(bytes: &[u8]) -> Result<V7ShadowReport, EtnfError
     }
 
     let mut verdict = SafetyVerdict::Safe;
-    let mut links: Vec<V7ShadowReport> = Vec::new();
+    let mut links: Vec<EtnfShadowReport> = Vec::new();
     let mut unparseable_count: u64 = 0;
-    let mut previous: Option<V7ShadowReport> = None;
+    let mut previous: Option<EtnfShadowReport> = None;
 
     for (index, element) in elements.iter().enumerate() {
         let canonical = match serde_json::to_vec(element) {
@@ -636,7 +547,7 @@ pub fn check_certificate_chain(bytes: &[u8]) -> Result<V7ShadowReport, EtnfError
                 continue;
             }
         };
-        match V7ShadowReport::from_canonical_bytes(&canonical) {
+        match EtnfShadowReport::from_canonical_bytes(&canonical) {
             Ok(link) if link.verdict.grants_authority() => {
                 if let Some(predecessor) = &previous {
                     verdict = verdict.meet(chain_pair_verdict(predecessor, &link));
@@ -724,7 +635,7 @@ pub fn check_certificate_chain(bytes: &[u8]) -> Result<V7ShadowReport, EtnfError
 
 /// Verdict of one adjacent chain pair. All checks are total; `previous` is
 /// always a validated `Safe` link with a live certificate.
-fn chain_pair_verdict(previous: &V7ShadowReport, next: &V7ShadowReport) -> SafetyVerdict {
+fn chain_pair_verdict(previous: &EtnfShadowReport, next: &EtnfShadowReport) -> SafetyVerdict {
     let mut verdict = SafetyVerdict::Safe;
     let previous_root = previous.certificate.as_ref().map(|cert| cert.root.as_str());
     if !previous_root.is_some_and(|root| next.evidence.anchor == root) {
@@ -750,22 +661,11 @@ fn chain_pair_verdict(previous: &V7ShadowReport, next: &V7ShadowReport) -> Safet
     verdict
 }
 
-// ---------------------------------------------------------------------------
-// Checker 2: W7-T11 demanded-output causal closure
-// ---------------------------------------------------------------------------
+// Checker 2: demanded-output causal closure
 
-/// W7-T11 Executable Causal Closure (shadow): demanded output must be in the
-/// declared closure.
-///
-/// Input bytes are a canonical [`CausalClosureDocument`]. The checker
-/// requires every demanded output to be a declared node and every declared
-/// dependency edge to be closed (both endpoints declared). A demanded output
-/// absent from the declared closure positively falsifies the claim
-/// (W7-T11-f1); an open edge positively falsifies closure well-formedness
-/// (W7-T11-f2). Unparseable documents, oversized declarations, oversized
-/// identifiers, and empty demand lists are `Unknown` (missing evidence or
-/// vacuity; never `Safe`).
-pub fn check_causal_closure(bytes: &[u8]) -> Result<V7ShadowReport, EtnfError> {
+/// Executable Causal Closure (shadow): demanded output must be in the declared closure.
+/// Input bytes are a canonical [`CausalClosureDocument`].
+pub fn check_causal_closure(bytes: &[u8]) -> Result<EtnfShadowReport, EtnfError> {
     let bytes_read = bytes.len() as u64;
     let falsifiers = causal_falsifiers()?;
     let anchor = sha256_hex(bytes);
@@ -930,21 +830,11 @@ pub fn check_causal_closure(bytes: &[u8]) -> Result<V7ShadowReport, EtnfError> {
     )
 }
 
-// ---------------------------------------------------------------------------
-// Checker 3: W7-T13 savings-provenance completeness
-// ---------------------------------------------------------------------------
+// Checker 3: savings-provenance completeness
 
-/// W7-T13 Savings Provenance (shadow): every baseline transcript segment
-/// maps 1:1 to one of the six trace-auditable categories.
-///
-/// Input bytes are a canonical [`SavingsProvenanceDocument`]. A segment
-/// with no savings entry is missing evidence: `Unknown`
-/// ("segment_unmapped:<id>") and no public saving claim. A segment mapped by
-/// more than one entry (W7-T13-f2), an entry for a segment outside the
-/// baseline (W7-T13-f3), a repeated baseline segment (W7-T13-f4), or an
-/// entry with an undeclared category (W7-T13-f1) is `Unsafe`. Unparseable,
-/// oversized, or empty-baseline documents are `Unknown`.
-pub fn check_savings_provenance(bytes: &[u8]) -> Result<V7ShadowReport, EtnfError> {
+/// Savings Provenance (shadow): every baseline transcript segment maps 1:1 to one of the six
+/// trace-auditable categories. Input bytes are a canonical [`SavingsProvenanceDocument`].
+pub fn check_savings_provenance(bytes: &[u8]) -> Result<EtnfShadowReport, EtnfError> {
     let bytes_read = bytes.len() as u64;
     let falsifiers = savings_falsifiers()?;
     let anchor = sha256_hex(bytes);

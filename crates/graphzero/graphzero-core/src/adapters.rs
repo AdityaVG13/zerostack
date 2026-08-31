@@ -1,26 +1,4 @@
-//! Dynamic-domain adapters (RACC row ZS-GRAPH-010).
-//!
-//! The adapter surface for non-static domains (runtime traces, external
-//! systems) feeding the dependency graph through the refinement loop. The
-//! [`DomainAdapter`] contract:
-//!
-//! - the adapter DECLARES its domain and the truth class of the edges it may
-//!   emit: [`TruthClass::RuntimeObserved`] at best -- never a declared/static
-//!   class ([`TruthClass::CompilerExact`], `LspExactScoped`,
-//!   `SyntaxDerived`, `SoundOverapproximation` are rejected by the
-//!   contract);
-//! - it emits [`ObservedInfluence`]-compatible records, ingested via
-//!   [`ingest_adapter`] which bridges to `RefinementLoop::observe` -- the
-//!   loop labels every added edge `RuntimeObserved` and never upgrades it;
-//! - it carries an honesty label ([`DomainAdapter::coverage_label`]): what
-//!   the adapter can and cannot see. A missing or empty label is a contract
-//!   violation, as is a missing domain.
-//!
-//! [`ReplayTraceAdapter`] is the one concrete reference adapter: a
-//! deterministic replay of a recorded `Vec<ObservedInfluence>`, demonstrating
-//! the loop adapter -> observed influences -> refinement loop -> edges labeled
-//! `RuntimeObserved` -> derivability predicate answers that upgrade from
-//! Unknown to Derivable-with-runtime-grade (see its test).
+//! Adapters that feed runtime and external-system observations into dependency refinement.
 
 use std::fmt;
 
@@ -71,12 +49,8 @@ impl fmt::Display for AdapterContractError {
 
 impl std::error::Error for AdapterContractError {}
 
-/// Contract for adapters feeding non-static domains into the dependency graph.
-///
-/// Implementations are deterministic: the same adapter state yields the same
-/// influence record sequence. The contract is enforced by
-/// [`DomainAdapter::validate`], which [`ingest_adapter`] runs before emitting
-/// any influence.
+/// Contract for adapters feeding non-static domains into the dependency graph. Implementations are
+/// deterministic: the same adapter state yields the same influence record sequence.
 pub trait DomainAdapter {
     /// The declared domain this adapter observes (e.g. `runtime-trace:exec:2`).
     /// Never empty.
@@ -125,13 +99,8 @@ pub struct AdapterIngestReport {
     pub already_represented: usize,
 }
 
-/// Bridge: adapter -> `RefinementLoop::observe`.
-///
-/// Enforces the adapter contract first, then feeds every replayed influence
-/// into the refinement loop. Every edge the loop adds is labeled
-/// [`TruthClass::RuntimeObserved`] -- the loop never upgrades an observed
-/// edge to declared -- so the adapter's `max_truth_class` promise is kept by
-/// construction.
+/// Bridge: adapter -> `RefinementLoop::observe`. Enforces the adapter contract first, then feeds
+/// every replayed influence into the refinement loop.
 pub fn ingest_adapter(
     loop_: &mut RefinementLoop,
     adapter: &dyn DomainAdapter,
@@ -154,11 +123,9 @@ pub fn ingest_adapter(
     })
 }
 
-/// Reference adapter: deterministic replay of a recorded influence trace.
-///
-/// Demonstrates the full loop: adapter -> observed influences -> refinement
-/// loop -> edges labeled `RuntimeObserved` -> derivability predicate answers
-/// that upgrade from Unknown to Derivable-with-runtime-grade.
+/// Reference adapter: deterministic replay of a recorded influence trace. Demonstrates the full
+/// loop: adapter -> observed influences -> refinement loop -> edges labeled `RuntimeObserved`
+/// -> derivability predicate answers that upgrade from Unknown to Derivable-with-runtime-grade.
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ReplayTraceAdapter {
     domain: String,

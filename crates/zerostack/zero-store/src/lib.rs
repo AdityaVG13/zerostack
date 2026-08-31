@@ -1,20 +1,8 @@
 #![deny(unsafe_code)]
 
-//! Canonical ZeroRef content-addressed store layout, publish protocol,
-//! store-root resolution, and collection coordination.
-//!
-//! Layout: <store_root>/blobs/sha256/<first-two-hex>/<64-lowercase-hex>,
-//! immutable complete objects only. Engine facts, indexes, provenance, and
-//! mutable metadata never live in this namespace.
-//!
-//! The publish protocol is crash-safe and concurrency-safe: unique sibling
-//! temp file, sync, atomic rename, directory sync. Identical concurrent
-//! writers converge on one valid object; a preexisting object with different
-//! bytes is a loud corruption error and is never overwritten.
-//!
-//! Publishing additionally holds the shared store coordination lock, and
-//! removal requires the exclusive one, so a collector's liveness recheck and
-//! its unlink cannot be split by a concurrent publisher.
+//! Canonical ZeroRef content-addressed store layout, publish protocol, store-root resolution, and
+//! collection coordination. Layout: <store_root>/blobs/sha256/<first-two-hex>/<64-lowercase-hex>,
+//! immutable complete objects only.
 
 mod attempt_journal;
 mod cas;
@@ -32,7 +20,6 @@ mod snapshot;
 mod store_root;
 mod zbf;
 mod zero_cas;
-mod zero_migration;
 
 pub use attempt_journal::{
     ATTEMPT_BINDING_SCHEMA_VERSION, ATTEMPT_JOURNAL_MAX_ENTRIES, ATTEMPT_JOURNAL_MAX_RECORD_BYTES,
@@ -56,9 +43,9 @@ pub use durable_journal::{
     DURABLE_LEASE_JOURNAL_SCHEMA_VERSION, DURABLE_LEASE_SCHEMA_VERSION,
     DURABLE_RECEIPT_SCHEMA_VERSION, DurableJournal, DurableLeaseJournal, FaultPlan, JournalBinding,
     JournalBindingLike, JournalBoundary, JournalError, JournalFailureCode, JournalLeaseBinding,
-    JournalPaths, JournalRecord, JournalState, OwnerDeathReceipt, PublishedRoot, RecoveryOutcome,
-    RecoveryReceipt, RootPublicationReceipt, abort_journal, abort_journal_with_fault,
-    abort_lease_journal, abort_lease_journal_with_fault, commit_journal, commit_journal_with_fault,
+    JournalPaths, JournalState, OwnerDeathReceipt, RecoveryOutcome, RecoveryReceipt,
+    RootPublicationReceipt, abort_journal, abort_journal_with_fault, abort_lease_journal,
+    abort_lease_journal_with_fault, commit_journal, commit_journal_with_fault,
     commit_lease_journal, commit_lease_journal_with_fault, durable_journal_contract,
     initialize_published_root, initialize_published_root_with_fault, prepare_journal,
     prepare_journal_with_fault, prepare_lease_journal, prepare_lease_journal_with_fault,
@@ -78,13 +65,13 @@ pub use gc::{
     GC_MAX_PRODUCER_NAMESPACES, GC_MAX_RECORD_BYTES, GC_MAX_REPORT_OBJECTS, GC_MIN_GRACE_SECONDS,
     GC_RECORD_TYPE_DRY_RUN, GC_RECORD_TYPE_LEASE, GC_RECORD_TYPE_PIN, GC_RECORD_TYPE_REACHABILITY,
     GC_RECORD_TYPE_REPAIR, GC_RECORD_TYPE_SWEEP_PROGRESS, GC_REFS_FORMAT, GC_SCHEMA_VERSION,
-    GC_SCHEMA_VERSION_LEGACY, GcCandidate, GcConfig, GcError, GcRunReceipt, GcRunState, GcVerdict,
-    LeaseOwner, LeaseRecord, PinRecord, ReachabilitySnapshot, RepairReceipt,
-    current_reachability_snapshot, gc_contract_digest_hex, gc_contract_manifest,
-    gc_repair_receipt_digest_hex, gc_report_digest_hex, project_id as gc_project_id,
-    publish_lease_record, publish_pin_record, publish_reachability_snapshot,
-    refs_from_verified_bytes, remove_lease_record, remove_pin_record, repair_object,
-    repair_object_receipted, run_gc, validate_dry_run_report, validate_repair_receipt,
+    GcCandidate, GcConfig, GcError, GcRunReceipt, GcRunState, GcVerdict, LeaseOwner, LeaseRecord,
+    PinRecord, ReachabilitySnapshot, RepairReceipt, current_reachability_snapshot,
+    gc_contract_digest_hex, gc_contract_manifest, gc_repair_receipt_digest_hex,
+    gc_report_digest_hex, project_id as gc_project_id, publish_lease_record, publish_pin_record,
+    publish_reachability_snapshot, refs_from_verified_bytes, remove_lease_record,
+    remove_pin_record, repair_object, repair_object_receipted, run_gc, validate_dry_run_report,
+    validate_repair_receipt,
 };
 pub use gc_lock::{
     COORDINATOR_LOCK, GC_DIR, LOCK_DEADLINE, LockMode, StoreLock, coordinator_lock_path,
@@ -119,12 +106,6 @@ pub use snapshot::{
     SnapshotReadResolution, SnapshotStalenessReceipt, SnapshotView, resolve_snapshot_read,
     snapshot_isolation_contract, take_root_snapshot,
 };
-pub use zbf::{
-    DurableProfile, DurableProfileId, ZBF_CONTAINER_FLAG, ZBF_CONTRACT_VERSION, ZBF_HEADER_LEN,
-    ZBF_MAGIC, ZBF_MAX_CHILDREN, ZBF_MAX_DEPTH, ZBF_MAX_OBJECT_BYTES, ZBF_SCHEMA_MAJOR,
-    ZBF_SCHEMA_MINOR, ZbfArtifactKind, ZbfError, ZbfFailureCode, ZbfHeader, ZbfObject, ZbfPayload,
-    zbf_contract_digest, zbf_contract_manifest,
-};
 
 pub use store_root::{
     BLOBS_DIR, Engine, LOCAL_STORE_DIR, PROJECT_KEY_HEX_LEN, PROJECTS_DIR, ResolvedStore,
@@ -141,9 +122,4 @@ pub use event_log::{
     EVENT_LOG_BYTE_LIMIT, EVENT_LOG_DIR, EVENT_RECORD_BYTE_LIMIT, EventLog, EventLogError,
     EventLogRecord, EventPublication, ProviderUsageLogRecord, ProviderUsagePublication,
     USAGE_LOG_DIR,
-};
-
-pub use zero_migration::{
-    LEGACY_OBJECT_LAYOUT, MIGRATION_MANIFEST_BYTE_LIMIT, ZeroMigrationEntry, ZeroMigrationError,
-    ZeroMigrationManifest, import_legacy_store, read_and_verify_manifest,
 };

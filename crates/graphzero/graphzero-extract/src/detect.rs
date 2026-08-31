@@ -1,4 +1,4 @@
-//! Language detection from file extension (FR-002).
+//! Language detection from file extension.
 
 use crate::Language;
 

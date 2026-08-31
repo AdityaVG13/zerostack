@@ -1,4 +1,4 @@
-//! Fidelity ladder (graphzero-femy): L1–L4 graph view renders with token envelopes.
+//! Fidelity ladder: L1–L4 graph view renders with token envelopes.
 
 use graphzero_store::Snapshot;
 use graphzero_store::store::format::symbol_kind;
@@ -12,7 +12,6 @@ use super::QuerySurfaceRouter;
 use super::helpers::{empty_capsule, outline_kind_name};
 use super::types::*;
 
-pub const L1_TOKEN_ENVELOPE: usize = 100;
 pub const L2_TOKEN_ENVELOPE: usize = 500;
 pub const L3_TOKEN_ENVELOPE: usize = 2000;
 
@@ -65,7 +64,7 @@ impl QuerySurfaceRouter {
             outline.push(OutlineItem {
                 name: name.to_string(),
                 kind: kind.clone(),
-                evidence_ref: format!("gz://node/{name}"),
+                evidence_ref: format!("node/{name}"),
                 source: "tier_a".into(),
                 start_line: None,
                 end_line: None,

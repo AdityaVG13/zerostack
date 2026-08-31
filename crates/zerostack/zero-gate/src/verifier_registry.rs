@@ -1,21 +1,12 @@
-//! V6-R8: typed verifier registry, obligation checklists, successor-state
-//! verification (ZS-VERIFY-001/002/003).
-//!
-//! A registered verifier is the only authority that may vouch for a
-//! (domain, kind) pair. Lookup is deterministic and typed; an unknown pair is
-//! a loud refusal -- never a silent skip. Every registered record binds the
-//! verifier identity/version to the exact input roots it verified, its
-//! result, its evidence digest, its runtime, and per-dimension coverage
-//! grades. Successor-state verification recomputes the claimed successor root
-//! from transition receipts and refuses any mismatch, attaching the receipts
-//! to the fault.
+//! Registry for typed verifiers, obligation checklists, and successor-state checks.
+//! A registered verifier is the sole authority for its `(domain, kind)` pair.
 
 use std::{collections::BTreeMap, error::Error, fmt};
 
 use serde::{Deserialize, Serialize};
 use zero_abi::{
-    canonical_json, sha256, CoverageGrade, Sha256Digest, ProtectedDimension,
-    ProtectedScopeObligations,
+    CoverageGrade, ProtectedDimension, ProtectedScopeObligations, Sha256Digest, canonical_json,
+    sha256,
 };
 
 pub const VERIFIER_REGISTRY_CONTRACT_VERSION: u16 = 1;
@@ -26,13 +17,13 @@ pub const OBLIGATION_CHECKLIST_MAX_ENTRIES: usize = 64;
 pub const OBLIGATION_CHECKLIST_MAX_EVIDENCE_REFS: usize = 4096;
 pub const SUCCESSOR_TRANSITION_MAX_RECEIPTS: usize = 4096;
 
-/// Domain of a registered verifier (ZS-VERIFY-001).
+/// Domain of a registered verifier.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum VerifierDomain {
-    /// ZS-VERIFY-002: current-effect verification of an exact candidate delta.
+    /// Current-effect verification of an exact candidate delta.
     CurrentEffect,
-    /// ZS-VERIFY-003: successor-state preservation of registered future actions.
+    /// Successor-state preservation of registered future actions.
     SuccessorState,
 }
 
@@ -71,7 +62,7 @@ impl VerifierResult {
 
 /// One typed registry record: verifier identity/version bound to the exact
 /// input roots it verified, its result, evidence digest, runtime, and
-/// per-dimension coverage grades (ZS-VERIFY-001).
+/// per-dimension coverage grades.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct VerifierRegistryRecord {
@@ -129,13 +120,18 @@ impl VerifierRegistryRecord {
                 "verifier id and version must be nonblank".into(),
             ));
         }
-        if self.input_roots.is_empty() || self.input_roots.len() > VERIFIER_REGISTRY_MAX_INPUT_ROOTS {
+        if self.input_roots.is_empty() || self.input_roots.len() > VERIFIER_REGISTRY_MAX_INPUT_ROOTS
+        {
             return Err(VerifierRegistryError::InvalidRecord(format!(
                 "input roots must be nonempty and at most {}",
                 VERIFIER_REGISTRY_MAX_INPUT_ROOTS
             )));
         }
-        if self.input_roots.iter().any(|root| *root == Sha256Digest::ZERO) {
+        if self
+            .input_roots
+            .iter()
+            .any(|root| *root == Sha256Digest::ZERO)
+        {
             return Err(VerifierRegistryError::InvalidRecord(
                 "input roots must be nonzero".into(),
             ));
@@ -161,8 +157,9 @@ impl VerifierRegistryRecord {
                 Some(grade) if !grade.is_unknown() => {}
                 _ => {
                     return Err(VerifierRegistryError::InvalidRecord(
-                        "a passing record must grade its own kind as covered (never Unknown)".into(),
-                    ))
+                        "a passing record must grade its own kind as covered (never Unknown)"
+                            .into(),
+                    ));
                 }
             }
         }
@@ -200,7 +197,8 @@ impl VerifierRegistry {
         verifier_id: impl Into<String>,
         version: impl Into<String>,
     ) {
-        self.trusted_versions.insert(verifier_id.into(), version.into());
+        self.trusted_versions
+            .insert(verifier_id.into(), version.into());
     }
 
     /// Typed registration. Refuses verifiers that are not trusted at all and
@@ -243,16 +241,12 @@ impl VerifierRegistry {
 
     /// Version freshness of a record against the currently trusted version
     /// of its verifier identity.
-    pub fn freshness(
-        &self,
-        record: &VerifierRegistryRecord,
-    ) -> Result<(), VerifierRegistryError> {
-        let expected = self
-            .trusted_versions
-            .get(&record.verifier_id)
-            .ok_or(VerifierRegistryError::MissingTrustedVerifier {
+    pub fn freshness(&self, record: &VerifierRegistryRecord) -> Result<(), VerifierRegistryError> {
+        let expected = self.trusted_versions.get(&record.verifier_id).ok_or(
+            VerifierRegistryError::MissingTrustedVerifier {
                 verifier_id: record.verifier_id.clone(),
-            })?;
+            },
+        )?;
         if expected != &record.verifier_version {
             return Err(VerifierRegistryError::StaleVerifier {
                 verifier_id: record.verifier_id.clone(),
@@ -264,9 +258,7 @@ impl VerifierRegistry {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Obligation checklist (ZS-VERIFY-002).
-// ---------------------------------------------------------------------------
+// Obligation checklist.
 
 /// One dimension's obligation with the evidence refs substantiating it.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -277,10 +269,9 @@ pub struct ObligationChecklistEntry {
     pub evidence_refs: Vec<Sha256Digest>,
 }
 
-/// Obligation checklist mapping dimensions (Security, Tests, ...) to evidence
-/// refs, bound to the exact subject root (candidate delta / successor state)
-/// it was verified against. Substituting a different delta after verification
-/// is a loud `DeltaSubstitutedAfterVerification` refusal.
+/// Obligation checklist mapping dimensions (Security, Tests,...) to evidence refs, bound to the
+/// exact subject root (candidate delta / successor state) it was verified against. Substituting
+/// a different delta after verification is a loud `DeltaSubstitutedAfterVerification` refusal.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ObligationChecklist {
@@ -375,9 +366,7 @@ impl ObligationChecklist {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Successor-state verification (ZS-VERIFY-003).
-// ---------------------------------------------------------------------------
+// Successor-state verification.
 
 /// A registered future action: a declared contract the successor state must
 /// preserve. A locally-passing edit that breaks it is rejected by
@@ -470,7 +459,8 @@ impl SuccessorStateTransition {
                 self.transition_version
             )));
         }
-        if self.predecessor_root == Sha256Digest::ZERO || self.claimed_successor_root == Sha256Digest::ZERO
+        if self.predecessor_root == Sha256Digest::ZERO
+            || self.claimed_successor_root == Sha256Digest::ZERO
         {
             return Err(VerifierRegistryError::InvalidTransition(
                 "predecessor and claimed successor roots must be nonzero".into(),
@@ -487,7 +477,11 @@ impl SuccessorStateTransition {
                 SUCCESSOR_TRANSITION_MAX_RECEIPTS
             )));
         }
-        if self.receipts.iter().any(|receipt| *receipt == Sha256Digest::ZERO) {
+        if self
+            .receipts
+            .iter()
+            .any(|receipt| *receipt == Sha256Digest::ZERO)
+        {
             return Err(VerifierRegistryError::InvalidTransition(
                 "receipts must be nonzero".into(),
             ));
@@ -702,15 +696,11 @@ impl fmt::Display for VerifierRegistryError {
 
 impl Error for VerifierRegistryError {}
 
-// ---------------------------------------------------------------------------
 // Verification entry points.
-// ---------------------------------------------------------------------------
 
-/// Current-effect authority validation (ZS-VERIFY-002): the delta in hand
-/// must be exactly the delta the registered verifier verified, the verifier
-/// must be fresh and passing, and the obligation checklist must bind the same
-/// subject root. Substituting a different delta after verification is a loud
-/// refusal.
+/// Current-effect authority validation: the delta in hand must be exactly the delta
+/// the registered verifier verified, the verifier must be fresh and passing, and the obligation
+/// checklist must bind the same subject root.
 pub fn assert_current_effect_authority(
     registry: &VerifierRegistry,
     kind: ProtectedDimension,
@@ -732,12 +722,7 @@ pub fn assert_current_effect_authority(
     Ok(())
 }
 
-/// Successor-state verification (ZS-VERIFY-003). Uses the typed registry
-/// (unknown verifier = loud refusal), checks verifier freshness and passing
-/// result, recomputes the successor root from the transition receipts, checks
-/// that the successor state preserves every required dimension of the
-/// registered future action with evidence-backed coverage, and mints a sealed
-/// receipt on acceptance. Any mismatch is a loud fault carrying the receipts.
+/// Successor-state verification.
 pub fn verify_successor_state<R>(
     registry: &VerifierRegistry,
     transition: &SuccessorStateTransition,
@@ -817,4 +802,3 @@ where
         runtime_ms: record.runtime_ms,
     })
 }
-

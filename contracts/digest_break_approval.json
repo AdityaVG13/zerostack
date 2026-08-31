@@ -1,5 +1,0 @@
-{
-  "classification": "minor_additive",
-  "owner": "ubuntu",
-  "rationale": "Advertise blast depth, remember anchor alias, and reserve agent alias on the operation ABI so MCP schemas match live CLI/domain acceptance (graphzero-agent-ergo-cli-mcp-parity-w407t.1 / R-029)."
-}

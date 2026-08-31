@@ -1,19 +1,5 @@
-//! Fresh-work accounting vector and the eta_action efficiency metric.
-//!
-//! The accounting contract and invariants are defined by this module.
-//!
-//! Token savings alone cannot show that redundant work is disappearing: a
-//! cheap action that re-derives information the session already paid for still
-//! costs. This module decomposes the declared input of one action into the
-//! components of the pay-once causal information law and exposes
-//! `eta_action` = fresh work / total as an integer parts-per-million ratio.
-//!
-//! Invariants enforced here, at construction and again on the wire:
-//!
-//! - the four components sum exactly to `total_tokens` (no side component),
-//! - `eta_action` is therefore always inside [0, 1] (0 ppm..=1_000_000 ppm),
-//! - aggregation is checked integer addition, so a session-level eta is the
-//!   same arithmetic applied to the summed vector.
+//! Fresh-work accounting vector and the eta_action efficiency metric. The accounting contract and
+//! invariants are defined by this module.
 
 use serde::de;
 use serde::{Deserialize, Deserializer, Serialize};
@@ -21,7 +7,6 @@ use serde::{Deserialize, Deserializer, Serialize};
 use crate::{LedgerError, PPM_ONE, RetainedFractionPpm};
 
 /// The exhaustive component set of the fresh-work vector.
-///
 /// Every token of an action's declared input belongs to exactly one component.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub enum FreshWorkComponent {
@@ -34,8 +19,8 @@ pub enum FreshWorkComponent {
     /// Work spent recovering or re-expanding information that was already
     /// paid for once: verification, retries, re-expansion of compressed spans.
     Recovery,
-    /// Structural cost that carries no repository information: schema,
-    /// protocol framing and harness scaffolding.
+    /// Structural cost that carries no repository information, such as schemas and protocol
+    /// framing.
     Overhead,
 }
 
@@ -65,12 +50,8 @@ impl std::fmt::Display for FreshWorkComponent {
     }
 }
 
-/// One action's token cost decomposed across [`FreshWorkComponent`].
-///
-/// `total_tokens` is derived, never caller-supplied: it is recomputed by
-/// [`FreshWorkVector::new`] and re-checked when a vector is deserialized, so a
-/// wire value cannot understate a component or inflate the total to flatter
-/// eta_action. The all-zero vector is the "not declared" case.
+/// One action's token cost split across [`FreshWorkComponent`]. `total_tokens` is derived and
+/// rechecked on deserialization, so wire data cannot understate a component or alter the total.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize)]
 pub struct FreshWorkVector {
     fresh_work_tokens: u64,
@@ -175,13 +156,8 @@ impl FreshWorkVector {
         self.total_tokens > 0
     }
 
-    /// eta_action: the fraction of this action's cost that was causally novel,
-    /// floored to parts per million. `None` for an undeclared (all-zero)
-    /// vector, where the ratio has no denominator.
-    ///
-    /// Because the components sum to the total, the result is always inside
-    /// [0, 1]. eta_action -> 0 is the target: transformations grow while the
-    /// novel delta stays structurally describable.
+    /// eta_action: the fraction of this action's cost that was causally novel, floored to parts per
+    /// million. `None` for an undeclared (all-zero) vector, where the ratio has no denominator.
     pub fn eta_action_ppm(&self) -> Option<RetainedFractionPpm> {
         if self.total_tokens == 0 {
             return None;
@@ -289,11 +265,9 @@ impl<'de> Deserialize<'de> for ActionFreshWork {
     }
 }
 
-/// Session-level aggregate of per-action fresh-work vectors.
-///
-/// The aggregate is the component-wise sum, so the session eta is the same
-/// ratio computed over the summed vector: the novelty fraction of everything
-/// the session paid for.
+/// Session-level aggregate of per-action fresh-work vectors. The aggregate is
+/// the component-wise sum, so the session eta is the same ratio computed over
+/// the summed vector: the novelty fraction of everything the session paid for.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize)]
 pub struct SessionFreshWork {
     actions: u64,

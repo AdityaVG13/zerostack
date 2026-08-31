@@ -1,5 +1,4 @@
-//! P4.2 claim verification: post-edit assertions checked against the graph
-//! (vision pillar 3 — certified claims, blast radius run backwards).
+//! Verifies post-edit assertions against graph evidence.
 
 mod evidence_graph;
 mod parse;

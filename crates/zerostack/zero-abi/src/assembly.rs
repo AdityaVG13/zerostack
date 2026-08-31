@@ -1,10 +1,6 @@
-//! Canonical ZeroStack assembly identity and pre-dispatch validation.
-//!
-//! An assembly manifest binds the exact host, workers, profiles, target,
-//! verifiers, receipt schema, runtime generation, epoch, and capability catalogs
-//! that were assembled together. Canonical bytes are sorted-key JSON with
-//! canonically ordered vectors. The digest is domain separated from other JSON
-//! contracts.
+//! Canonical ZeroStack assembly identity and pre-dispatch validation. An assembly manifest binds
+//! the exact host, workers, profiles, target, verifiers, receipt schema, runtime generation, epoch,
+//! and capability catalogs that were assembled together.
 
 use std::{error::Error, fmt};
 
@@ -12,10 +8,9 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 use serde_json::{Value, json};
 
 use crate::{
-    canonical_json,
+    EngineIdentity, canonical_json,
     cwir::{CWIR_CONTRACT_VERSION, cwir_contract_digest},
     effect::{EFFECT_IR_CONTRACT_VERSION, effect_ir_contract_digest},
-    raw_worker::EngineIdentity,
     reasoning::{REASONING_CONTRACT_VERSION, reasoning_contract_digest},
     sha256,
     zbf::{ZBF_CONTRACT_VERSION, zbf_contract_digest},

@@ -8,7 +8,6 @@ use serde::{Deserialize, Serialize};
 pub const PREVENTED_READ_ACCOUNTING_SCHEMA_VERSION: u32 = 1;
 
 /// Ledger-compatible counters for bytes/files GraphZero lets a caller avoid reading.
-///
 /// required_* counts the unique indexed files that the graph-selected answer says are
 /// relevant. prevented_* is the complement inside the current indexed repository snapshot.
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -67,7 +66,7 @@ pub fn accounting_for_evidence_refs(
 }
 
 fn blob_hash_from_ref(reference: &str) -> Option<String> {
-    let rest = reference.strip_prefix("gz://blob/")?;
+    let rest = reference.strip_prefix("z://blob/")?;
     let hash = rest.split(['#', '/', '?']).next().unwrap_or(rest);
     if hash.len() == 64 && hash.bytes().all(|b| b.is_ascii_hexdigit()) {
         Some(hash.to_ascii_lowercase())

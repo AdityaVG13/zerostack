@@ -1,36 +1,7 @@
 #![forbid(unsafe_code)]
 
-//! ZeroRef: the portable cross-engine blob ref subset.
-//!
-//! Canonical contract: GraphZero docs/adr/002-zeroref.md, shared verbatim
-//! across TokenZero, FSZero, and GraphZero. Golden vectors live in
-//! fixtures/zeroref_vectors.json and are asserted by this crate's tests.
-//!
-//! Interoperability scope is blob refs only:
-//! (fz|gz|tz)://blob/<sha256>              whole blob
-//! (fz|gz|tz)://blob/<sha256>#B<s>-<e>     byte span, zero-based half-open
-//! (fz|gz|tz)://blob/<sha256>#L<a>-<b>     line span, one-based inclusive
-//!
-//! The hash is the full lowercase 64-hex SHA-256 of the complete unfragmented
-//! bytes. Short prefixes, uppercase, non-hex, and extra path segments are
-//! rejected. Non-blob kinds remain engine-owned and parse as unsupported.
-//!
-//! The legacy GraphZero #B<start>+<len> form is accepted as a deprecated
-//! input alias, normalized internally, and never emitted.
-//!
-//! Engine-internal ref grammars (fz://seq/, gz node/query refs, compact
-//! g:/q: forms, tz session keys) are wider and stay engine-owned; this crate
-//! is the strict v1 layer only.
-//!
-//! Parse refs and use [ZeroRef::verify_and_select] for normal access:
-//!
-//!     use zero_ref::{content_hash_hex, ZeroRef};
-//!     let bytes = b"hello";
-//!     let reference = ZeroRef::parse(&format!(
-//!         "fz://blob/{}#B0-5", content_hash_hex(bytes)
-//!     ))?;
-//!     assert_eq!(reference.verify_and_select(bytes)?, bytes);
-//!     # Ok::<(), zero_ref::ZeroRefError>(())
+//! Portable cross-domain blob references shared by TokenZero, FSZero, and GraphZero.
+//! Domain adapters share the vectors in `contracts/zeroref-fixtures.json`.
 
 use std::fmt;
 use std::str::FromStr;
@@ -38,57 +9,28 @@ use std::str::FromStr;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use sha2::{Digest as ShaDigest, Sha256};
 
-/// Version tag for capability negotiation and fixture manifests.
-pub const ZEROREF_VERSION: &str = "v1";
-
-/// Contract major: peers with a different major must refuse before payload
-/// work. Minor bumps are additive and forward-compatible.
-pub const ZEROREF_MAJOR: u64 = 1;
-pub const ZEROREF_MINOR: u64 = 0;
-
-/// Refuse a peer whose contract major does not match [ZEROREF_MAJOR].
-///
-/// Minor bumps are additive and forward-compatible: any peer minor is
-/// accepted when the major matches. This is not a wire handshake protocol.
-pub fn negotiate(major: u64, minor: u64) -> Result<(), ZeroRefError> {
-    let _ = minor;
-    if major != ZEROREF_MAJOR {
-        return Err(ZeroRefError::new(
-            ZeroRefErrorClass::IncompatibleVersion,
-            format!(
-                "peer ZeroRef {major}.{minor} is incompatible with {ZEROREF_MAJOR}.{ZEROREF_MINOR}"
-            ),
-        ));
-    }
-    Ok(())
-}
-
 /// Identity algorithm and hex length shared by the parser and the fixture.
 pub const HASH_ALGORITHM: &str = "sha256";
 pub const HASH_HEX_LEN: usize = 64;
 
 /// Hash case accepted by the parser and advertised by capability
-/// descriptors. v1 is lowercase-only; uppercase is malformed.
+/// descriptors. Only lowercase input is valid; uppercase is malformed.
 pub const HASH_CASE: &str = "lower";
 
-/// The only portable ref kind under v1. Everything else is engine-owned.
+/// The only portable ref kind. Everything else is domain-owned.
 pub const PORTABLE_KINDS: [&str; 1] = ["blob"];
 
-/// Exact fragment-semantics strings shared by the annex, capability
-/// descriptors, and conformance tests.
+/// Exact fragment-semantics strings shared by the contract and conformance tests.
 pub const BYTE_FRAGMENT_SEMANTICS: &str = "#B zero-based half-open";
 pub const LINE_FRAGMENT_SEMANTICS: &str = "#L one-based inclusive";
-
-/// Deprecated GraphZero byte-span alias: accepted on input, never emitted.
-pub const LEGACY_BYTE_FRAGMENT_ALIAS: &str = "#B<start>+<len>";
 
 /// Stable error classes shared verbatim across the three engines
 /// (fixtures error_classes).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ZeroRefErrorClass {
-    /// Input does not match the v1 grammar (bad hash, bad fragment, overflow).
+    /// Input does not match the portable grammar (bad hash, bad fragment, overflow).
     Malformed,
-    /// Recognizable ref that is not a portable v1 blob ref (engine-owned
+    /// Recognizable ref that is not a portable blob ref (engine-owned
     /// kinds, unknown schemes, compact forms).
     Unsupported,
     /// Fragment bounds exceed the real byte length or line count under strict
@@ -96,35 +38,21 @@ pub enum ZeroRefErrorClass {
     RangeOutOfBounds,
     /// #L selection over bytes that are not valid UTF-8.
     NotUtf8,
-    /// Object not present in any reachable store.
-    ///
-    /// Reserved for store/resolution layers. The v1 text parser never emits
-    /// this class.
+    /// Object not present in any reachable store. Reserved for
+    /// store/resolution layers. The text parser never emits this class.
     Missing,
-    /// Store I/O failed while resolving.
-    ///
-    /// Reserved for store/resolution layers. The v1 text parser never emits
-    /// this class.
+    /// Store I/O failed while resolving. Reserved for
+    /// store/resolution layers. The text parser never emits this class.
     Io,
     /// Resolved bytes do not hash to the ref identity.
     DigestMismatch,
     /// Resolution denied by storage policy (e.g. shared root not opted in).
-    ///
-    /// Reserved for store/resolution layers. The v1 text parser never emits
-    /// this class.
+    /// Reserved for store/resolution layers. The text parser never emits this class.
     PolicyDenied,
-    /// Peer speaks an incompatible ZeroRef version.
-    IncompatibleVersion,
-    /// Legacy short-prefix input matched zero-or-many objects during legacy
-    /// resolution. v1 parsing itself rejects prefixes as malformed.
-    ///
-    /// Reserved for a store-layer legacy resolver. The v1 text parser never
-    /// emits this class.
-    LegacyAmbiguity,
 }
 
 impl ZeroRefErrorClass {
-    pub const ALL: [ZeroRefErrorClass; 10] = [
+    pub const ALL: [ZeroRefErrorClass; 8] = [
         Self::Malformed,
         Self::Unsupported,
         Self::RangeOutOfBounds,
@@ -133,8 +61,6 @@ impl ZeroRefErrorClass {
         Self::Io,
         Self::DigestMismatch,
         Self::PolicyDenied,
-        Self::IncompatibleVersion,
-        Self::LegacyAmbiguity,
     ];
 
     pub fn as_str(&self) -> &'static str {
@@ -147,12 +73,10 @@ impl ZeroRefErrorClass {
             Self::Io => "io",
             Self::DigestMismatch => "digest_mismatch",
             Self::PolicyDenied => "policy_denied",
-            Self::IncompatibleVersion => "incompatible_version",
-            Self::LegacyAmbiguity => "legacy_ambiguity",
         }
     }
 
-    /// Classes the v1 text parser and selector construct today.
+    /// Classes the text parser and selector construct today.
     pub const PARSER_AND_SELECTOR: [ZeroRefErrorClass; 5] = [
         Self::Malformed,
         Self::Unsupported,
@@ -161,14 +85,9 @@ impl ZeroRefErrorClass {
         Self::DigestMismatch,
     ];
 
-    /// Classes reserved for store/resolution layers. The v1 parser never
-    /// emits these. [Self::IncompatibleVersion] is constructed by [negotiate].
-    pub const RESERVED_FOR_RESOLUTION: [ZeroRefErrorClass; 4] = [
-        Self::Missing,
-        Self::Io,
-        Self::PolicyDenied,
-        Self::LegacyAmbiguity,
-    ];
+    /// Classes reserved for store/resolution layers. The parser never emits them.
+    pub const RESERVED_FOR_RESOLUTION: [ZeroRefErrorClass; 3] =
+        [Self::Missing, Self::Io, Self::PolicyDenied];
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -194,27 +113,22 @@ impl fmt::Display for ZeroRefError {
 
 impl std::error::Error for ZeroRefError {}
 
-/// Producer scheme. Denotes provenance, not authorization or storage
-/// location: a matching suffix is the same identity claim, not proof the
-/// bytes are reachable from this process.
+/// Identity scheme. One ZeroStack family: `z://blob/<digest>`.
+/// Retired product schemes `fz`/`gz`/`tz` do not parse.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ZeroScheme {
-    Fz,
-    Gz,
-    Tz,
+    Z,
 }
 
 impl ZeroScheme {
-    /// Every scheme the v1 parser accepts. The parser iterates THIS list and
+    /// Every scheme the parser accepts. The parser iterates THIS list and
     /// capability descriptors report it, so acceptance and advertisement
     /// cannot drift.
-    pub const ALL: [ZeroScheme; 3] = [Self::Fz, Self::Gz, Self::Tz];
+    pub const ALL: [ZeroScheme; 1] = [Self::Z];
 
     pub fn as_str(&self) -> &'static str {
         match self {
-            Self::Fz => "fz",
-            Self::Gz => "gz",
-            Self::Tz => "tz",
+            Self::Z => "z",
         }
     }
 
@@ -268,7 +182,7 @@ pub fn is_full_lower_hex(s: &str) -> bool {
             .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
 }
 
-/// Lowercase hex SHA-256 of the complete bytes (the v1 identity function).
+/// Lowercase hex SHA-256 of the complete bytes.
 pub fn content_hash_hex(bytes: &[u8]) -> String {
     let mut h = Sha256::new();
     h.update(bytes);
@@ -298,7 +212,7 @@ pub fn object_identity_hex(bytes: &[u8]) -> String {
 }
 
 /// A digest-bound byte selection. Its serde field names and digest arrays are
-/// the stable structured wire shape; it does not extend the v1 text grammar.
+/// the stable structured wire shape; it does not extend the portable text grammar.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct SpanRef {
     pub byte_len: u64,
@@ -415,7 +329,7 @@ fn parse_u64_strict(s: &str, input: &str) -> Result<u64, ZeroRefError> {
 }
 
 impl ZeroRef {
-    /// Parse a portable v1 blob ref. Engine-owned forms (non-blob kinds,
+    /// Parse a portable blob ref. Engine-owned forms (non-blob kinds,
     /// compact g:/q: refs) fail as [ZeroRefErrorClass::Unsupported];
     /// anything outside the grammar fails as [ZeroRefErrorClass::Malformed].
     pub fn parse(input: &str) -> Result<Self, ZeroRefError> {
@@ -465,18 +379,10 @@ impl ZeroRef {
         })
     }
 
-    /// Apply the fragment using the canonical bounds policy without
-    /// verifying the ref digest.
-    ///
-    /// This is safe only after the bytes have been independently authenticated.
+    /// Apply the fragment using the canonical bounds policy without verifying the ref
+    /// digest. This is safe only after the bytes have been independently authenticated.
     pub fn unchecked_select<'a>(&self, bytes: &'a [u8]) -> Result<&'a [u8], ZeroRefError> {
         select_fragment(bytes, &self.fragment, &self.to_string())
-    }
-
-    /// Apply the fragment without verifying the ref digest.
-    #[deprecated(note = "use verify_and_select, or unchecked_select after authentication")]
-    pub fn select<'a>(&self, bytes: &'a [u8]) -> Result<&'a [u8], ZeroRefError> {
-        self.unchecked_select(bytes)
     }
 
     /// Apply the fragment with an explicit line-end policy. This is for
@@ -490,7 +396,7 @@ impl ZeroRef {
     }
 
     /// Verify the complete unfragmented bytes against the ref identity, then
-    /// select the fragment with the canonical v1 policy.
+    /// select the fragment with the canonical policy.
     pub fn verify_and_select<'a>(&self, bytes: &'a [u8]) -> Result<&'a [u8], ZeroRefError> {
         let actual = content_hash_hex(bytes);
         if actual != self.hash {
@@ -528,14 +434,6 @@ fn parse_fragment(f: &str, input: &str) -> Result<ZeroFragment, ZeroRefError> {
             }
             return Ok(ZeroFragment::Bytes { start, end });
         }
-        if let Some((s, l)) = span.split_once('+') {
-            // Deprecated GraphZero alias: accepted on input, never emitted.
-            let (start, len) = (parse_u64_strict(s, input)?, parse_u64_strict(l, input)?);
-            let end = start
-                .checked_add(len)
-                .ok_or_else(|| malformed(format!("byte span start+len overflows: {input}")))?;
-            return Ok(ZeroFragment::Bytes { start, end });
-        }
         return Err(malformed(format!(
             "malformed byte fragment '#B{span}': {input}"
         )));
@@ -559,8 +457,7 @@ fn parse_fragment(f: &str, input: &str) -> Result<ZeroFragment, ZeroRefError> {
 }
 
 /// How line spans whose end runs past EOF are treated at selection time.
-///
-/// The canonical v1 policy is LineEndPolicy::ClampEnd. Strict remains
+/// The canonical policy is LineEndPolicy::ClampEnd. Strict remains
 /// available for compatibility checks and callers that validate exact bounds.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LineEndPolicy {
@@ -594,7 +491,7 @@ pub fn select_fragment_with_policy<'a>(
         ZeroFragment::None => Ok(bytes),
         ZeroFragment::Bytes { start, end } => {
             if start > end {
-                // The v1 parser rejects reversed spans, but legacy surfaces
+                // The parser rejects reversed spans, but legacy surfaces
                 // can construct fragments directly; never let one panic.
                 return Err(malformed(format!("byte span end before start: {context}")));
             }
@@ -734,4 +631,3 @@ impl<'de> Deserialize<'de> for ZeroRef {
         Self::parse(&raw).map_err(serde::de::Error::custom)
     }
 }
-

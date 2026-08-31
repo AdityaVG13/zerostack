@@ -1,7 +1,6 @@
-//! Warm, in-memory intent/symbol to edit-anchor resolution (graphzero-tcx3).
-//!
-//! The index is built once per Snapshot. Resolution performs no repository traversal or
-//! filesystem I/O; every path, line and byte span is materialized during index construction.
+//! Warm, in-memory intent/symbol to edit-anchor resolution. The index is built
+//! once per Snapshot. Resolution performs no repository traversal or filesystem
+//! I/O; every path, line and byte span is materialized during index construction.
 
 use std::collections::{BTreeSet, HashMap};
 use std::path::Path;
@@ -130,11 +129,8 @@ impl SnapEditIndex {
             );
         }
 
-        // Pre-stage every distinct blob in parallel (graphzero perf): the
-        // per-symbol loop below is otherwise serialized on ~928 read+SHA-256
-        // verifications (~350ms). Reads are independent; results feed an
-        // unordered cache and the entry list is re-sorted deterministically
-        // afterwards, so output is byte-identical.
+        // Pre-stage every distinct blob in parallel (graphzero perf): the per-symbol loop below is
+        // otherwise serialized on ~928 read+SHA-256 verifications (~350ms).
         let distinct_hashes: Vec<String> = {
             let mut seen = std::collections::HashSet::new();
             let mut out = Vec::new();
@@ -328,11 +324,9 @@ impl SnapEditIndex {
     }
 
     fn from_entries(entries: Vec<IndexedAnchor>) -> Self {
-        // Pre-sized + FxHash-style hasher (graphzero perf): ~100k short-string
-        // inserts per build; SipHash's cost dominates these internal maps.
-        // Iteration order is never output (resolution sorts), so the
-        // non-cryptographic, seed-free hasher is safe here. The token inverted
-        // index is deferred to first fuzzy miss (see `token_map`).
+        // Pre-sized + FxHash-style hasher (graphzero perf): ~100k short-string inserts per build;
+        // SipHash's cost dominates these internal maps. Iteration order is never output (resolution
+        // sorts), so the non-cryptographic, seed-free hasher is safe here.
         let mut exact: HashMap<String, Vec<usize>, FxBuildHasher> =
             HashMap::with_capacity_and_hasher(entries.len(), FxBuildHasher::default());
         let mut qualified: HashMap<String, usize, FxBuildHasher> =
@@ -438,7 +432,7 @@ impl SnapEditIndex {
     }
 }
 
-/// One-call API used by the future zero.graph.snap adapter.
+/// Resolve a natural-language edit query to the best anchor in a snapshot.
 pub fn snap_to_edit(snapshot: &Snapshot, query: &str) -> Result<SnapEditResult> {
     snapshot.snap_edit_index()?.resolve(query)
 }
@@ -565,11 +559,8 @@ fn line_at_offset_indexed(line_starts: &[u32], offset: u32) -> u32 {
     count.max(1) as u32
 }
 
-/// FxHash-style hasher for the index's internal lookup maps (graphzero perf).
-/// Keys are short ASCII strings; SipHash's 2-3 cycles/byte dominates
-/// `from_entries`. These maps never cross a process boundary and iteration
-/// order is not part of any output (resolution sorts results), so hash-seed
-/// determinism is irrelevant here.
+/// FxHash-style hasher for the index's internal lookup maps (graphzero perf). Keys are short ASCII
+/// strings; SipHash's 2-3 cycles/byte dominates `from_entries`.
 #[derive(Default)]
 pub(crate) struct FxHasher {
     hash: u64,

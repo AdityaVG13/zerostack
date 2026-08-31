@@ -1,12 +1,6 @@
-//! Canonical Causal Work IR (CWIR) v1 contracts.
-//!
-//! CWIR is an immutable, task-conditioned typed hypergraph. It records facts,
-//! uncertainty, obligations, permitted effect identities, verification scope,
-//! and bounded expansion requests. It does not render a prompt, authorize an
-//! effect, or claim that opaque model continuation state is recoverable.
-//!
-//! The v1 wire identity is canonical sorted-key JSON. It is deliberately not
-//! called ZCB1: a future binary codec requires its own reviewed version.
+//! Canonical Causal Work IR (CWIR) contracts. CWIR is an immutable, -conditioned typed hypergraph.
+//! It records facts, uncertainty, obligations, permitted effect identities, verification scope, and
+//! bounded expansion requests.
 
 use std::{collections::BTreeMap, error::Error, fmt};
 
@@ -729,7 +723,7 @@ impl CwirExpansionCost {
         {
             return Err(CwirError::new(
                 CwirFailureCode::ExpansionLimitExceeded,
-                "expansion cost exceeds the CWIR v1 contract bound",
+                "expansion cost exceeds the CWIR contract bound",
             ));
         }
         Ok(())

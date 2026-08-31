@@ -1,26 +1,4 @@
-//! Q99 causal-cache runtime (ZS-CACHE-001/004/005/010/011/012/013).
-//!
-//! The economic core of V6: a demand-weight ledger with declared
-//! coordinate/window/tier, sliding-window Q99 reporting that treats
-//! impossibility as a reportable state (never an average), a restoration
-//! threshold `V(t) = max(0, I0 - 0.01W)`, an eviction slack guard
-//! `sigma = W_R - 0.99W >= 0`, an independent residency-threshold checker
-//! over optimizer proposals (propose/authorize separation), and L1/L2/L3
-//! layer accounting where a provider miss never becomes project amnesia.
-//!
-//! Fail-closed laws:
-//! - [`Q99Window::report`] returns `unavailable` when the central change
-//!   mass exceeds 1% of the demanded mass in the window; impossibility is
-//!   reported, never averaged away.
-//! - The restoration threshold check fails closed when valid mass falls
-//!   below `max(0, I0 - 0.01W)`; Q99 stays unavailable until restored.
-//! - The eviction slack guard rejects any eviction that would push resident
-//!   mass below 99% of demanded mass.
-//! - The checker is a separate type from the optimizer proposal: a plan
-//!   just below the threshold fails, just above passes (adversarial pair).
-//! - L3 (provider) loss preserves L2 causal identity and validity records;
-//!   recovery is fetch/rematerialize, never rediscovery, and tombstones
-//!   never delete L2 validity.
+//! Q99 causal-cache runtime.
 
 use std::{error::Error, fmt};
 
@@ -43,8 +21,15 @@ pub enum ResidencyError {
     InvalidDemandLedger(String),
     InvalidPlan(String),
     PlanRejected(String),
-    SlackExceeded { resident_mass: u64, demanded_mass: u64, slack: i64 },
-    RestorationRequired { valid_mass: u64, threshold: u64 },
+    SlackExceeded {
+        resident_mass: u64,
+        demanded_mass: u64,
+        slack: i64,
+    },
+    RestorationRequired {
+        valid_mass: u64,
+        threshold: u64,
+    },
     Q99Unavailable(String),
     InvalidLayerLedger(String),
     L3LossUndiscovered(String),
@@ -66,7 +51,10 @@ impl fmt::Display for ResidencyError {
                 formatter,
                 "eviction slack exceeded: resident {resident_mass} vs demanded {demanded_mass}, slack {slack}"
             ),
-            Self::RestorationRequired { valid_mass, threshold } => write!(
+            Self::RestorationRequired {
+                valid_mass,
+                threshold,
+            } => write!(
                 formatter,
                 "valid mass {valid_mass} below restoration threshold {threshold}; Q99 unavailable until restored"
             ),
@@ -83,9 +71,7 @@ impl fmt::Display for ResidencyError {
 
 impl Error for ResidencyError {}
 
-// ---------------------------------------------------------------------------
-// Demand-weight ledger (ZS-CACHE-010).
-// ---------------------------------------------------------------------------
+// Demand-weight ledger.
 
 /// The three cache layers. L3 is the provider/cold layer; losing L3 must not
 /// destroy L2 validity (project amnesia).
@@ -184,7 +170,9 @@ impl DemandWeightLedger {
         self.objects
             .iter()
             .filter(|object| object.window_id == window_id)
-            .fold(0_u64, |mass, object| mass.saturating_add(object.demand_weight))
+            .fold(0_u64, |mass, object| {
+                mass.saturating_add(object.demand_weight)
+            })
     }
 
     /// Demanded mass of one window at one tier.
@@ -192,20 +180,23 @@ impl DemandWeightLedger {
         self.objects
             .iter()
             .filter(|object| object.window_id == window_id && object.tier == tier)
-            .fold(0_u64, |mass, object| mass.saturating_add(object.demand_weight))
+            .fold(0_u64, |mass, object| {
+                mass.saturating_add(object.demand_weight)
+            })
     }
 
     /// All declared window ids, sorted.
     pub fn windows(&self) -> Vec<String> {
-        let windows: std::collections::BTreeSet<String> =
-            self.objects.iter().map(|object| object.window_id.clone()).collect();
+        let windows: std::collections::BTreeSet<String> = self
+            .objects
+            .iter()
+            .map(|object| object.window_id.clone())
+            .collect();
         windows.into_iter().collect()
     }
 }
 
-// ---------------------------------------------------------------------------
-// Sliding-window Q99 (ZS-CACHE-004) + restoration threshold (ZS-CACHE-005).
-// ---------------------------------------------------------------------------
+// Sliding-window Q99 + restoration threshold.
 
 /// One observed demand event in the window.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -217,10 +208,7 @@ pub struct DemandObservation {
 
 impl DemandObservation {
     pub fn new(demanded_mass: u64, hit: bool) -> Result<Self, ResidencyError> {
-        let observation = Self {
-            demanded_mass,
-            hit,
-        };
+        let observation = Self { demanded_mass, hit };
         if demanded_mass == 0 {
             return Err(ResidencyError::InvalidDemandLedger(
                 "demanded_mass must be nonzero".into(),
@@ -275,9 +263,9 @@ impl Q99Window {
 
     /// Total demanded mass in the window.
     pub fn demanded_mass(&self) -> u64 {
-        self.observations
-            .iter()
-            .fold(0_u64, |mass, observation| mass.saturating_add(observation.demanded_mass))
+        self.observations.iter().fold(0_u64, |mass, observation| {
+            mass.saturating_add(observation.demanded_mass)
+        })
     }
 
     /// Mass of observations that hit.
@@ -285,7 +273,9 @@ impl Q99Window {
         self.observations
             .iter()
             .filter(|observation| observation.hit)
-            .fold(0_u64, |mass, observation| mass.saturating_add(observation.demanded_mass))
+            .fold(0_u64, |mass, observation| {
+                mass.saturating_add(observation.demanded_mass)
+            })
     }
 
     /// Recomputed (missed) mass as PPM of demanded mass. Empty windows are
@@ -350,12 +340,7 @@ impl Q99Window {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Residency plan + independent threshold checker (ZS-CACHE-011, schema
-// causal_residency_plan.schema.json).
-// ---------------------------------------------------------------------------
-
-/// One object in a residency plan, matching the canonical V6 schema object.
+/// One object in a residency plan.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ResidencyPlanObject {
@@ -438,7 +423,9 @@ impl ResidencyPlan {
         self.objects
             .iter()
             .filter(|object| object.resident)
-            .fold(0_u64, |bytes, object| bytes.saturating_add(object.size_bytes))
+            .fold(0_u64, |bytes, object| {
+                bytes.saturating_add(object.size_bytes)
+            })
     }
 
     /// Demand weight of resident + valid objects.
@@ -446,14 +433,16 @@ impl ResidencyPlan {
         self.objects
             .iter()
             .filter(|object| object.resident && object.valid)
-            .fold(0_u64, |mass, object| mass.saturating_add(object.demand_weight))
+            .fold(0_u64, |mass, object| {
+                mass.saturating_add(object.demand_weight)
+            })
     }
 
     /// Total demanded weight in the plan (all objects, resident or not).
     pub fn total_demand_weight(&self) -> u64 {
-        self.objects
-            .iter()
-            .fold(0_u64, |mass, object| mass.saturating_add(object.demand_weight))
+        self.objects.iter().fold(0_u64, |mass, object| {
+            mass.saturating_add(object.demand_weight)
+        })
     }
 
     /// The optimizer's own root claim (the plan root) must equal the
@@ -516,9 +505,7 @@ impl ResidencyThresholdChecker {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Eviction slack guard (ZS-CACHE-012).
-// ---------------------------------------------------------------------------
+// Eviction slack guard.
 
 /// Eviction slack: `sigma = W_R - 0.99W`. An eviction that would push
 /// resident mass below 99% of demanded mass is rejected.
@@ -565,9 +552,7 @@ impl EvictionSlack {
     }
 }
 
-// ---------------------------------------------------------------------------
-// L1/L2/L3 layer validity (ZS-CACHE-001/013).
-// ---------------------------------------------------------------------------
+// L1/L2/L3 layer validity.
 
 /// One cache entry's per-layer validity. L3 loss (provider miss) preserves
 /// the entry's causal identity and L2 validity; recovery is
@@ -629,16 +614,18 @@ impl LayerValidityLedger {
     /// Publish a verified L2 copy (identity proven by content, not
     /// rediscovery).
     pub fn publish_l2(&mut self, object_root: Sha256Digest) -> Result<(), ResidencyError> {
-        let entry = self.entries.entry(object_root).or_insert_with(|| LayerValidityEntry::new(object_root));
+        let entry = self
+            .entries
+            .entry(object_root)
+            .or_insert_with(|| LayerValidityEntry::new(object_root));
         entry.l2_valid = true;
         entry.l2_needs_refetch = false;
         entry.validate()
     }
 
-    /// Declare an L3 loss for a set of entries. L2 validity is PRESERVED and
-    /// marked for refetch/rematerialization; the causal identity is never
-    /// re-derived. An entry that was never L2-valid fails closed (there is
-    /// nothing to preserve).
+    /// Declare an L3 loss for a set of entries. L2 validity is PRESERVED and marked
+    /// for refetch/rematerialization; the causal identity is never re-derived. An
+    /// entry that was never L2-valid fails closed (there is nothing to preserve).
     pub fn mark_l3_loss(&mut self, object_root: Sha256Digest) -> Result<(), ResidencyError> {
         let entry = self.entries.get_mut(&object_root).ok_or_else(|| {
             ResidencyError::L3LossUndiscovered(
@@ -692,4 +679,3 @@ fn ppm_of(numerator: u64, denominator: u64) -> u64 {
     let scaled = numerator.saturating_mul(1_000_000);
     scaled / denominator
 }
-

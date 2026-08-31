@@ -1,13 +1,13 @@
-//! FromStr, Display-form serde, negotiate, and error-class reachability.
+//! FromStr, Display-form serde, and error-class reachability.
 
 use std::str::FromStr;
 
-use zero_ref::{ZEROREF_MAJOR, ZEROREF_MINOR, ZeroRef, ZeroRefErrorClass, negotiate};
+use zero_ref::{ZeroRef, ZeroRefErrorClass};
 
 const HASH: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
 fn canonical_blob() -> String {
-    format!("fz://blob/{HASH}")
+    format!("z://blob/{HASH}")
 }
 
 #[test]
@@ -22,7 +22,7 @@ fn fromstr_equals_parse() {
 
 #[test]
 fn serde_roundtrips_display_form() {
-    let input = format!("tz://blob/{HASH}#B0-4");
+    let input = format!("z://blob/{HASH}#B0-4");
     let parsed = ZeroRef::parse(&input).expect("parse");
     let json = serde_json::to_string(&parsed).expect("serialize");
     assert_eq!(json, serde_json::to_string(&input).expect("string json"));
@@ -38,10 +38,10 @@ fn serde_rejects_malformed_display_form() {
     // direct parser; serde layer must also reject without relying on message prose.
     for bad in [
         "not-a-ref",
-        "fz://blob/ZZZ",
-        "tz://blob/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa#BAD",
-        "fz://blob/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        "fz://blob/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "z://blob/ZZZ",
+        "z://blob/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa#BAD",
+        "z://blob/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "z://blob/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
     ] {
         let parse_err = ZeroRef::parse(bad).unwrap_err();
         assert_eq!(
@@ -59,25 +59,29 @@ fn serde_rejects_malformed_display_form() {
 }
 
 #[test]
-fn negotiate_accepts_same_major_any_minor() {
-    // Minor bumps are additive: every peer minor with the same major is accepted.
-    // Exercise boundaries: zero, the local minor, an arbitrary higher value, and
-    // the type maximum, without pinning an implementation sentinel.
-    for minor in [0u64, 1, ZEROREF_MINOR, 99, u64::MAX] {
-        let result = negotiate(ZEROREF_MAJOR, minor);
-        assert!(
-            result.is_ok(),
-            "negotiate({}, {}) must accept same-major any-minor, got {result:?}",
-            ZEROREF_MAJOR,
-            minor
+fn plus_length_byte_fragment_is_rejected() {
+    let input = format!("z://blob/{HASH}#B6+4");
+    let err = ZeroRef::parse(&input).expect_err("plus-length alias must fail closed");
+    assert_eq!(err.class, ZeroRefErrorClass::Malformed);
+}
+
+#[test]
+fn retired_product_schemes_fail_closed() {
+    for retired in [
+        format!("fz://blob/{HASH}"),
+        format!("gz://blob/{HASH}"),
+        format!("tz://blob/{HASH}"),
+        format!("tz://blob/{HASH}#B0-4"),
+    ] {
+        let err = ZeroRef::parse(&retired).expect_err("retired scheme must fail closed");
+        assert_eq!(
+            err.class,
+            ZeroRefErrorClass::Unsupported,
+            "retired {retired} must be rejected as a nonportable scheme"
         );
     }
-}
-#[test]
-fn negotiate_rejects_other_major() {
-    let err = negotiate(ZEROREF_MAJOR + 1, 0).expect_err("major mismatch");
-    assert_eq!(err.class, ZeroRefErrorClass::IncompatibleVersion);
-    assert!(err.message.contains("incompatible"), "{}", err.message);
+    let live = ZeroRef::parse(&format!("z://blob/{HASH}")).expect("z://blob is the live family");
+    assert_eq!(live.to_string(), format!("z://blob/{HASH}"));
 }
 
 #[test]
@@ -111,18 +115,18 @@ fn parser_never_emits_reserved_resolution_classes() {
 fn selector_emits_range_and_utf8_and_digest() {
     let bytes = b"hello";
     let hash = zero_ref::content_hash_hex(bytes);
-    let oob = ZeroRef::parse(&format!("fz://blob/{hash}#B0-99")).unwrap();
+    let oob = ZeroRef::parse(&format!("z://blob/{hash}#B0-99")).unwrap();
     assert_eq!(
         oob.verify_and_select(bytes).unwrap_err().class,
         ZeroRefErrorClass::RangeOutOfBounds
     );
-    let lines = ZeroRef::parse(&format!("fz://blob/{hash}#L1-1")).unwrap();
+    let lines = ZeroRef::parse(&format!("z://blob/{hash}#L1-1")).unwrap();
     assert_eq!(
         lines.verify_and_select(b"\xff").unwrap_err().class,
         ZeroRefErrorClass::DigestMismatch
     );
     let utf = ZeroRef::parse(&format!(
-        "fz://blob/{}#L1-1",
+        "z://blob/{}#L1-1",
         zero_ref::content_hash_hex(b"\xff")
     ))
     .unwrap();

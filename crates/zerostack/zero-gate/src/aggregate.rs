@@ -1,16 +1,4 @@
 //! Truthful aggregate Program receipts across FSZero, GraphZero, and TokenZero.
-//!
-//! A Program-level aggregate may report success only when every required engine
-//! (FSZero, GraphZero, TokenZero) carries distinct, digest-bound evidence for
-//! every required evidence class (planner, worker, MCP, lifecycle, GC). This
-//! module is pure, sync, and no-I/O; `verify` is a cold receipt-validation
-//! path. It never certifies semantic sufficiency (T6) and never widens the
-//! engine or class vocabulary silently — a new member requires a schema
-//! successor.
-//!
-//! `verify` fails closed: any missing engine, missing surface, duplicate slot,
-//! unknown engine, zero digest, noncanonical ordering, or forged `receipt_head`
-//! returns a documented typed failure that can never count as Program success.
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -41,9 +29,8 @@ const AGGREGATE_PROGRAM_CONTRACT_DOMAIN: &[u8] = b"zerostack.aggregate_program_r
 const AGGREGATE_PROGRAM_RECEIPT_DOMAIN: &[u8] = b"zerostack.aggregate_program_receipt.head\0";
 
 /// Distinct evidence classes an aggregate Program must carry per engine.
-///
-/// Each class stays a separate digest-bound slot; merging classes would hide
-/// which surface contributed (or failed to contribute) evidence.
+/// Each class stays a separate digest-bound slot; merging classes would
+/// hide which surface contributed (or failed to contribute) evidence.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AggregateEvidenceClass {
@@ -69,10 +56,9 @@ impl AggregateEvidenceClass {
     }
 }
 
-/// Exact source repository head bound into the aggregate receipt. The shape
-/// mirrors the two-phase `SourceHead` contract (repository 1..=64
-/// `[A-Za-z0-9._-]` bytes; head 40..=64 lowercase hex) so aggregates and
-/// Program receipts can never disagree on what a source head is.
+/// Exact source repository head bound into the aggregate receipt. The shape mirrors the
+/// two-phase `SourceHead` contract (repository 1..=64 `[A-Za-z0-9._-]` bytes; head 40..=64
+/// lowercase hex) so aggregates and Program receipts can never disagree on what a source head is.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct AggregateSourceHead {
@@ -80,10 +66,9 @@ pub struct AggregateSourceHead {
     pub head: String,
 }
 
-/// One distinct evidence slot: a class plus the digest of that class's evidence
-/// record (planner plan, worker receipt, MCP trace, lifecycle record, GC
-/// record). The digest is bound into the receipt head, so evidence cannot be
-/// substituted after sealing.
+/// One distinct evidence slot: a class plus the digest of that class's evidence record
+/// (planner plan, worker receipt, MCP trace, lifecycle record, GC record). The digest
+/// is bound into the receipt head, so evidence cannot be substituted after sealing.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct EvidenceSlot {
@@ -331,8 +316,7 @@ pub fn aggregate_program_contract_manifest() -> Value {
 /// Digest of the aggregate receipt contract (domain-prefixed, canonical JSON).
 pub fn aggregate_program_contract_digest() -> Sha256Digest {
     let canonical = canonical_json(&aggregate_program_contract_manifest());
-    let mut bytes =
-        Vec::with_capacity(AGGREGATE_PROGRAM_CONTRACT_DOMAIN.len() + canonical.len());
+    let mut bytes = Vec::with_capacity(AGGREGATE_PROGRAM_CONTRACT_DOMAIN.len() + canonical.len());
     bytes.extend_from_slice(AGGREGATE_PROGRAM_CONTRACT_DOMAIN);
     bytes.extend_from_slice(canonical.as_bytes());
     Sha256Digest::from_bytes(sha256(&bytes))
@@ -449,4 +433,3 @@ fn canonical_value<T: Serialize>(value: &T) -> Result<Vec<u8>, AggregateProgramE
 fn is_zero(digest: &Sha256Digest) -> bool {
     digest == &Sha256Digest::ZERO
 }
-

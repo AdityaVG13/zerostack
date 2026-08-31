@@ -1,4 +1,4 @@
-//! Ref-first budget policy: spill overflow to gz://query/<id> refs (ref-contract §7).
+//! Ref-first budget policy that spills overflow to `query/<id>`.
 
 use std::path::Path;
 
@@ -35,9 +35,8 @@ fn persist_query_json_inner(
         file_bytes_match(&json_path, bytes) && file_bytes_match(&digest_path, hash_hex.as_bytes());
     if !query_artifacts_match {
         super::super::atomic_write_file(&json_path, bytes)?;
-        // Full-hash sidecar so expand can resolve via BlobStore/SharedCas after the
-        // legacy queries/<id>.json spill is removed (graphzero-m3wx). Query ids are
-        // only a 16-hex prefix; SharedCas requires the exact 64-hex identity.
+        // Full-hash sidecar so expand can resolve via BlobStore/SharedCas after the legacy queries/<id>.json
+        // spill is removed. Query ids are only a 16-hex prefix; SharedCas requires the exact 64-hex identity.
         super::super::atomic_write_file(&digest_path, hash_hex.as_bytes())?;
     }
 
@@ -58,14 +57,14 @@ fn persist_query_json_inner(
     }
 
     let mut refs_match = true;
-    for ref_id in [format!("gz://query/{id}"), format!("q:{id}")] {
+    for ref_id in [format!("query/{id}"), format!("q:{id}")] {
         if !ref_points_to_store(&ref_id, store_root) {
             refs_match = false;
             super::super::ref_index::record_ref(&ref_id, store_root).map_err(io_other)?;
         }
     }
 
-    // Opt-in capsule spill provenance (graphzero-3wbh.2).
+    // Opt-in capsule spill provenance.
     if super::super::provenance::provenance_enabled() {
         let _ = super::super::provenance::attach_capsule_build_provenance(
             store_root,
@@ -169,7 +168,7 @@ pub fn compact_truncated_budgeted(
     full_tokens: usize,
 ) -> String {
     format!(
-        "{{\"query\":\"{}\",\"snapshot\":{snapshot_id},\"budget\":{budget},\"truncated\":{{\"full_ref\":\"gz://query/{id}\"}},\"accounting\":{{\"visible_tokens\":0,\"full_tokens\":{full_tokens},\"savings_tokens\":0,\"expand_verified\":false}}}}",
+        "{{\"query\":\"{}\",\"snapshot\":{snapshot_id},\"budget\":{budget},\"truncated\":{{\"full_ref\":\"query/{id}\"}},\"accounting\":{{\"visible_tokens\":0,\"full_tokens\":{full_tokens},\"savings_tokens\":0,\"expand_verified\":false}}}}",
         json_escape(query)
     )
 }

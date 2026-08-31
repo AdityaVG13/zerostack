@@ -1,31 +1,4 @@
 //! Authoritative Program assembly over planner, worker, MCP, lifecycle, and GC evidence.
-//!
-//! A `Program` is an executed unit of work that spans five independent evidence
-//! sources: a **planner** (plan + step count), a **worker** (execution, closure
-//! kind, MCP evidence binding, usage), an **MCP** surface (tool and call
-//! commitments), a **lifecycle** state machine (open -> prepared -> executing ->
-//! closed), and a **garbage collector** (collection after lifecycle closure).
-//!
-//! Each source emits its own *report*. Reports are kept separate: none of them
-//! is a proof, and no report may claim another source's outcome. Truthful
-//! aggregation happens only in [`assemble`], which:
-//!
-//! - requires every one of the five reports exactly once ([`ProgramReports`]
-//!   carries `Option`s so a missing source is a real, detectable state);
-//! - recomputes every report's self-binding digest from its fields and rejects
-//!   mismatches ([`ProgramAssemblyError::MalformedReport`]);
-//! - rejects zero-binding ("synthetic") evidence
-//!   ([`ProgramAssemblyError::SyntheticReceipt`]);
-//! - refuses fallback closure: a worker that fell back cannot yield a proof
-//!   ([`ProgramAssemblyError::FallbackReceipt`]);
-//! - cross-checks planner / worker / lifecycle step counts and the MCP evidence
-//!   commitment carried by the worker report;
-//! - requires lifecycle closure before GC evidence counts.
-//!
-//! The resulting [`ProgramProof`] is an opaque, linear object: fields are
-//! private, it is neither `Clone` nor `Deserialize`, and it can only be created
-//! by a successful [`assemble`]. `ProgramProof::verify` re-checks the stored
-//! commitment without needing the source reports again.
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
@@ -1158,4 +1131,3 @@ pub fn assemble(reports: ProgramReports) -> Result<ProgramProof, ProgramAssembly
         gc_digest,
     })
 }
-

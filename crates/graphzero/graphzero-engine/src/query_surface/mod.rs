@@ -1,5 +1,4 @@
-//! GraphZero MCP query tools: symbol, callers, deps, outline, context, hot,
-//! changes, word, search — shared JSON for MCP and CLI.
+//! Typed GraphZero query surfaces for symbols, callers, dependencies, context, and search.
 
 mod budget;
 mod delta;

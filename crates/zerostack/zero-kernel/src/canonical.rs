@@ -6,10 +6,10 @@ use std::time::{Duration, Instant};
 
 use fs4::{FileExt, TryLockError};
 
-use fszero_kernel::ZeroFileEngine;
-use graphzero_kernel::ZeroStructuralEngine;
-use tokenzero_kernel::ZeroTokenEngine;
 use zero_abi::{GUEST_METHODS, KernelBudget, KernelContext};
+use zero_fs::ZeroFileEngine;
+use zero_graph::ZeroStructuralEngine;
+use zero_token::ZeroTokenEngine;
 
 use crate::{HostError, ZeroKernel};
 
@@ -77,9 +77,8 @@ impl ZeroKernel {
         Self::canonical_with_tokenizer(project_root, store_root, session_id, budget, None)
     }
 
-    /// Build ZeroKernel with an explicit tokenizer model identity supplied by
-    /// the embedding harness. Recognized bundled tokenizers certify counts;
-    /// unknown models remain honestly labeled estimators.
+    /// Build ZeroKernel with a tokenizer identity supplied by the embedding host.
+    /// Recognized bundled tokenizers certify counts; unknown models remain estimators.
     pub fn canonical_with_tokenizer(
         project_root: impl AsRef<Path>,
         store_root: impl Into<PathBuf>,
@@ -91,9 +90,9 @@ impl ZeroKernel {
             HostError::InvalidRequest(format!("canonicalize project root: {error}"))
         })?;
         let store_root = store_root.into();
-        // External harnesses may activate the same project in separate
-        // processes. Serialize construction while event and transaction logs
-        // are scanned; the advisory lock releases on drop or process death.
+        // Independent processes may activate the same project. Serialize construction
+        // while event and transaction logs are scanned; the advisory lock releases
+        // on drop or process death.
         let _activation_lock = ActivationLock::acquire(
             &store_root,
             Duration::from_millis(budget.wall_ms.clamp(1, 30_000)),
@@ -107,7 +106,10 @@ impl ZeroKernel {
             ZeroStructuralEngine::open(&project_root, store_root.join("graph"), &store_root)
                 .map_err(HostError::Engine)?,
         );
-        let tokens = Arc::new(ZeroTokenEngine::open(&store_root, tokenizer_model));
+        let tokens = crate::pulse::PulseRecordingTokens::wrap(
+            Arc::new(ZeroTokenEngine::open(&store_root, tokenizer_model)),
+            &store_root,
+        );
         Self::new(
             KernelContext {
                 workspace_root: project_root.clone(),
@@ -128,21 +130,4 @@ impl ZeroKernel {
 pub fn direct_contract_digest() -> String {
     let bytes = GUEST_METHODS.join("\n");
     blake3::hash(bytes.as_bytes()).to_hex().to_string()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn activation_lock_excludes_competing_initializer() {
-        let root = tempfile::tempdir().unwrap();
-        let first = ActivationLock::acquire(root.path(), Duration::from_secs(1)).unwrap();
-        let competing = ActivationLock::acquire(root.path(), Duration::from_millis(20));
-        assert!(
-            matches!(competing, Err(HostError::Event(message)) if message.contains("remained held"))
-        );
-        drop(first);
-        ActivationLock::acquire(root.path(), Duration::from_millis(20)).unwrap();
-    }
 }

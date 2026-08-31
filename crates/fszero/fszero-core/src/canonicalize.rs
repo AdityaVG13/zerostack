@@ -1,8 +1,6 @@
-//! Per-artifact-class canonical forms (fszero-i5px / omega gauge-fixing substrate).
-//!
-//! Canonicalization is pure identity-preserving for semantic equality: sorted
-//! keys, stable ordering, normalized insignificant whitespace. It never claims
-//! unlabeled Q99 savings.
+//! Per-artifact-class canonical forms for omega gauge fixing.
+//! Canonicalization is pure identity-preserving for semantic equality: sorted keys,
+//! stable ordering, normalized insignificant whitespace. It never claims unlabeled Q99 savings.
 
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
@@ -89,7 +87,7 @@ fn canonicalize_json_value(v: &serde_json::Value) -> serde_json::Value {
     }
 }
 
-/// Repo-map: `{ "files": [ { "path", "digest" }, ... ] }` sorted by path.
+/// Repo-map: `{ "files": [ { "path", "digest" },... ] }` sorted by path.
 pub fn canonicalize_repo_map(raw: &str) -> Result<Vec<u8>, CanonicalizeError> {
     let v: serde_json::Value =
         serde_json::from_str(raw).map_err(|e| CanonicalizeError::InvalidJson(e.to_string()))?;

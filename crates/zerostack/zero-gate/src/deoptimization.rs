@@ -1,18 +1,13 @@
-//! Proof-carrying exact deoptimization to a frozen raw-baseline safepoint.
-//!
-//! Deoptimization is a first-class transition. It restores the complete
-//! preregistered effect closure, reinstates the frozen project/reasoning entry,
-//! preserves the raw baseline identity, then consumes a linear invocation into
-//! a verified baseline execution receipt. A journal-root recovery alone is not
-//! baseline readiness or publication authority.
+//! Proof-carrying exact deoptimization to a frozen raw-baseline safepoint. Deoptimization is a
+//! first-class transition.
 
 use std::{error::Error, fmt};
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use zero_abi::{
-    Sha256Digest, NativeStatePolicy, ReasoningContract, canonical_json,
-    reasoning_contract_digest, sha256,
+    NativeStatePolicy, ReasoningContract, Sha256Digest, canonical_json, reasoning_contract_digest,
+    sha256,
 };
 use zero_cert::{CompletenessWitness, Query, VerifiedEvidence};
 use zero_store::RecoveryOutcome;
@@ -22,8 +17,7 @@ use crate::{
     recovery::{RecoveryUnknownDecision, dcr_contract_digest},
     semantic_cut::{ReasoningSafepoint, ReasoningStateStatus},
     transaction::{
-        RestorationScope, TransactionDisposition, TransactionReceipt,
-        transaction_contract_digest,
+        RestorationScope, TransactionDisposition, TransactionReceipt, transaction_contract_digest,
     },
     two_phase::{FailureCode, WorkerEnvelope},
 };
@@ -33,25 +27,17 @@ pub const BASELINE_SAFEPOINT_SCHEMA_VERSION: &str = "zerostack.baseline_safepoin
 pub const BASELINE_RESTORATION_SCHEMA_VERSION: &str = "zerostack.baseline_restoration";
 pub const BASELINE_EXECUTION_SCHEMA_VERSION: &str = "zerostack.baseline_execution";
 pub const DEOPTIMIZATION_PLAN_SCHEMA_VERSION: &str = "zerostack.deoptimization_plan";
-pub const DEOPTIMIZATION_RESUME_SCHEMA_SHA256: &str =
-    "984eeed082d5a1d190f644072e21b4821c5649f19f240e057dfbb6ff9554e8ba";
-pub const DEOPTIMIZATION_EXECUTION_SCHEMA_SHA256: &str =
-    "71c51182f265ae08a46f1530778619071a9dddd9d001cc6cb974345fcb450639";
-pub const DEOPTIMIZATION_PLAN_SCHEMA_SHA256: &str =
-    "667e8ca57b3702882dfb7504b80e13a2de5e6e911e58c8e0d67004e3438da203";
 pub const DEOPTIMIZATION_MAX_CANONICAL_BYTES: usize = 1_048_576;
 
 const SAFEPOINT_DOMAIN: &[u8] = b"zerostack.deoptimization.safepoint_claim\0";
-const SAFEPOINT_CERTIFICATE_DOMAIN: &[u8] =
-    b"zerostack.deoptimization.safepoint_certificate\0";
+const SAFEPOINT_CERTIFICATE_DOMAIN: &[u8] = b"zerostack.deoptimization.safepoint_certificate\0";
 const REASONING_ENTRY_DOMAIN: &[u8] = b"zerostack.deoptimization.reasoning_entry\0";
 const PLAN_DOMAIN: &[u8] = b"zerostack.deoptimization.plan\0";
 const RESTORATION_CLAIM_DOMAIN: &[u8] = b"zerostack.deoptimization.restoration_claim\0";
 const RESUME_PERMIT_DOMAIN: &[u8] = b"zerostack.deoptimization.resume_permit\0";
 const INVOCATION_DOMAIN: &[u8] = b"zerostack.deoptimization.baseline_invocation\0";
 const EXECUTION_CLAIM_DOMAIN: &[u8] = b"zerostack.deoptimization.baseline_execution_claim\0";
-const EXECUTION_RECEIPT_DOMAIN: &[u8] =
-    b"zerostack.deoptimization.baseline_execution_receipt\0";
+const EXECUTION_RECEIPT_DOMAIN: &[u8] = b"zerostack.deoptimization.baseline_execution_receipt\0";
 const VERIFIER_DOMAIN: &[u8] = b"zerostack.deoptimization.verifier_identity\0";
 const CONTRACT_DOMAIN: &[u8] = b"zerostack.deoptimization.contract\0";
 
@@ -265,8 +251,7 @@ impl BaselineReasoningEntry {
                     &[*clean_start_identity_digest],
                 )?;
                 if contract.native_state_policy() != NativeStatePolicy::CleanRestart
-                    || safepoint.reasoning_state_status()
-                        != ReasoningStateStatus::ExactCleanRestart
+                    || safepoint.reasoning_state_status() != ReasoningStateStatus::ExactCleanRestart
                     || safepoint.opaque_reasoning_state_digest()
                         != *clean_start_identity_digest.as_bytes()
                 {
@@ -302,7 +287,7 @@ pub struct BaselineSafepointClaim {
     raw_baseline_input_digest: Sha256Digest,
     raw_decision_view_digest: Sha256Digest,
     assembly_contract_digest: Sha256Digest,
-    raw_worker_contract_digest: Sha256Digest,
+    baseline_engine_contract_digest: Sha256Digest,
     effect_schema_digest: Sha256Digest,
     baseline_reasoning_contract: ReasoningContract,
     baseline_reasoning_contract_digest: Sha256Digest,
@@ -327,7 +312,7 @@ impl BaselineSafepointClaim {
         raw_baseline_input_digest: Sha256Digest,
         raw_decision_view_digest: Sha256Digest,
         assembly_contract_digest: Sha256Digest,
-        raw_worker_contract_digest: Sha256Digest,
+        baseline_engine_contract_digest: Sha256Digest,
         effect_schema_digest: Sha256Digest,
         baseline_reasoning_contract: ReasoningContract,
         reasoning_safepoint: ReasoningSafepoint,
@@ -352,7 +337,7 @@ impl BaselineSafepointClaim {
             raw_baseline_input_digest,
             raw_decision_view_digest,
             assembly_contract_digest,
-            raw_worker_contract_digest,
+            baseline_engine_contract_digest,
             effect_schema_digest,
             baseline_reasoning_contract,
             baseline_reasoning_contract_digest,
@@ -373,7 +358,7 @@ impl BaselineSafepointClaim {
         if self.schema_version != BASELINE_SAFEPOINT_SCHEMA_VERSION {
             return Err(deopt_error(
                 DeoptimizationFailureCode::SchemaVersionMismatch,
-                "baseline safepoint schema version is not v1",
+                "baseline safepoint schema is unsupported",
             ));
         }
         self.baseline_reasoning_contract
@@ -394,7 +379,7 @@ impl BaselineSafepointClaim {
                 self.raw_baseline_input_digest,
                 self.raw_decision_view_digest,
                 self.assembly_contract_digest,
-                self.raw_worker_contract_digest,
+                self.baseline_engine_contract_digest,
                 self.effect_schema_digest,
                 self.baseline_reasoning_contract_digest,
                 self.sampler_randomness_identity_digest,
@@ -495,7 +480,7 @@ impl BaselineSafepointEvidence {
         if self.contract_version != DEOPTIMIZATION_CONTRACT_VERSION {
             return Err(deopt_error(
                 DeoptimizationFailureCode::SchemaVersionMismatch,
-                "safepoint certificate contract version is not v1",
+                "safepoint certificate contract is unsupported",
             ));
         }
         self.claim.validate()?;
@@ -613,7 +598,7 @@ impl DeoptimizationPlanClaim {
         if self.schema_version != DEOPTIMIZATION_PLAN_SCHEMA_VERSION {
             return Err(deopt_error(
                 DeoptimizationFailureCode::SchemaVersionMismatch,
-                "deoptimization plan claim schema version is not v1",
+                "deoptimization plan claim schema is unsupported",
             ));
         }
         require_nonzero(
@@ -826,7 +811,7 @@ impl DeoptimizationPlan {
         if self.contract_version != DEOPTIMIZATION_CONTRACT_VERSION {
             return Err(deopt_error(
                 DeoptimizationFailureCode::SchemaVersionMismatch,
-                "deoptimization plan contract version is not v1",
+                "deoptimization plan contract is unsupported",
             ));
         }
         self.safepoint.validate()?;
@@ -935,8 +920,7 @@ impl DeoptimizationPlanRecord {
                 "trigger": self.trigger,
             }),
         );
-        if self.contract_version != DEOPTIMIZATION_CONTRACT_VERSION
-            || expected != self.plan_digest
+        if self.contract_version != DEOPTIMIZATION_CONTRACT_VERSION || expected != self.plan_digest
         {
             return Err(deopt_error(
                 DeoptimizationFailureCode::PlanDigestMismatch,
@@ -1025,7 +1009,7 @@ impl BaselineRestorationClaim {
         if self.schema_version != BASELINE_RESTORATION_SCHEMA_VERSION {
             return Err(deopt_error(
                 DeoptimizationFailureCode::SchemaVersionMismatch,
-                "baseline restoration schema version is not v1",
+                "baseline restoration schema is unsupported",
             ));
         }
         require_nonzero(
@@ -1215,7 +1199,7 @@ impl BaselineResumePermit {
         if self.contract_version != DEOPTIMIZATION_CONTRACT_VERSION {
             return Err(deopt_error(
                 DeoptimizationFailureCode::SchemaVersionMismatch,
-                "baseline resume permit contract version is not v1",
+                "baseline resume permit contract is unsupported",
             ));
         }
         self.plan.validate()?;
@@ -1274,7 +1258,7 @@ impl BaselineResumePermit {
             raw_decision_view_digest: safepoint.raw_decision_view_digest,
             comparison_identity_digest: safepoint.comparison_identity_digest,
             assembly_contract_digest: safepoint.assembly_contract_digest,
-            raw_worker_contract_digest: safepoint.raw_worker_contract_digest,
+            baseline_engine_contract_digest: safepoint.baseline_engine_contract_digest,
             effect_schema_digest: safepoint.effect_schema_digest,
             baseline_reasoning_contract: safepoint.baseline_reasoning_contract.clone(),
             baseline_reasoning_contract_digest: safepoint.baseline_reasoning_contract_digest,
@@ -1387,7 +1371,7 @@ pub struct FrozenBaselineInvocation {
     raw_decision_view_digest: Sha256Digest,
     comparison_identity_digest: Sha256Digest,
     assembly_contract_digest: Sha256Digest,
-    raw_worker_contract_digest: Sha256Digest,
+    baseline_engine_contract_digest: Sha256Digest,
     effect_schema_digest: Sha256Digest,
     baseline_reasoning_contract: ReasoningContract,
     baseline_reasoning_contract_digest: Sha256Digest,
@@ -1404,7 +1388,7 @@ impl FrozenBaselineInvocation {
         if self.contract_version != DEOPTIMIZATION_CONTRACT_VERSION {
             return Err(deopt_error(
                 DeoptimizationFailureCode::SchemaVersionMismatch,
-                "frozen baseline invocation contract version is not v1",
+                "frozen baseline invocation contract is unsupported",
             ));
         }
         self.resume_record.validate()?;
@@ -1434,7 +1418,7 @@ impl FrozenBaselineInvocation {
                 self.raw_decision_view_digest,
                 self.comparison_identity_digest,
                 self.assembly_contract_digest,
-                self.raw_worker_contract_digest,
+                self.baseline_engine_contract_digest,
                 self.effect_schema_digest,
                 self.baseline_reasoning_contract_digest,
                 self.sampler_randomness_identity_digest,
@@ -1482,7 +1466,7 @@ impl FrozenBaselineInvocation {
                 "raw_baseline_input_digest": self.raw_baseline_input_digest,
                 "raw_baseline_work_limit": self.raw_baseline_work_limit,
                 "raw_decision_view_digest": self.raw_decision_view_digest,
-                "raw_worker_contract_digest": self.raw_worker_contract_digest,
+                "baseline_engine_contract_digest": self.baseline_engine_contract_digest,
                 "reasoning_entry": self.reasoning_entry,
                 "resume_permit_digest": self.resume_permit_digest,
                 "sampler_randomness_identity_digest": self.sampler_randomness_identity_digest,
@@ -1524,7 +1508,7 @@ fn baseline_invocation_digest_from_resume_record(
             "raw_baseline_input_digest": safepoint.raw_baseline_input_digest,
             "raw_baseline_work_limit": safepoint.reserve.raw_baseline_work_limit,
             "raw_decision_view_digest": safepoint.raw_decision_view_digest,
-            "raw_worker_contract_digest": safepoint.raw_worker_contract_digest,
+            "baseline_engine_contract_digest": safepoint.baseline_engine_contract_digest,
             "reasoning_entry": safepoint.reasoning_entry,
             "resume_permit_digest": record.permit_digest,
             "sampler_randomness_identity_digest": safepoint.sampler_randomness_identity_digest,
@@ -1638,9 +1622,6 @@ pub fn deoptimization_contract_manifest() -> Value {
         ],
         "max_canonical_bytes": DEOPTIMIZATION_MAX_CANONICAL_BYTES,
         "proof_carrier": "zero_cert::VerifiedEvidence_successful_build_or_test_exact_claim_payload",
-        "published_execution_schema_sha256": DEOPTIMIZATION_EXECUTION_SCHEMA_SHA256,
-        "published_plan_schema_sha256": DEOPTIMIZATION_PLAN_SCHEMA_SHA256,
-        "published_resume_schema_sha256": DEOPTIMIZATION_RESUME_SCHEMA_SHA256,
         "resource_arithmetic": "integer_native_coordinates_no_scalar_laundering",
     })
 }
@@ -1696,7 +1677,10 @@ fn domain_digest(domain: &[u8], bytes: &[u8]) -> Sha256Digest {
     Sha256Digest::from_bytes(sha256(&value))
 }
 
-fn require_nonzero(label: &'static str, values: &[Sha256Digest]) -> Result<(), DeoptimizationError> {
+fn require_nonzero(
+    label: &'static str,
+    values: &[Sha256Digest],
+) -> Result<(), DeoptimizationError> {
     if values.contains(&Sha256Digest::ZERO) {
         Err(deopt_error(
             DeoptimizationFailureCode::ZeroDigest,
@@ -1786,7 +1770,7 @@ impl BaselineExecutionClaim {
         if self.schema_version != BASELINE_EXECUTION_SCHEMA_VERSION {
             return Err(deopt_error(
                 DeoptimizationFailureCode::SchemaVersionMismatch,
-                "baseline execution claim schema version is not v1",
+                "baseline execution claim schema is unsupported",
             ));
         }
         require_nonzero(
@@ -2120,10 +2104,7 @@ impl fmt::Display for DeoptimizationError {
 
 impl Error for DeoptimizationError {}
 
-fn deopt_error(
-    code: DeoptimizationFailureCode,
-    detail: impl Into<String>,
-) -> DeoptimizationError {
+fn deopt_error(code: DeoptimizationFailureCode, detail: impl Into<String>) -> DeoptimizationError {
     DeoptimizationError {
         code,
         detail: detail.into(),
@@ -2137,4 +2118,3 @@ fn reasoning_error(detail: String) -> DeoptimizationError {
 fn json_error(detail: String) -> DeoptimizationError {
     deopt_error(DeoptimizationFailureCode::Json, detail)
 }
-

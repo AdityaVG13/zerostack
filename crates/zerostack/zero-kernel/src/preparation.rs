@@ -87,12 +87,8 @@ impl CellPreparation {
         Ok(())
     }
 
-    /// Seal the collected source into a prepared cell bound to one exact
-    /// capsule, publication, and speculation binding. Every coordinate must
-    /// agree: the capsule must be a Draft carrying the finalized source as
-    /// its task root, its canonical root must be the published capsule root
-    /// and the binding capsule root, and the binding must carry canonical
-    /// roots with a positive epoch.
+    /// Seal the collected source into a prepared cell bound to one exact capsule, publication, and
+    /// speculation binding.
     pub fn finish(
         self,
         binding: SpeculationBinding,

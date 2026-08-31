@@ -1,4 +1,4 @@
-//! Tier-B merge helpers (P3.1 FR-005, FR-006, FR-007).
+//! Tier-B merge helpers.
 
 use std::collections::BTreeMap;
 

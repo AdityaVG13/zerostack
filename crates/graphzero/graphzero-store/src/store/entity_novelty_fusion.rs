@@ -1,10 +1,5 @@
-//! TokenZero fusion for shared entity novelty (`zerostack.entity-novelty`).
-//!
-//! Bead: `graphzero-entity-refs-lfoo.5`.
-//!
-//! Persist GraphZero [`EntityId`] digests under the shared store path and
-//! optionally publish an immutable snapshot via [`SharedCas`]. Does **not**
-//! invent `tz://entity/` — refs stay `gz://entity/<64-hex>`.
+//! Persists GraphZero entity digests under the shared novelty store path.
+//! Immutable snapshots may be published through [`SharedCas`].
 
 use std::fs;
 use std::io;
@@ -18,14 +13,14 @@ use super::entity::{EntityId, EntityNovelty};
 use super::session::SeenScope;
 use super::shared_cas::SharedCas;
 
-/// Frozen schema id (TokenZero `schemas/entity-novelty/v1/`).
+/// Frozen schema id (TokenZero `schemas/entity-novelty/`).
 pub const ENTITY_NOVELTY_SCHEMA_VERSION: &str = "zerostack.entity-novelty";
 
 /// Record type constant.
 pub const ENTITY_NOVELTY_RECORD_TYPE: &str = "entity-novelty";
 
 /// Relative directory under a ZeroStack / SharedCas store root.
-pub const ENTITY_NOVELTY_REL_DIR: &str = "shared/entity-novelty/v1";
+pub const ENTITY_NOVELTY_REL_DIR: &str = "shared/entity-novelty";
 
 /// Default max entity ids retained per shared novelty scope (disk + CAS snapshot).
 pub const DEFAULT_SHARED_ENTITY_NOVELTY_MAX: usize = 50_000;
@@ -202,7 +197,6 @@ pub fn write_shared_entity_novelty(
 }
 
 /// Union `ids` into the shared novelty set and publish a CAS snapshot.
-///
 /// Returns the updated record (with `cas_digest` set when publish succeeds).
 pub fn merge_shared_entity_novelty(
     store_root: &Path,

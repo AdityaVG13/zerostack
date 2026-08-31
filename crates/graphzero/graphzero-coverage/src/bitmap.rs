@@ -1,7 +1,5 @@
-//! Dense per-blob per-tier bitmap.
-//!
-//! Layout v1: one `u64` per tier per blob.  Bit 0 = `indexed`.
-//! Remaining 63 bits are reserved for future categories.
+//! Dense per-blob per-tier bitmap. Layout: one `u64` per tier per blob.
+//! Bit 0 is `indexed`; the remaining bits are reserved categories.
 
 use graphzero_store::{BlobId, Tier};
 use std::collections::HashMap;
@@ -109,12 +107,12 @@ impl Bitmap {
         }
     }
 
-    /// Tier A placeholder categories (bits 1..=7 reserved for SCIP/LSP).
+    /// Reserved Tier B category bits for SCIP and LSP evidence.
     pub fn tier_b_reserved_bits() -> &'static [u32] {
         &[1, 2, 3, 4, 5, 6, 7]
     }
 
-    /// Tier C placeholder categories (bits 8..=15 reserved for git empirical).
+    /// Reserved Tier C category bits for git evidence.
     pub fn tier_c_reserved_bits() -> &'static [u32] {
         &[8, 9, 10, 11, 12, 13, 14, 15]
     }

@@ -1,59 +1,4 @@
-//! Wave16 Task Lens internal engine contract (hub ABI).
-//!
-//! The Task Lens is the hub ABI through which domain engines expose rooted,
-//! evidence-backed structural inspection over one capsule/snapshot: one
-//! query, one compiler-impact closure, one locus, and a fail-closed
-//! trivalent verdict. It is an engine-to-engine contract, not a model-facing
-//! surface: these types are `#[doc(hidden)]` re-exports and are deliberately
-//! absent from [`crate::zero_kernel::GUEST_METHODS`].
-//!
-//! # Verdict lattice
-//!
-//! The verdict follows the shared trivalent lattice
-//! ([`crate::verdict::SafetyVerdict`]):
-//!
-//! ```text
-//! Unsafe  dominates  Unknown  dominates  Safe
-//! ```
-//!
-//! An engine emits `Safe` only when every Safe law below is positively
-//! established. Anything missing, stale, or incomplete degrades to `Unknown`
-//! with a reason. An explicit semantic choice or conflict is `Unsafe` with
-//! reasons. [`TaskLensResult::validate`] rejects a `Safe` verdict that
-//! violates a law and an `Unsafe` verdict that carries no reasons, so a
-//! corrupt lens result can never be mistaken for authority.
-//!
-//! # Safe laws
-//!
-//! A `Safe` [`TaskLensResult`] must satisfy all of:
-//!
-//! 1. **Exactly one rooted locus** — `locus` is present and anchored to at
-//!    least one content handle (`evidence` or `source`).
-//! 2. **Complete compiler reverse impact** — `impact.complete` is true and
-//!    both `impact.edge_roots` and `impact.reverse_roots` are non-empty: a
-//!    boolean `complete` without rooted compiler evidence is not proof.
-//! 3. **Non-empty fresh proof support** — `proof_support` is non-empty and
-//!    the coverage snapshot is freshness-verified.
-//! 4. **Complete coverage/freshness** — `coverage` is present,
-//!    `freshness_verified` is true, and tier A coverage is at least 99%
-//!    (the GraphZero complete law). Tiers B and C are independent
-//!    coverages and may take any value from 0% to 100%.
-//! 5. **Matching requested snapshot/capsule roots** — every root requested
-//!    on the [`TaskLensRequest`] (`capsule_root`, `required_snapshot`)
-//!    appears in `evidence_roots`.
-//! 7. **Evidence hygiene** — every rooted handle in `locus`, `impact`,
-//!    `proof_support`, and `evidence_roots` re-parses as a canonical
-//!    `z://blob/` handle, and `index_digest` is a live content digest in
-//!    the canonical [`ZeroHandle`] digest domain: exactly 64 lowercase
-//!    hexadecimal characters. `Unknown` may carry partial
-//!    malformed data (it grants no authority); `Safe` never may.
-//!
-//! # Reason hygiene
-//!
-//! `reasons` is the single canonical reason list: sorted and deduplicated,
-//! and equal to the reasons carried by `verdict` (empty for `Safe`).
-//! [`TaskLensResult::normalize`] restores the canonical form;
-//! [`TaskLensResult::validate`] rejects any result that drifted from it.
+//! Rooted structural inspection contract for one capsule or snapshot.
 
 use std::fmt;
 
@@ -67,12 +12,8 @@ use crate::zero_kernel::{AsgrepOptions, StructuralCoverage, StructuralHit, ZeroH
 /// suffix in a symbol.
 pub const TASK_LENS_CONTRACT_VERSION: u16 = 1;
 
-/// Rooted lens request: one query over one optional capsule/snapshot pair.
-///
-/// `capsule_root` and `required_snapshot` name the roots the caller demands
-/// the evidence to cover. A `Safe` result must then anchor its evidence to
-/// exactly those roots (Safe law 5); an engine that cannot honor them must
-/// degrade to `Unknown`.
+/// Rooted lens request: one query over one optional capsule/snapshot pair. `capsule_root` and
+/// `required_snapshot` name the roots the caller demands the evidence to cover.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct TaskLensRequest {
@@ -85,13 +26,8 @@ pub struct TaskLensRequest {
 }
 
 impl TaskLensRequest {
-    /// Fail-closed request hygiene: the lens query must not be blank, and
-    /// every requested root must be a canonical `z://blob/` handle.
-    ///
-    /// Handles are re-parsed because serde's transparent `ZeroHandle`
-    /// encoding does not format-check on deserialization: direct Rust engine
-    /// callers bypass the runtime parser and must not smuggle malformed
-    /// roots into a request.
+    /// Fail-closed request hygiene: the lens query must not be blank, and every requested root must be
+    /// a canonical `z://blob/` handle.
     pub fn validate(&self) -> Result<(), TaskLensError> {
         if self.query.trim().is_empty() {
             return Err(TaskLensError::EmptyQuery);
@@ -107,12 +43,9 @@ impl TaskLensRequest {
     }
 }
 
-/// Compiler reverse-impact closure for the lens locus.
-///
-/// `complete` states that the reverse impact analysis was exhaustive, not
-/// truncated by budget or index gaps. `edge_roots` are the forward edge
-/// roots and `reverse_roots` the reverse edge roots of the impact closure,
-/// each a content handle.
+/// Compiler reverse-impact closure for the lens locus. `complete` states that the reverse impact
+/// analysis was exhaustive, not truncated by budget or index gaps. `edge_roots` are the forward
+/// edge roots and `reverse_roots` the reverse edge roots of the impact closure, each a content handle.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct TaskLensCompilerImpact {
@@ -123,14 +56,8 @@ pub struct TaskLensCompilerImpact {
     pub reverse_roots: Vec<ZeroHandle>,
 }
 
-/// One lens verdict over one locus.
-///
-/// `verdict` is the trivalent outcome; `reasons` is the canonical,
-/// sorted-and-deduplicated reason list and must equal the reasons carried by
-/// `verdict` (empty for `Safe`). `locus` is the single rooted hit when one
-/// exists. `proof_support` and `evidence_roots` are content handles backing
-/// the verdict; `coverage` certifies index coverage and freshness;
-/// `index_digest` identifies the index state the verdict was computed over.
+/// One trivalent verdict for one locus. `reasons` must be canonical and equal the verdict reasons.
+/// `locus` is the rooted hit when present; proof and evidence refs bind supporting artifacts.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct TaskLensResult {
@@ -150,13 +77,9 @@ pub struct TaskLensResult {
 }
 
 impl TaskLensResult {
-    /// Enforce the task-lens laws against one request.
-    ///
-    /// - `Safe` must satisfy every Safe law (1–6) and carry no reasons.
-    /// - `Unsafe` must be explicit: it carries at least one reason.
-    /// - `Unknown` may carry reasons but need not.
-    /// - Every verdict must carry a canonical `reasons` list: sorted,
-    ///   deduplicated, and equal to the reasons on `verdict`.
+    /// Enforce the -lens laws against one request. `Safe` must satisfy every Safe law (1–6) and carry
+    /// no reasons. `Unsafe` must be explicit: it carries at least one reason. `Unknown` may carry
+    /// reasons but need not.
     pub fn validate(&self, request: &TaskLensRequest) -> Result<(), TaskLensError> {
         if !is_sorted_deduped(&self.reasons) {
             return Err(TaskLensError::UnnormalizedReasons);
@@ -182,9 +105,8 @@ impl TaskLensResult {
     }
 
     /// Return a copy with `reasons` (and the verdict's reasons) sorted and
-    /// deduplicated. This restores reason hygiene only; it never repairs a
-    /// missing reason or a mismatch, so the normalized result may still fail
-    /// [`TaskLensResult::validate`].
+    /// deduplicated. This restores reason hygiene only; it never repairs a missing
+    /// reason or a mismatch, so the normalized result may still fail [`TaskLensResult::validate`].
     pub fn normalize(mut self) -> Self {
         self.reasons = sort_dedup(self.reasons);
         self.verdict = match self.verdict {

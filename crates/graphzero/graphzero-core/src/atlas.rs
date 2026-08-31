@@ -91,10 +91,9 @@ impl AddressAtlas {
         self.node_truth.insert(node, truth);
     }
 
-    /// Resolve a fingerprint into calibrated snap level + ranked loci.
-    ///
-    /// Returns Unknown when no token hits; S0 only for a single exact unique hit
-    /// with exact truth class; otherwise S1/S2 with premises (never certificate from rank alone).
+    /// Resolve a fingerprint into calibrated snap level + ranked loci. Returns
+    /// Unknown when no token hits; S0 only for a single exact unique hit with exact
+    /// truth class; otherwise S1/S2 with premises (never certificate from rank alone).
     pub fn resolve(&self, fp: &TaskFingerprint) -> Result<(SnapLevel, Vec<LocusRank>), AtlasError> {
         if fp.tokens.is_empty() {
             return Err(AtlasError::EmptyFingerprint);

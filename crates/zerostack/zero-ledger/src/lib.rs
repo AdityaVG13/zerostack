@@ -1,49 +1,7 @@
 #![forbid(unsafe_code)]
 
-//! RACC resource gauge, T8 exposure/replay identity, and exact-phase dominance receipt.
-//!
-//! This crate is the single home for RACC token accounting arithmetic so that
-//! TokenZero, FSZero, GraphZero and the CodeMode host all account identically.
-//! The crate implements the accounting model documented in `docs/racc/RACC.md`.
-//!
-//! Properties enforced here:
-//!
-//! - **Locked tokenizer gauge.** Every charge carries a [`TokenizerIdentity`];
-//!   mixing identities is a typed error ([`LedgerError::TokenizerIdentityMismatch`]).
-//! - **Append-only monotone counters.** [`ResourceGauge`] exposes no API to
-//!   decrement or rewrite history; overflow is a typed error, never a wrap.
-//! - **Legacy v2 token surface stays readable.** Every model-visible call
-//!   declares its locked-tokenizer input once in [`TokenCharge::input_tokens`]
-//!   and splits it across the six [`ChargeClass`] variants. This is the archived
-//!   v2 per-surface report and remains wire-compatible, but it is **not** the
-//!   complete causal authority: the six classes can omit or double-class
-//!   fallback, restoration, prewarm, and residue work, and declared estimates
-//!   can masquerade as measured facts. Unclassified and double-counted input
-//!   remain typed errors on this surface ([`LedgerError::UnclassifiedInput`],
-//!   [`LedgerError::DoubleCountedInput`]).
-//! - **Complete causal authority is versioned and exclusive.** [`causal_work`]
-//!   replaces the six token classes as complete authority with exactly-one
-//!   classification across candidate, verification, comparison, baseline,
-//!   fallback, restoration, prewarm, and residue. Receipts bind one
-//!   parent-measured integer counter window and a preregistered residue policy;
-//!   declared estimates live in a separate namespace ([`DeclaredEstimate`])
-//!   that can never construct a measured receipt, and an unavailable counter is
-//!   [`ParentCounterObservation::Unmeasured`], never zero. Legacy v2 classes
-//!   map readably without rewriting archives ([`map_legacy_class`]).
-//! - **Integer-only arithmetic.** Retained fractions are parts-per-million
-//!   integers widened to u128; there are no floats and no percentage strings.
-//!   [`RetainedFractionPpm`] is range-validated at construction and on the wire.
-//! - **Unforgeable exactness gates.** [`ExactnessGates`] has no public boolean
-//!   setter: each gate is raised only by presenting a verified evidence handle
-//!   ([`ArchiveAttestation`], [`PolicyEvidence`], [`TaskAcceptanceReceipt`]).
-//! - **V6 metric completion.** [`resource_classes`] adds typed non-token
-//!   ledger classes with honest exactness labels and provider-bill
-//!   reconciliation; [`charging_maps`] stores the disjoint six-phase
-//!   lower-bound maps with overlap checking and Gamma closure;
-//!   [`campaign`] allocates cold-build cost over reuse campaigns;
-//!   [`frontier`] computes the normalized Frontier Closure decomposition.
-//! - **No I/O, sync only.** charge() is a handful of integer adds and performs
-//!   no allocation.
+//! Exact resource accounting, exposure/replay identities, and dominance receipts.
+//! All domains share these arithmetic contracts.
 
 use std::fmt;
 
@@ -63,11 +21,10 @@ pub use campaign::{CampaignError, ReuseCampaign};
 pub use causal_work::{
     CAUSAL_WORK_MAX_CHARGES, CAUSAL_WORK_MAX_ID_BYTES, CAUSAL_WORK_RECEIPT_SCHEMA,
     CAUSAL_WORK_TAXONOMY_VERSION, CausalClassTotals, CausalCounterUnit, CausalWorkCharge,
-    CausalWorkClass, CausalWorkError, CausalWorkFailureCode, CausalWorkOutcome,
-    CausalWorkReceipt, CounterCorrespondenceReceipt, CounterEvidenceMode, DeclaredEstimate,
-    LegacyChargeClass, LegacyClassMapping, ParentCounterIdentity, ParentCounterObservation,
-    ParentCounterWindow, ResiduePolicy, causal_work_contract_digest,
-    causal_work_contract_manifest, map_legacy_class,
+    CausalWorkClass, CausalWorkError, CausalWorkFailureCode, CausalWorkOutcome, CausalWorkReceipt,
+    CounterCorrespondenceReceipt, CounterEvidenceMode, DeclaredEstimate, LegacyChargeClass,
+    LegacyClassMapping, ParentCounterIdentity, ParentCounterObservation, ParentCounterWindow,
+    ResiduePolicy, causal_work_contract_digest, causal_work_contract_manifest, map_legacy_class,
 };
 
 pub use charging_maps::{
@@ -88,11 +45,9 @@ pub use fresh_work::{ActionFreshWork, FreshWorkComponent, FreshWorkVector, Sessi
 /// Parts per million denominator used by every retained-fraction comparison.
 pub const PPM_ONE: u32 = 1_000_000;
 
-/// Canonical-JSON receipt schema version.
-///
-/// Version 2 adds schema_version, the per-class charge breakdown and the derived
-/// racc_input_tokens total; version 1 carried a single caller-supplied
-/// racc_input_tokens field inside the ledger.
+/// Canonical-JSON receipt schema version. Version 2 adds schema_version, the
+/// per-class charge breakdown and the derived racc_input_tokens total; version
+/// 1 carried a single caller-supplied racc_input_tokens field inside the ledger.
 pub const RECEIPT_SCHEMA_VERSION: u32 = 2;
 
 /// A 32-byte content digest, wired as lowercase hex.
@@ -180,12 +135,8 @@ pub struct TokenBudget(pub u64);
 #[serde(transparent)]
 pub struct NextBudget(pub u64);
 
-/// Retained input fraction expressed in parts per million.
-///
-/// RetainedFractionPpm::new(30_000) means keep at most 3% of the raw input
-/// tokens. The value is never a float and never a percentage string (T5). The
-/// inner value is private: the only ways to obtain one are [`Self::new`] and
-/// deserialization, and both reject anything above [`PPM_ONE`].
+/// Retained input fraction in parts per million. `RetainedFractionPpm::new(30_000)` keeps at most
+/// 3% of raw input tokens. The value is never a float or percentage string.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Ord, Serialize)]
 #[serde(transparent)]
 pub struct RetainedFractionPpm(u32);
@@ -218,10 +169,8 @@ impl<'de> Deserialize<'de> for RetainedFractionPpm {
     }
 }
 
-/// The tokenizer gauge that all counts in one ledger are measured against.
-///
-/// T4/T14 require a locked gauge: token counts produced by different
-/// tokenizers are incommensurable and must never be summed.
+/// Tokenizer gauge for every count in one ledger. Counts from different tokenizers are
+/// incommensurable and must never be summed.
 #[derive(Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
 pub struct TokenizerIdentity {
     /// Stable tokenizer name, e.g. cl100k_base.
@@ -254,15 +203,7 @@ impl LedgerConfig {
     }
 }
 
-/// Legacy v2 input-token charge classes (T8, section 2.2).
-///
-/// These six classes are the archived v2 per-surface report and stay readable
-/// and wire-compatible, but they are not the complete causal authority: they
-/// can omit or double-class fallback, restoration, prewarm, and residue work,
-/// and declared estimates can masquerade as measured facts. Complete exactly-one
-/// causal accounting lives in [`causal_work`] ([`CausalWorkClass`],
-/// [`CausalWorkReceipt`]); [`map_legacy_class`] maps these classes readably
-/// without rewriting archives.
+/// Input-token charge classes.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub enum ChargeClass {
     /// Input tokens of an accepted, billed rendering.
@@ -384,10 +325,8 @@ impl TokenLedger {
         }
     }
 
-    /// Total RACC input exposure: the sum over every charge class.
-    ///
-    /// This is the C of the exact-phase certificate. Nothing model-visible is
-    /// excluded, so hiding cost in a side counter cannot lower it.
+    /// Total RACC input exposure: the sum over every charge class. This is the C of the exact-phase
+    /// certificate. Nothing model-visible is excluded, so hiding cost in a side counter cannot lower it.
     pub fn racc_input_tokens(&self) -> Result<u64, LedgerError> {
         let mut total = 0u64;
         for class in ChargeClass::ALL {
@@ -396,11 +335,9 @@ impl TokenLedger {
         Ok(total)
     }
 
-    /// Verifies that every declared input token is classified exactly once.
-    ///
-    /// Returns the class total on success. Declared input above the classified
-    /// sum means a call was left unclassified; a classified sum above the
-    /// declared input means a call was counted twice.
+    /// Verifies that every declared input token is classified exactly once. Returns the
+    /// class total on success. Declared input above the classified sum means a call was left
+    /// unclassified; a classified sum above the declared input means a call was counted twice.
     pub fn check_accounting_complete(&self) -> Result<u64, LedgerError> {
         let classified = self.racc_input_tokens()?;
         if self.declared_input_tokens > classified {
@@ -434,11 +371,9 @@ impl TokenLedger {
     }
 }
 
-/// One append-only charge against a resource gauge.
-///
-/// input_tokens is the total locked-tokenizer input this call made visible to
-/// the model, and must equal the sum of the per-class fields. All fields default
-/// to zero, so an empty charge is trivially reconciled.
+/// One append-only charge against a resource gauge. input_tokens is the total
+/// locked-tokenizer input this call made visible to the model, and must equal the sum of
+/// the per-class fields. All fields default to zero, so an empty charge is trivially reconciled.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct TokenCharge {
     /// Raw-replay input tokens attributable to this call.
@@ -463,10 +398,8 @@ pub struct TokenCharge {
     pub model_calls: u64,
     /// Retries represented.
     pub retries: u64,
-    /// Fresh-work decomposition of this call's declared input.
-    ///
-    /// Either the all-zero (undeclared) vector, or a vector whose component
-    /// sum equals `input_tokens`.
+    /// Fresh-work decomposition of this call's declared input. Either the all-zero
+    /// (undeclared) vector, or a vector whose component sum equals `input_tokens`.
     pub fresh_work: FreshWorkVector,
 }
 
@@ -601,7 +534,6 @@ impl TokenCharge {
 }
 
 /// The RACC resource gauge: a locked tokenizer plus monotone counters.
-///
 /// There is deliberately no API to decrement, reset, or rewrite history.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ResourceGauge {
@@ -636,15 +568,9 @@ impl ResourceGauge {
         self.charges
     }
 
-    /// Applies one append-only charge.
-    ///
-    /// Rejects counts measured with a different tokenizer identity, rejects a
-    /// charge whose declared input is not classified exactly once, and rejects
-    /// overflow rather than wrapping. On any error the ledger is unchanged, so
-    /// the counters stay monotone. Performs no allocation and no I/O.
-    /// Charges one successful or rolled-back task attempt through the existing
-    /// exhaustive token accounting. A zero charge is rejected so speculation
-    /// cannot become free; checked charge() arithmetic keeps counters monotone.
+    /// Applies one append-only charge. Rejects counts measured with a different tokenizer identity,
+    /// rejects a charge whose declared input is not classified exactly once, and rejects overflow
+    /// rather than wrapping. On any error the ledger is unchanged, so the counters stay monotone.
     pub fn charge_task_attempt(
         &mut self,
         tokenizer: &TokenizerIdentity,
@@ -729,10 +655,8 @@ fn fold_root(tag: &str, leaves: &[Digest]) -> Digest {
 }
 
 /// Evidence that every retained span is byte-identical to the archived original.
-///
 /// The handle can only be built by presenting the span digests that fold to the
-/// declared archive root, so a caller cannot assert byte-exactness it cannot
-/// exhibit.
+/// declared archive root, so a caller cannot assert byte-exactness it cannot exhibit.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ArchiveAttestation {
     archive_root: Digest,
@@ -769,11 +693,8 @@ impl ArchiveAttestation {
     }
 }
 
-/// One per-decision policy outcome behind the policy-exactness gate.
-///
-/// These are policy-sufficiency or raw-fallback receipts (paper 8.2). They are
-/// deliberately distinct from the T13 task-no-regret receipts of 8.3 / non-claim
-/// 14.9: proving policy sufficiency is not proving task acceptance.
+/// Policy-sufficiency or raw-fallback outcome for one decision.
+/// This does not prove downstream task acceptance.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PolicyDecision {
     /// Policy sufficiency was proven for this decision.
@@ -839,7 +760,7 @@ impl PolicyEvidence {
     }
 }
 
-/// Outcome of one downstream task acceptance check (T13).
+/// Outcome of one downstream task acceptance check.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum TaskOutcome {
     /// The task was accepted against its preregistered criterion.
@@ -867,12 +788,8 @@ impl TaskOutcome {
     }
 }
 
-/// T13 task-acceptance receipt: every checked task was accepted.
-///
-/// Trusted boundary: the outcomes are minted by the transactional T13 protocol
-/// (zero-gate). Until zero-gate lands, the caller that presents the outcomes is
-/// the trusted party; this type is the seam that will be narrowed to zero-gate.
-/// A task-acceptance receipt never substitutes for policy evidence (8.2/8.3).
+/// Receipt proving every checked task outcome was accepted.
+/// Outcomes must come from the transactional acceptance boundary.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TaskAcceptanceReceipt {
     acceptance_root: Digest,
@@ -922,9 +839,8 @@ pub struct ReceiptRoots {
     pub certificate_root: Digest,
 }
 
-/// The three non-arithmetic exactness gates of the phase certificate.
-///
-/// The booleans are private and there is no public setter: a gate is raised only
+/// The three non-arithmetic exactness gates of the phase certificate. The
+/// booleans are private and there is no public setter: a gate is raised only
 /// by presenting the corresponding verified evidence handle. Default is all-false.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct ExactnessGates {
@@ -946,7 +862,7 @@ impl ExactnessGates {
         self
     }
 
-    /// Raises the task gate from a T13 task-acceptance receipt.
+    /// Marks the task gate with a verified acceptance receipt.
     pub fn with_task_verified(mut self, receipt: &TaskAcceptanceReceipt) -> Self {
         self.task_verified = Some(receipt.acceptance_root());
         self
@@ -968,12 +884,8 @@ impl ExactnessGates {
     }
 }
 
-/// Ex-post exact-phase certificate: C <= epsilon * R plus exactness gates.
-///
-/// Constructed only by [`DominanceReceipt::seal`] or [`ResourceGauge::finalize_receipt`].
-/// A receipt decoded from the wire is a claim, not a proof: its gates are only
-/// meaningful once the archive and certificate roots are re-verified against
-/// evidence handles.
+/// Ex-post exact-phase certificate: C <= epsilon * R plus exactness gates. Constructed only by
+/// [`DominanceReceipt::seal`] or [`ResourceGauge::finalize_receipt`].
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct DominanceReceipt {
     /// Canonical-JSON schema version.
@@ -994,11 +906,9 @@ pub struct DominanceReceipt {
 }
 
 impl DominanceReceipt {
-    /// Seals a ledger into a receipt.
-    ///
-    /// Rejects a zero raw baseline (R = 0 certifies nothing), rejects a ledger
-    /// whose declared input is not classified exactly once, and rejects gates
-    /// whose evidence roots disagree with the receipt roots.
+    /// Seals a ledger into a receipt. Rejects a zero raw baseline (R = 0 certifies
+    /// nothing), rejects a ledger whose declared input is not classified exactly
+    /// once, and rejects gates whose evidence roots disagree with the receipt roots.
     pub fn seal(
         ledger: TokenLedger,
         target_retained_ppm: RetainedFractionPpm,
@@ -1052,16 +962,13 @@ impl DominanceReceipt {
         self.policy_exact_or_fallback
     }
 
-    /// Whether the downstream T13 task acceptance check passed.
+    /// Whether downstream task acceptance was verified.
     pub fn task_verified(&self) -> bool {
         self.task_verified
     }
 
-    /// Pure arithmetic part of the ex-post phase certificate.
-    ///
-    /// Checks racc_input_tokens * 1_000_000 <= raw_input_tokens * target_ppm
-    /// with u128 widening, exactly as RACC_CONTRACT.rs specifies. A zero raw
-    /// baseline is always false: with R = 0 there is no phase to certify.
+    /// Checks the token target with `u128` widening. A zero raw baseline fails because no phase can
+    /// be certified without a denominator.
     pub fn meets_token_target(&self) -> bool {
         if self.ledger.raw_input_tokens == 0 {
             return false;
@@ -1087,10 +994,8 @@ impl DominanceReceipt {
             && self.meets_token_target()
     }
 
-    /// Achieved retained fraction, rounded up to the next ppm.
-    ///
-    /// Returns None when the raw baseline is zero (no ratio is defined) or the
-    /// exposure sum overflows.
+    /// Achieved retained fraction, rounded up to the next ppm. Returns None when
+    /// the raw baseline is zero (no ratio is defined) or the exposure sum overflows.
     pub fn achieved_retained_ppm_ceil(&self) -> Option<u128> {
         let raw = u128::from(self.ledger.raw_input_tokens);
         if raw == 0 {
@@ -1113,10 +1018,9 @@ impl DominanceReceipt {
     }
 }
 
-/// One block of archived content with its raw and RACC exposure multiplicities.
-///
-/// In the paper's notation a block contributes b_i tokens, is exposed r_i
-/// times under a raw replay and d_i times under RACC.
+/// One block of archived content with its raw and RACC exposure multiplicities. In the paper's
+/// notation a block contributes b_i tokens, is exposed r_i times under a raw replay and d_i times
+/// under RACC.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct ExposureBlock {
     /// Token size of the block, b_i.
@@ -1127,11 +1031,8 @@ pub struct ExposureBlock {
     pub racc_exposures: u64,
 }
 
-/// Full exposure account behind a ledger: C = H + sum_i m_i b_i (T8, eq 5.7).
-///
-/// Framing and boundary interactions (system preamble, tool schemas, block
-/// separators) are not blocks: they belong in the fixed overheads H_raw and
-/// H_tz, so that the per-block sums stay exact multiplicities.
+/// Exact exposure account: `C = H + sum_i m_i b_i`. Framing belongs in fixed overheads so
+/// per-block terms remain exact multiplicities.
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct ExposureAccount {
     /// Raw-side fixed overhead, H_raw.
@@ -1173,13 +1074,8 @@ impl ExposureAccount {
         self.blocks.iter().map(|b| u128::from(b.block_tokens)).sum()
     }
 
-    /// Verifies the T8 exact exposure/replay identity (eq 5.7) against a ledger.
-    ///
-    /// The ledger must account for its declared input exactly once, its
-    /// raw_input_tokens must equal C_raw exactly, and its RACC exposure summed
-    /// over every charge class must equal C_tz exactly. Any drift means the
-    /// ledger and the exposure account disagree about history, which invalidates
-    /// every downstream saving claim.
+    /// Verifies exact exposure/replay accounting. The ledger must classify each declared input once,
+    /// and its raw and classified totals must equal the corresponding exposure costs.
     pub fn check_replay_identity(&self, ledger: &TokenLedger) -> Result<(), LedgerError> {
         let racc_actual = u128::from(ledger.check_accounting_complete()?);
         let raw_expected = self.raw_cost()?;
@@ -1203,7 +1099,6 @@ impl ExposureAccount {
     }
 
     /// Exact saving, floor-rounded to ppm: floor((C_raw - C_tz) * 1e6 / C_raw).
-    ///
     /// Returns zero when RACC costs at least as much as the raw replay.
     pub fn saving_ppm_floor(&self) -> Result<u32, LedgerError> {
         let raw = self.raw_cost()?;
@@ -1218,11 +1113,9 @@ impl ExposureAccount {
         Ok(u32::try_from(ppm).unwrap_or(PPM_ONE))
     }
 
-    /// Exact saving as the reduced-free rational pair (numerator, denominator),
-    /// i.e. (C_raw - C_tz, C_raw). Lets callers compare savings exactly without
-    /// floats or rounding.
-    ///
-    /// The numerator is zero when RACC costs at least as much as the raw replay.
+    /// Exact saving as the reduced-free rational pair (numerator, denominator), i.e.
+    /// (C_raw - C_tz, C_raw). Lets callers compare savings exactly without floats or
+    /// rounding. The numerator is zero when RACC costs at least as much as the raw replay.
     pub fn exact_saving_ratio(&self) -> Result<(u128, u128), LedgerError> {
         let raw = self.raw_cost()?;
         if raw == 0 {
@@ -1307,7 +1200,7 @@ pub enum LedgerError {
     },
     /// The exposure account has no blocks, so no ratio is defined.
     EmptyExposureAccount,
-    /// The T8 exposure/replay identity did not hold exactly.
+    /// The exposure/replay identity did not hold.
     ReplayIdentityMismatch {
         /// Which side disagreed.
         side: ExposureSide,

@@ -1,5 +1,5 @@
-//! Compressed Sparse Row adjacency for tier-A edges (FR-006). Every edge
-//! carries an evidence span (INV-002); evidence travels with the edge
+//! Compressed Sparse Row adjacency for tier-A edges. Every edge
+//! carries an evidence span; evidence travels with the edge
 //! through the CSR sort so `evidence[i]` belongs to edge index `i`.
 
 use super::format::SpanEntry;
@@ -17,7 +17,7 @@ pub mod edge_kind {
     }
     pub const CO_CHANGED: u8 = 3;
     pub const SESSION_FOLLOWED: u8 = 4;
-    /// Tier-C publisher kinds (P5.3).
+    /// Tier-C publisher edge kinds.
     pub const RUNTIME_CALLED: u8 = 5;
     pub const LINTER_SMELL: u8 = 6;
     /// Verification run proved a claim about the target.
@@ -25,13 +25,13 @@ pub mod edge_kind {
     /// Verification run refuted or could not prove a claim about the target.
     pub const VERIFICATION_FAILED: u8 = 8;
 
-    /// Declared build dependency (GRAPH-001): manifest -> package sources the
+    /// Declared build dependency: manifest -> package sources the
     /// manifest governs building.
     pub const BUILD_DEPENDS: u8 = 9;
-    /// Declared schema/codegen dependency (GRAPH-001): build-time include of a
+    /// Declared schema/codegen dependency: build-time include of a
     /// schema input or generated artifact (consumer -> included file).
     pub const SCHEMA_DEPENDS: u8 = 10;
-    /// Conservative effect overapprox (GRAPH-001): an effectful producer may
+    /// Conservative effect overapprox: an effectful producer may
     /// touch sibling artifacts at build/runtime (over-invalidates, never
     /// under-invalidates).
     pub const EFFECT_MAY_TOUCH: u8 = 11;
@@ -58,7 +58,7 @@ pub struct BuiltCsr {
     pub targets: Vec<u32>,
     pub kinds: Vec<u8>,
     pub confidences: Vec<u8>,
-    /// `evidence[i]` is the byte-span proof for edge index `i` (INV-002).
+    /// `evidence[i]` is the byte-span proof for edge index `i`.
     pub evidence: Vec<SpanEntry>,
 }
 
@@ -133,31 +133,19 @@ impl CsrBuilder {
     }
 }
 
-/// Precomputed reverse adjacency: for each target node, stores (src, edge_index) pairs.
-/// Converts O(V*E) reverse traversal into O(degree).
-///
-/// Flat CSR representation (graphzero perf): one offsets array + one entries
-/// array. The previous `Vec<Vec<(u32, usize)>>` allocated one heap Vec per
-/// symbol (~38k allocs on this repo) even though most symbols have no
-/// incoming CALLS/REFS/IMPORTS edges; the counting-sort build below produces
-/// the identical per-target `(src, global_edge_idx)` sequence in the same
-/// source order with two linear passes and no per-node allocations.
+/// Reverse adjacency in flat CSR form, grouped by target as source and edge-index pairs.
+/// Traversal cost is proportional to incoming degree.
 pub struct ReverseIndex {
-    /// `offsets[t] .. offsets[t+1]` slice `entries`, ascending by t.
+    /// `offsets[t].. offsets[t+1]` slice `entries`, ascending by t.
     pub offsets: Vec<u32>,
-    /// For target `t`, each entry is `(src, global_edge_idx)`, in the same
-    /// (src-ascending scan) order the previous per-node Vec build produced.
+    /// Entries grouped by target and ordered by ascending source scan.
     pub entries: Vec<(u32, u32)>,
 }
 
 impl ReverseIndex {
     fn from_pairs(n: usize, pairs: Vec<(u32, (u32, u32))>) -> Self {
-        // Two-pass counting placement (O(V+E), no comparison sort): count
-        // per-target, prefix-sum into offsets, then place each pair at its
-        // slot in forward-emission order. Placement is stable because pairs
-        // arrive grouped by nothing but are emitted in src-scan order; equal
-        // targets keep their relative scan order exactly as the previous
-        // per-node Vec build produced.
+        // Two-pass counting placement (O(V+E), no comparison sort): count per-target, prefix-sum into
+        // offsets, then place each pair at its slot in forward-emission order.
         let mut offsets = vec![0u32; n + 1];
         for &(t, _) in &pairs {
             let slot = t as usize + 1;
@@ -193,8 +181,7 @@ impl ReverseIndex {
 }
 
 /// Optional multi-view reverse build (tests / offline). Production Snapshot
-/// materializes each view lazily so blast-only sessions pay for one table, not
-/// three (see graphzero-8n6k6).
+/// materializes each view lazily so blast-only sessions pay for one table, not three (see ).
 pub struct ReverseIndexBundle {
     pub all: ReverseIndex,
     pub blast: ReverseIndex,
@@ -259,8 +246,7 @@ impl ReverseIndex {
         Self::from_pairs(n, pairs)
     }
 
-    /// Incoming `(src, global_edge_idx)` pairs for `target`, in forward-scan
-    /// order — identical sequence to the previous per-node-Vec build.
+    /// Incoming pairs for target in ascending source scan order.
     pub fn callers(&self, target: u32) -> &[(u32, u32)] {
         self.slice_for(target)
     }

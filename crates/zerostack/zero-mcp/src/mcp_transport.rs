@@ -1,9 +1,6 @@
-//! Hub-owned FastMCP compatibility transport.
-//!
-//! Engine adapters provide a validated [`SurfaceRegistration`] and a callback
-//! that owns operation semantics. This module owns tool registration, bounded
-//! callback execution, cancellation hooks, and FastMCP stdio lifecycle. It
-//! does not import an engine crate or execute CodeMode plans.
+//! Hub-owned MCP carrier for the single ZeroKernel `zero` tool. The
+//! carrier owns bounded callback execution, cancellation hooks, and stdio
+//! lifecycle. Domain engines remain behind the in-process ZeroKernel dispatcher.
 
 use std::fmt;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -14,12 +11,7 @@ use std::time::{Duration, Instant};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-#[cfg(feature = "fastmcp")]
-use zero_abi::CanonicalResource;
-use zero_abi::{
-    SurfaceContractError, SurfaceKind, SurfaceRegistration, ZeroKernelResponse, canonical_json,
-    zero_kernel_response_schema,
-};
+use zero_abi::{ZeroKernelResponse, canonical_json, zero_kernel_response_schema};
 
 pub const ZERO_CARRIER_TOOL_NAME: &str = "zero";
 pub const ZERO_CARRIER_PLAN_BYTE_LIMIT: usize = 64 * 1024;
@@ -151,7 +143,7 @@ const CANCELLATION_POLL: Duration = Duration::from_millis(10);
 /// below any product tool timeout so the handler thread is never unbounded.
 const LATE_RESULT_BOUND: Duration = Duration::from_millis(100);
 
-/// Configuration shared by every dynamically registered tool.
+/// Configuration shared by ZeroKernel carrier calls.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct McpTransportConfig {
     /// Finite hub outer deadline. Zero delegates deadline policy to the engine.
@@ -168,18 +160,7 @@ impl Default for McpTransportConfig {
     }
 }
 
-/// Alias-specific MCP catalog metadata. The alias name must already be
-/// declared by the canonical operation; this only preserves its visible face.
-#[derive(Clone, Debug, PartialEq)]
-pub struct McpAliasMetadata {
-    pub canonical_id: String,
-    pub name: String,
-    pub description: Option<String>,
-    pub input_schema: Value,
-    pub output_schema: Option<Value>,
-}
-
-/// Engine-owned MCP initialize identity.
+/// ZeroKernel MCP initialize identity.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct McpServerIdentity {
     pub name: String,
@@ -209,14 +190,6 @@ impl McpServerIdentity {
     }
 }
 
-/// Model-visible MCP error text policy.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum McpErrorPresentation {
-    #[default]
-    Structured,
-    PlainMessage,
-}
-
 impl McpTransportConfig {
     pub fn validate(self) -> Result<Self, McpTransportError> {
         if self.tool_timeout > MAX_MCP_TOOL_TIMEOUT {
@@ -237,17 +210,6 @@ impl McpTransportConfig {
         }
         Ok(self)
     }
-}
-
-/// Validate the selected install-time surface for a compatibility transport.
-pub fn validate_mcp_registration(
-    registration: &SurfaceRegistration,
-) -> Result<(), McpTransportError> {
-    registration.validate()?;
-    if registration.surface != SurfaceKind::Mcp {
-        return Err(McpTransportError::WrongSurface(registration.surface));
-    }
-    Ok(())
 }
 
 /// Cooperative cancellation and deadline information for one domain callback.
@@ -296,8 +258,8 @@ impl McpTextContent {
     }
 }
 
-/// Engine callback output. `Json` preserves the original compatibility path;
-/// `Text` preserves exact, ordered MCP content entries without reserialization.
+/// Engine callback output. `Json` serializes one value; `Text` preserves exact,
+/// ordered MCP content entries.
 #[derive(Clone, Debug, PartialEq)]
 pub enum McpDispatchOutput {
     Json(Value),
@@ -305,21 +267,6 @@ pub enum McpDispatchOutput {
 }
 
 impl From<Value> for McpDispatchOutput {
-    fn from(value: Value) -> Self {
-        Self::Json(value)
-    }
-}
-
-/// Engine-owned resource output. Text and blob carriers remain byte-visible;
-/// JSON keeps the compatibility behavior used by existing adapters.
-#[derive(Clone, Debug, PartialEq)]
-pub enum McpResourceOutput {
-    Json(Value),
-    Text(String),
-    Blob(String),
-}
-
-impl From<Value> for McpResourceOutput {
     fn from(value: Value) -> Self {
         Self::Json(value)
     }
@@ -342,29 +289,6 @@ pub trait McpDispatcher: Send + Sync {
     ) -> Result<McpDispatchOutput, McpDispatchError> {
         self.dispatch(tool, arguments, context)
             .map(McpDispatchOutput::Json)
-    }
-}
-
-/// Engine-owned resource payload seam. The transport owns only bounded
-/// execution and FastMCP serialization; URI meaning stays with the engine.
-pub trait McpResourceReader: Send + Sync {
-    fn read(&self, uri: &str, context: &McpCallContext) -> Result<Value, McpDispatchError>;
-
-    fn read_output(
-        &self,
-        uri: &str,
-        context: &McpCallContext,
-    ) -> Result<McpResourceOutput, McpDispatchError> {
-        self.read(uri, context).map(McpResourceOutput::Json)
-    }
-}
-
-impl<F> McpResourceReader for F
-where
-    F: Fn(&str, &McpCallContext) -> Result<Value, McpDispatchError> + Send + Sync,
-{
-    fn read(&self, uri: &str, context: &McpCallContext) -> Result<Value, McpDispatchError> {
-        self(uri, context)
     }
 }
 
@@ -552,12 +476,8 @@ impl std::error::Error for McpDispatchError {}
 #[derive(Debug)]
 pub enum McpTransportError {
     InvalidConfig(String),
-    InvalidAliasMetadata(String),
     InvalidServerIdentity(String),
     InvalidCarrier(String),
-    Surface(SurfaceContractError),
-    WrongSurface(SurfaceKind),
-    MissingResourceReader,
 }
 
 impl fmt::Display for McpTransportError {
@@ -566,38 +486,17 @@ impl fmt::Display for McpTransportError {
             Self::InvalidConfig(message) => {
                 write!(formatter, "invalid MCP transport config: {message}")
             }
-            Self::InvalidAliasMetadata(message) => {
-                write!(formatter, "invalid MCP alias metadata: {message}")
-            }
             Self::InvalidServerIdentity(message) => {
                 write!(formatter, "invalid MCP server identity: {message}")
             }
             Self::InvalidCarrier(message) => {
                 write!(formatter, "invalid ZeroKernel carrier: {message}")
             }
-            Self::Surface(error) => write!(formatter, "invalid MCP surface registration: {error}"),
-            Self::WrongSurface(surface) => write!(
-                formatter,
-                "MCP compatibility transport requires mcp surface, got {}",
-                surface.as_str()
-            ),
-            Self::MissingResourceReader => {
-                write!(
-                    formatter,
-                    "MCP resources require an engine-owned resource reader"
-                )
-            }
         }
     }
 }
 
 impl std::error::Error for McpTransportError {}
-
-impl From<SurfaceContractError> for McpTransportError {
-    fn from(error: SurfaceContractError) -> Self {
-        Self::Surface(error)
-    }
-}
 
 struct Inflight {
     active: AtomicUsize,
@@ -707,27 +606,6 @@ where
     )
 }
 
-#[cfg(feature = "fastmcp")]
-fn execute_resource_with_limiter<F>(
-    reader: Arc<dyn McpResourceReader>,
-    uri: &str,
-    config: McpTransportConfig,
-    limiter: Arc<Inflight>,
-    externally_cancelled: F,
-) -> Result<McpResourceOutput, McpDispatchError>
-where
-    F: Fn() -> bool,
-{
-    let owned_uri = uri.to_owned();
-    execute_bounded(
-        uri,
-        config,
-        limiter,
-        move |context| reader.read_output(&owned_uri, context),
-        externally_cancelled,
-    )
-}
-
 trait LateOkPayload {
     fn late_ok_data(self) -> Value;
 }
@@ -746,16 +624,6 @@ impl LateOkPayload for McpDispatchOutput {
                 let texts: Vec<String> = parts.into_iter().map(|part| part.text).collect();
                 serde_json::json!({ "result": { "text": texts } })
             }
-        }
-    }
-}
-
-impl LateOkPayload for McpResourceOutput {
-    fn late_ok_data(self) -> Value {
-        match self {
-            Self::Json(value) => serde_json::json!({ "result": value }),
-            Self::Text(text) => serde_json::json!({ "result": { "text": text } }),
-            Self::Blob(blob) => serde_json::json!({ "result": { "blob": blob } }),
         }
     }
 }
@@ -876,20 +744,8 @@ where
 #[cfg(feature = "fastmcp")]
 mod fastmcp {
     use super::*;
-    use fastmcp_rust::ResourceHandler;
-    use fastmcp_rust::prelude::{
-        Content, McpContext, McpError, Resource, ResourceContent, Server, Tool,
-    };
+    use fastmcp_rust::prelude::{Content, McpContext, McpError, Server, Tool};
     use fastmcp_rust::{ToolAnnotations, ToolHandler};
-    use zero_abi::{CanonicalOperation, EffectClass};
-
-    struct RegisteredTool {
-        definition: Tool,
-        dispatcher: Arc<dyn McpDispatcher>,
-        config: McpTransportConfig,
-        error_presentation: McpErrorPresentation,
-        limiter: Arc<Inflight>,
-    }
 
     struct RegisteredZeroCarrierTool {
         definition: Tool,
@@ -962,10 +818,7 @@ mod fastmcp {
                 Ok(McpDispatchOutput::Json(value)) => {
                     Ok(vec![Content::text(canonical_json(&value))])
                 }
-                Err(error) => Err(present_dispatch_error(
-                    error,
-                    McpErrorPresentation::Structured,
-                )),
+                Err(error) => Err(present_dispatch_error(error)),
             }
         }
     }
@@ -1031,505 +884,10 @@ mod fastmcp {
         }
     }
 
-    pub(super) fn present_dispatch_error(
-        error: McpDispatchError,
-        presentation: McpErrorPresentation,
-    ) -> McpError {
-        match presentation {
-            McpErrorPresentation::Structured => McpError::tool_error(error.wire_text()),
-            McpErrorPresentation::PlainMessage => McpError::tool_error(error.message),
-        }
-    }
-
-    pub(super) struct RegisteredResource {
-        definition: Resource,
-        reader: Arc<dyn McpResourceReader>,
-        config: McpTransportConfig,
-        error_presentation: McpErrorPresentation,
-        limiter: Arc<Inflight>,
-    }
-
-    impl RegisteredResource {
-        pub(super) fn new(
-            resource: &CanonicalResource,
-            reader: Arc<dyn McpResourceReader>,
-            config: McpTransportConfig,
-            error_presentation: McpErrorPresentation,
-            limiter: Arc<Inflight>,
-        ) -> Self {
-            Self {
-                definition: Resource {
-                    uri: resource.uri.clone(),
-                    name: resource.name.clone(),
-                    description: (!resource.description.is_empty())
-                        .then(|| resource.description.clone()),
-                    mime_type: resource.mime_type.clone(),
-                    icon: None,
-                    version: None,
-                    tags: Vec::new(),
-                },
-                reader,
-                config,
-                error_presentation,
-                limiter,
-            }
-        }
-    }
-
-    impl ResourceHandler for RegisteredResource {
-        fn definition(&self) -> Resource {
-            self.definition.clone()
-        }
-
-        fn read(&self, context: &McpContext) -> fastmcp_rust::McpResult<Vec<ResourceContent>> {
-            context
-                .checkpoint()
-                .map_err(|_| McpError::request_cancelled())?;
-            let uri = self.definition.uri.clone();
-            let result = execute_resource_with_limiter(
-                Arc::clone(&self.reader),
-                &uri,
-                self.config,
-                Arc::clone(&self.limiter),
-                || context.is_cancelled(),
-            );
-            context
-                .checkpoint()
-                .map_err(|_| McpError::request_cancelled())?;
-            match result {
-                Ok(output) => {
-                    let (text, blob) = match output {
-                        McpResourceOutput::Json(value) => (
-                            Some(
-                                serde_json::to_string(&value)
-                                    .expect("JSON values are serializable"),
-                            ),
-                            None,
-                        ),
-                        McpResourceOutput::Text(text) => (Some(text), None),
-                        McpResourceOutput::Blob(blob) => (None, Some(blob)),
-                    };
-                    Ok(vec![ResourceContent {
-                        uri,
-                        mime_type: self.definition.mime_type.clone(),
-                        text,
-                        blob,
-                    }])
-                }
-                Err(error) => Err(present_dispatch_error(error, self.error_presentation)),
-            }
-        }
-    }
-
-    impl RegisteredTool {
-        fn new(
-            operation: &CanonicalOperation,
-            dispatcher: Arc<dyn McpDispatcher>,
-            config: McpTransportConfig,
-            error_presentation: McpErrorPresentation,
-            limiter: Arc<Inflight>,
-        ) -> Self {
-            let name = operation
-                .mcp_tool_name
-                .clone()
-                .unwrap_or_else(|| operation.canonical_id.clone());
-            let description = Some(if operation.description.is_empty() {
-                format!("{} operation", operation.canonical_id)
-            } else {
-                operation.description.clone()
-            });
-            Self::with_definition(
-                operation,
-                name,
-                description,
-                operation.args_schema.clone(),
-                operation.output_schema.clone(),
-                dispatcher,
-                config,
-                error_presentation,
-                limiter,
-            )
-        }
-
-        fn new_alias(
-            operation: &CanonicalOperation,
-            alias: &str,
-            metadata: Option<&McpAliasMetadata>,
-            dispatcher: Arc<dyn McpDispatcher>,
-            config: McpTransportConfig,
-            error_presentation: McpErrorPresentation,
-            limiter: Arc<Inflight>,
-        ) -> Self {
-            let canonical_description = Some(if operation.description.is_empty() {
-                format!("{} operation", operation.canonical_id)
-            } else {
-                operation.description.clone()
-            });
-            Self::with_definition(
-                operation,
-                alias.to_owned(),
-                metadata
-                    .map(|entry| entry.description.clone())
-                    .unwrap_or(canonical_description),
-                metadata
-                    .map(|entry| entry.input_schema.clone())
-                    .unwrap_or_else(|| operation.args_schema.clone()),
-                metadata
-                    .map(|entry| entry.output_schema.clone())
-                    .unwrap_or_else(|| operation.output_schema.clone()),
-                dispatcher,
-                config,
-                error_presentation,
-                limiter,
-            )
-        }
-
-        #[allow(clippy::too_many_arguments)]
-        fn with_definition(
-            operation: &CanonicalOperation,
-            name: String,
-            description: Option<String>,
-            input_schema: Value,
-            output_schema: Option<Value>,
-            dispatcher: Arc<dyn McpDispatcher>,
-            config: McpTransportConfig,
-            error_presentation: McpErrorPresentation,
-            limiter: Arc<Inflight>,
-        ) -> Self {
-            let read_only = operation.effect_policy.effect_class == EffectClass::ReadOnly;
-            Self {
-                definition: Tool {
-                    name,
-                    description,
-                    input_schema,
-                    output_schema,
-                    icon: None,
-                    version: None,
-                    tags: Vec::new(),
-                    annotations: Some(ToolAnnotations {
-                        destructive: Some(!read_only),
-                        idempotent: None,
-                        read_only: Some(read_only),
-                        open_world_hint: Some(false),
-                    }),
-                },
-                dispatcher,
-                config,
-                error_presentation,
-                limiter,
-            }
-        }
-    }
-
-    impl ToolHandler for RegisteredTool {
-        fn definition(&self) -> Tool {
-            self.definition.clone()
-        }
-
-        fn call(
-            &self,
-            context: &McpContext,
-            arguments: Value,
-        ) -> fastmcp_rust::McpResult<Vec<Content>> {
-            context
-                .checkpoint()
-                .map_err(|_| McpError::request_cancelled())?;
-            let result = execute_output_with_limiter(
-                Arc::clone(&self.dispatcher),
-                &self.definition.name,
-                arguments,
-                self.config,
-                Arc::clone(&self.limiter),
-                || context.is_cancelled(),
-            );
-            context
-                .checkpoint()
-                .map_err(|_| McpError::request_cancelled())?;
-            match result {
-                Ok(McpDispatchOutput::Json(value)) => Ok(vec![Content::text(
-                    serde_json::to_string(&value).expect("JSON values are serializable"),
-                )]),
-                Ok(McpDispatchOutput::Text(items)) => Ok(items
-                    .into_iter()
-                    .map(|item| Content::text(item.text))
-                    .collect()),
-                Err(error) => Err(present_dispatch_error(error, self.error_presentation)),
-            }
-        }
-    }
-
-    /// A validated dynamic FastMCP server over one engine registration.
-    pub struct FastMcpTransport {
-        registration: SurfaceRegistration,
-        dispatcher: Arc<dyn McpDispatcher>,
-        resource_reader: Option<Arc<dyn McpResourceReader>>,
-        alias_metadata: Vec<McpAliasMetadata>,
-        server_identity: McpServerIdentity,
-        error_presentation: McpErrorPresentation,
-        config: McpTransportConfig,
-    }
-
-    impl FastMcpTransport {
-        pub fn new(
-            registration: SurfaceRegistration,
-            dispatcher: Arc<dyn McpDispatcher>,
-            config: McpTransportConfig,
-        ) -> Result<Self, McpTransportError> {
-            validate_mcp_registration(&registration)?;
-            let config = config.validate()?;
-            if !registration.adapter.registry.resources.is_empty() {
-                return Err(McpTransportError::MissingResourceReader);
-            }
-            let server_identity = McpServerIdentity {
-                name: registration.root.clone(),
-                version: env!("CARGO_PKG_VERSION").into(),
-            };
-            Ok(Self {
-                registration,
-                dispatcher,
-                resource_reader: None,
-                alias_metadata: Vec::new(),
-                server_identity,
-                error_presentation: McpErrorPresentation::default(),
-                config,
-            })
-        }
-
-        /// Construct a transport with an engine-owned resource reader.
-        pub fn with_resources(
-            registration: SurfaceRegistration,
-            dispatcher: Arc<dyn McpDispatcher>,
-            resource_reader: Arc<dyn McpResourceReader>,
-            config: McpTransportConfig,
-        ) -> Result<Self, McpTransportError> {
-            validate_mcp_registration(&registration)?;
-            let config = config.validate()?;
-            let server_identity = McpServerIdentity {
-                name: registration.root.clone(),
-                version: env!("CARGO_PKG_VERSION").into(),
-            };
-            Ok(Self {
-                registration,
-                dispatcher,
-                resource_reader: Some(resource_reader),
-                alias_metadata: Vec::new(),
-                server_identity,
-                error_presentation: McpErrorPresentation::default(),
-                config,
-            })
-        }
-
-        pub fn registration(&self) -> &SurfaceRegistration {
-            &self.registration
-        }
-
-        pub fn with_server_identity(
-            mut self,
-            name: impl Into<String>,
-            version: impl Into<String>,
-        ) -> Result<Self, McpTransportError> {
-            self.server_identity = McpServerIdentity::new(name, version)?;
-            Ok(self)
-        }
-
-        pub fn with_error_presentation(mut self, presentation: McpErrorPresentation) -> Self {
-            self.error_presentation = presentation;
-            self
-        }
-
-        /// Add lossless alias-specific catalog metadata. Every entry must bind
-        /// an alias already declared by its canonical operation.
-        pub fn with_alias_metadata(
-            mut self,
-            alias_metadata: Vec<McpAliasMetadata>,
-        ) -> Result<Self, McpTransportError> {
-            for (index, entry) in alias_metadata.iter().enumerate() {
-                if entry.name.is_empty() || entry.name.trim() != entry.name {
-                    return Err(McpTransportError::InvalidAliasMetadata(format!(
-                        "entry {index} has invalid alias name {:?}",
-                        entry.name
-                    )));
-                }
-                if !entry.input_schema.is_object() || entry.input_schema.get("type").is_none() {
-                    return Err(McpTransportError::InvalidAliasMetadata(format!(
-                        "alias {:?} input schema must be an object with type",
-                        entry.name
-                    )));
-                }
-                if entry
-                    .output_schema
-                    .as_ref()
-                    .is_some_and(|schema| !schema.is_object())
-                {
-                    return Err(McpTransportError::InvalidAliasMetadata(format!(
-                        "alias {:?} output schema must be an object",
-                        entry.name
-                    )));
-                }
-                let Some(operation) = self
-                    .registration
-                    .adapter
-                    .registry
-                    .operations
-                    .iter()
-                    .find(|operation| operation.canonical_id == entry.canonical_id)
-                else {
-                    return Err(McpTransportError::InvalidAliasMetadata(format!(
-                        "unknown canonical operation {:?}",
-                        entry.canonical_id
-                    )));
-                };
-                if !operation.aliases.iter().any(|alias| alias == &entry.name) {
-                    return Err(McpTransportError::InvalidAliasMetadata(format!(
-                        "{:?} is not an alias of {:?}",
-                        entry.name, entry.canonical_id
-                    )));
-                }
-                if alias_metadata[..index].iter().any(|prior| {
-                    prior.canonical_id == entry.canonical_id && prior.name == entry.name
-                }) {
-                    return Err(McpTransportError::InvalidAliasMetadata(format!(
-                        "duplicate alias metadata for {:?}",
-                        entry.name
-                    )));
-                }
-            }
-            self.alias_metadata = alias_metadata;
-            Ok(self)
-        }
-
-        fn alias_metadata(
-            &self,
-            operation: &CanonicalOperation,
-            alias: &str,
-        ) -> Option<&McpAliasMetadata> {
-            self.alias_metadata
-                .iter()
-                .find(|entry| entry.canonical_id == operation.canonical_id && entry.name == alias)
-        }
-
-        /// Return the dynamic tool catalog derived from the canonical registry.
-        pub fn catalog(&self) -> Vec<Tool> {
-            let limiter = Arc::new(Inflight::new(self.config.max_inflight));
-            self.registration
-                .adapter
-                .registry
-                .operations
-                .iter()
-                .flat_map(|operation| {
-                    let canonical = RegisteredTool::new(
-                        operation,
-                        Arc::clone(&self.dispatcher),
-                        self.config,
-                        self.error_presentation,
-                        Arc::clone(&limiter),
-                    )
-                    .definition;
-                    let aliases = operation
-                        .aliases
-                        .iter()
-                        .map(|alias| {
-                            let metadata = self.alias_metadata(operation, alias);
-                            Tool {
-                                name: alias.clone(),
-                                description: metadata
-                                    .map(|entry| entry.description.clone())
-                                    .unwrap_or_else(|| canonical.description.clone()),
-                                input_schema: metadata
-                                    .map(|entry| entry.input_schema.clone())
-                                    .unwrap_or_else(|| canonical.input_schema.clone()),
-                                output_schema: metadata
-                                    .map(|entry| entry.output_schema.clone())
-                                    .unwrap_or_else(|| canonical.output_schema.clone()),
-                                icon: None,
-                                version: None,
-                                tags: Vec::new(),
-                                annotations: canonical.annotations.clone(),
-                            }
-                        })
-                        .collect::<Vec<_>>();
-                    std::iter::once(canonical)
-                        .chain(aliases)
-                        .collect::<Vec<_>>()
-                })
-                .collect()
-        }
-
-        /// Return the dynamic resource catalog. Resource payloads are never
-        /// synthesized by the hub and are available only with a reader.
-        pub fn resource_catalog(&self) -> Vec<Resource> {
-            self.registration
-                .adapter
-                .registry
-                .resources
-                .iter()
-                .map(|resource| Resource {
-                    uri: resource.uri.clone(),
-                    name: resource.name.clone(),
-                    description: (!resource.description.is_empty())
-                        .then(|| resource.description.clone()),
-                    mime_type: resource.mime_type.clone(),
-                    icon: None,
-                    version: None,
-                    tags: Vec::new(),
-                })
-                .collect()
-        }
-
-        pub fn build_server(&self) -> Server {
-            let limiter = Arc::new(Inflight::new(self.config.max_inflight));
-            let mut builder = Server::new(
-                self.server_identity.name.clone(),
-                self.server_identity.version.clone(),
-            )
-            .request_timeout(0);
-            for operation in &self.registration.adapter.registry.operations {
-                builder = builder.tool(RegisteredTool::new(
-                    operation,
-                    Arc::clone(&self.dispatcher),
-                    self.config,
-                    self.error_presentation,
-                    Arc::clone(&limiter),
-                ));
-                for alias in &operation.aliases {
-                    builder = builder.tool(RegisteredTool::new_alias(
-                        operation,
-                        alias,
-                        self.alias_metadata(operation, alias),
-                        Arc::clone(&self.dispatcher),
-                        self.config,
-                        self.error_presentation,
-                        Arc::clone(&limiter),
-                    ));
-                }
-            }
-            if let Some(reader) = &self.resource_reader {
-                for resource in &self.registration.adapter.registry.resources {
-                    builder = builder.resource(RegisteredResource::new(
-                        resource,
-                        Arc::clone(reader),
-                        self.config,
-                        self.error_presentation,
-                        Arc::clone(&limiter),
-                    ));
-                }
-            }
-            builder
-                .instructions(
-                    self.registration
-                        .instructions
-                        .clone()
-                        .unwrap_or_else(|| "ZeroStack engine MCP compatibility transport".into()),
-                )
-                .build()
-        }
-
-        /// Run the validated server on FastMCP's stdio transport.
-        pub fn run_stdio(self) -> ! {
-            self.build_server().run_stdio()
-        }
+    pub(super) fn present_dispatch_error(error: McpDispatchError) -> McpError {
+        McpError::tool_error(error.wire_text())
     }
 }
 
 #[cfg(feature = "fastmcp")]
-pub use fastmcp::{FastMcpTransport, FastMcpZeroCarrier};
+pub use fastmcp::FastMcpZeroCarrier;

@@ -21,7 +21,7 @@ pub fn mem_dir(store_root: &Path) -> PathBuf {
 }
 
 pub fn mem_ref(id: &str) -> String {
-    format!("gz://mem/{id}")
+    format!("mem/{id}")
 }
 
 pub fn remember_fact(snapshot: &Snapshot, input: RememberInput) -> Result<MemoryFact> {
@@ -76,7 +76,7 @@ pub fn persist_fact(store_root: &Path, fact: &MemoryFact) -> Result<()> {
 }
 
 pub fn load_fact(store_root: &Path, id: &str) -> Result<MemoryFact> {
-    validate_safe_id(id, "gz://mem")?;
+    validate_safe_id(id, "mem")?;
     let path = mem_dir(store_root).join(format!("{id}.json"));
     let bytes = fs::read(path).context("mem fact not found")?;
     serde_json::from_slice(&bytes).context("parse mem fact")
@@ -102,7 +102,7 @@ pub fn import_memory(store_root: &Path, export: &MemoryExport) -> Result<usize> 
     }
     let mut written = 0;
     for fact in &export.facts {
-        validate_safe_id(&fact.id, "gz://mem")?;
+        validate_safe_id(&fact.id, "mem")?;
         persist_fact(store_root, fact)?;
         written += 1;
     }
@@ -114,15 +114,11 @@ pub(super) fn normalize_supersedes(ids: Vec<String>) -> Result<Vec<String>> {
     let mut seen = HashSet::new();
     for raw in ids {
         let trimmed = raw.trim();
-        let id = match trimmed.strip_prefix("gz://mem/") {
-            Some(stripped) => stripped,
-            None => trimmed,
-        }
-        .to_string();
+        let id = trimmed.strip_prefix("mem/").unwrap_or(trimmed).to_string();
         if id.is_empty() || !seen.insert(id.clone()) {
             continue;
         }
-        validate_safe_id(&id, "gz://mem")?;
+        validate_safe_id(&id, "mem")?;
         out.push(id);
     }
     Ok(out)

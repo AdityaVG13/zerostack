@@ -1,27 +1,34 @@
 [package]
 name = "zero-kernel"
-version = "0.1.0"
+version.workspace = true
 edition.workspace = true
 license.workspace = true
 description = "Daemonless in-process ZeroKernel runtime with direct z bindings"
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
 
 [dependencies]
-parking_lot = "0.12"
-tree-sitter = "0.26.12"
-tree-sitter-typescript = "0.23.2"
-zero-codemode = { path = "../zero-codemode" }
-tokenzero-kernel.workspace = true
-graphzero-kernel.workspace = true
-fszero-kernel.workspace = true
+parking_lot = { workspace = true }
+tree-sitter = { workspace = true }
+tree-sitter-typescript = { workspace = true }
+zero-codemode = { workspace = true }
+zero-token.workspace = true
+zero-graph.workspace = true
+zero-fs.workspace = true
 blake3 = { workspace = true }
 fs4 = { workspace = true }
+getrandom = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-thiserror = "2"
-zero-abi = { path = "../zero-abi" }
-zero-mcp = { path = "../zero-mcp", optional = true, features = ["fastmcp"] }
-zero-process = { path = "../zero-process" }
-zero-store = { path = "../zero-store" }
+thiserror = { workspace = true }
+zero-abi = { workspace = true }
+zero-gate = { workspace = true }
+zero-gauge = { workspace = true }
+zero-mcp = { workspace = true, optional = true, features = ["fastmcp"] }
+zero-process = { workspace = true }
+zero-store = { workspace = true }
+zero-pulse = { workspace = true }
 
 [features]
 # The FastMCP stdio carrier (the `zero-kernel mcp` command) is transport, not
@@ -31,8 +38,8 @@ default = ["mcp-carrier"]
 mcp-carrier = ["dep:zero-mcp"]
 
 [dev-dependencies]
-tempfile = "3"
-zerostack-test-support = { path = "../../../tests/support" }
+tempfile = { workspace = true }
+zerostack-test-support = { workspace = true, features = ["kernel"] }
 [[test]]
 name = "direct_host"
 path = "../../../tests/zero_kernel_direct_host.rs"
@@ -44,6 +51,14 @@ path = "../../../tests/zero_kernel_provider_usage.rs"
 [[test]]
 name = "speculation"
 path = "../../../tests/zero_kernel_speculation.rs"
+
+[[test]]
+name = "pulse_record"
+path = "../../../tests/zero_kernel_pulse_record.rs"
+[[test]]
+name = "product_integration"
+path = "../../../tests/zero_kernel_product_integration.rs"
+
 
 [[bin]]
 name = "zero-kernel"

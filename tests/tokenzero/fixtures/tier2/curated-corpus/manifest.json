@@ -1,0 +1,35 @@
+{
+  "schema": "gauntlet.golden.manifest",
+  "tier": "Tier2Canonical",
+  "source": "curated-corpus",
+  "reference_version": "tokenzero-spec@HEAD-fb73416",
+  "canonicalization_fn": "json_project_capsule_vs_passthrough",
+  "equivalence_predicate": "canonical_json_eq",
+  "replay_command": "cargo test -p zero-token --test token_output_contract -- --test-threads=1",
+  "entries": [
+    {
+      "fixture_id": "project-capsule",
+      "tier": "Tier2Canonical",
+      "source": "curated-corpus",
+      "sha256": "69e3c25c61bff67f70460fb7740efcf8962127d83b47613d0cf692e6909d04f5",
+      "source_artifact_path": "tests/tokenzero/fixtures/tier2/curated-corpus/project-capsule.golden",
+      "canonicalization_fn": "json_project_capsule_vs_passthrough",
+      "equivalence_predicate": "canonical_json_eq",
+      "capture_timestamp": "2026-08-24T09:00:00Z",
+      "reference_version": "tokenzero-spec@HEAD-fb73416",
+      "replay_command": "cargo test -p zero-token --test token_output_contract -- --test-threads=1"
+    },
+    {
+      "fixture_id": "project-passthrough",
+      "tier": "Tier2Canonical",
+      "source": "curated-corpus",
+      "sha256": "8268a6632df0a20c4ca4a882e9a05e28b0d2d41fa64a5bb7eade5e49fedc95e4",
+      "source_artifact_path": "tests/tokenzero/fixtures/tier2/curated-corpus/project-passthrough.golden",
+      "canonicalization_fn": "json_project_capsule_vs_passthrough",
+      "equivalence_predicate": "canonical_json_eq",
+      "capture_timestamp": "2026-08-24T09:00:00Z",
+      "reference_version": "tokenzero-spec@HEAD-fb73416",
+      "replay_command": "cargo test -p zero-token --test token_output_contract -- --test-threads=1"
+    }
+  ]
+}

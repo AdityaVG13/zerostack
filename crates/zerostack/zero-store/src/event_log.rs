@@ -1,12 +1,6 @@
-//! Append-only ZeroKernel event publication.
-//!
-//! A model-visible result is valid only after its event object and append-only
-//! session-log entry are durable. Failure returns no publication receipt, so a
-//! caller cannot expose bytes that are absent from the log.
-//!
-//! Provider usage observations persist as a separate append-only sidecar that
-//! references immutable kernel events and content-addressed observation bytes;
-//! publishing usage never mutates a kernel event object.
+//! Append-only ZeroKernel event publication. A model-visible result is valid only after its event
+//! object and append-only session-log entry are durable. Failure returns no publication receipt, so
+//! a caller cannot expose bytes that are absent from the log.
 
 use std::fs::{self, OpenOptions};
 use std::io::{BufRead, BufReader, Write};
@@ -116,14 +110,6 @@ impl EventLog {
         event
             .validate()
             .map_err(|error| EventLogError::Invalid(error.to_string()))?;
-        let capsule = event.capsule.as_ref().ok_or_else(|| {
-            EventLogError::Invalid(
-                "event carries no capsule roots; new writes must be capsule-rooted".into(),
-            )
-        })?;
-        capsule.validate().map_err(|message| {
-            EventLogError::Invalid(format!("invalid capsule tuple: {message}"))
-        })?;
         let visible_digest = digest_hex(model_visible_bytes);
         if event.model_visible_digest != visible_digest {
             return Err(EventLogError::Invalid(format!(
@@ -192,11 +178,6 @@ impl EventLog {
         event
             .validate()
             .map_err(|error| EventLogError::UsageInvalid(error.to_string()))?;
-        if let Some(capsule) = &event.capsule {
-            capsule.validate().map_err(|message| {
-                EventLogError::UsageInvalid(format!("invalid capsule tuple: {message}"))
-            })?;
-        }
         if event.session_id != session_id {
             return Err(EventLogError::UsageInvalid(format!(
                 "kernel event session {} does not match session {session_id}",
@@ -352,11 +333,6 @@ impl EventLog {
             event
                 .validate()
                 .map_err(|error| EventLogError::UsageInvalid(error.to_string()))?;
-            if let Some(capsule) = &event.capsule {
-                capsule.validate().map_err(|message| {
-                    EventLogError::UsageInvalid(format!("invalid capsule tuple: {message}"))
-                })?;
-            }
             if event.session_id != session_id {
                 return Err(EventLogError::UsageInvalid(format!(
                     "usage record event session {} does not match log session {session_id}",
@@ -414,16 +390,6 @@ impl EventLog {
             event
                 .validate()
                 .map_err(|error| EventLogError::Invalid(error.to_string()))?;
-            // Legacy records may predate capsule rooting; a missing tuple is
-            // replayed as-is. Every present tuple must be canonical, and the
-            // record is returned unchanged so replay reconstructs the exact
-            // capsule/provider/cache/speculation/effect/quality/occurrence
-            // roots the event object carries.
-            if let Some(capsule) = &event.capsule {
-                capsule.validate().map_err(|message| {
-                    EventLogError::Invalid(format!("invalid capsule tuple: {message}"))
-                })?;
-            }
             if event.cell_id != record.cell_id
                 || event.model_visible_digest != record.model_visible_digest
             {

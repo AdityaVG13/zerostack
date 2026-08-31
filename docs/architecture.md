@@ -1,6 +1,6 @@
 # Architecture
 
-ZeroStack composes three independent engines behind one reusable in-process host. One monorepo stores the hub under `crates/zerostack/` and the engines under `crates/fszero/`, `crates/graphzero/`, and `crates/tokenzero/`. The engines never import one another.
+ZeroStack composes three independent domain libraries behind one reusable in-process host. One monorepo stores the hub under `crates/zerostack/` and the domain libraries under `crates/fszero/`, `crates/graphzero/`, and `crates/tokenzero/`. The domains never import one another. ZeroGate and ZeroGauge are hub features, not independent engines or products.
 
 ZeroStack is harness-agnostic and can be embedded by any compatible caller.
 
@@ -12,6 +12,8 @@ ZeroStack is harness-agnostic and can be embedded by any compatible caller.
 | FSZero | Exact bytes, snapshots, guarded file effects, restoration | `z.read`, `z.edit`, `z.apply` |
 | GraphZero | Syntax, symbols, relationships, freshness, coverage | `z.find` |
 | TokenZero | Measurement, projection, compression, exact expansion | automatic operation and response boundaries |
+| ZeroGate | Proof-carrying exact scenario closure and read-only Snap-to-File decisions | `z.read({snapToFile: ...})` after trusted GraphZero evidence registration |
+| ZeroGauge | Paired native/Zero measurements and exact savings reports | Rust host API and `zero-kernel savings-report` |
 
 Authority is deliberately narrow. A graph result does not become file content. A compact output does not become the source bytes. A successful file receipt does not commit the cell by itself.
 
@@ -21,11 +23,13 @@ The host retains initialized adapters, durable roots, and session identity. Ever
 
 ```mermaid
 graph LR
-  H[Agent harness] --> K[Reusable ZeroKernel host]
+  H[Embedding application] --> K[Reusable ZeroKernel host]
   K --> F[Fresh bounded frame]
   F --> FS[FSZero]
   F --> G[GraphZero]
   F --> T[TokenZero]
+  K --> Gate[ZeroGate proof gate]
+  K --> Gauge[ZeroGauge measurement]
   F --> P[Owned process tree]
   F --> S[CAS session state]
 ```
@@ -44,11 +48,17 @@ The first file mutation lazily opens one cell transaction. FSZero returns exact 
 
 `z.find` routes text, AST, symbol, relationship, call-path, and semantic modes through GraphZero. Freshness repair and coverage remain engine responsibilities. A no-result answer supports absence only when its scope, parser coverage, and snapshot are sufficient.
 
+## Proof-carrying Snap-to-File
+
+The trusted embedding host registers a validated `GraphZeroCompletenessInput` with `ZeroKernel::register_snap_to_file_completeness`. The returned opaque handle is valid only for that kernel instance. A cell can then pass that handle in `z.read({snapToFile: {...}})`. Guest-authored completeness envelopes are rejected, so a model cannot manufacture a proved closure.
+
+ZeroGate returns a snapped, escaped, or refused packet. A snapped packet carries the exact first expansion and a read-only continuation handle. Unknown coverage escapes to the declared native baseline. Unsafe demand is refused. This path never gains file-edit authority and does not add a seventh `z.*` operation.
+
 ## Output and recovery
 
 TokenZero measures the serialized value at operation and response boundaries. Small values pass through. Larger values may return a bounded projection and exact handles. Recovering a handle returns original bytes and contributes to recovery-aware accounting.
 
-ZeroGauge reports token savings only from paired observations with the same task, machine fingerprint, and measurement kind. Reports carry exact token, byte, and call numerators and denominators. Missing or incomparable observations produce an explicit unknown result, never zero savings or a percentage claim.
+ZeroGauge reports token savings only from explicit paired observations with the same task, machine fingerprint, and measurement kind. Reports carry exact token, byte, and call numerators and denominators. Missing or incomparable observations fail closed; zero denominators and negative savings remain explicit unknown results. `paired_savings_report` exposes the Rust API, and `zero-kernel savings-report --native <native.json> --zero <zero.json>` emits its canonical report. ZeroKernel never invents the native baseline.
 
 ## Zero-miss speculative scheduling
 
@@ -84,6 +94,6 @@ The direct host can prepare, validate, stage, and commit one effect request in o
 
 ## Source and release model
 
-ZeroStack currently ships only as source in this workspace. There is no tagged ZeroStack release and no Homebrew, npm, or Pi package to install. FSZero, GraphZero, and TokenZero are engine crate domains in the same Cargo workspace, not separately published products from this tree.
+ZeroStack currently ships only as source in this workspace. There is no tagged ZeroStack release and no Homebrew, npm, or Pi package to install. FSZero, GraphZero, and TokenZero are internal crate domains in the same Cargo workspace and set `publish = false`; they are not separately published products. The only executable target for product operations is `zero-kernel`, whose subcommands include runtime diagnostics, Program evidence assembly, and paired savings reporting.
 
-Production Rust inherits a workspace Clippy cognitive-complexity deny rule with threshold 25. The detached harness inherits the same threshold. Complexity exceptions are not a compatibility surface; functions above the threshold must be split along existing authority and lifecycle boundaries.
+Split complex functions along existing authority and lifecycle boundaries rather than adding compatibility wrappers.

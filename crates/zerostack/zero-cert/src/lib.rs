@@ -1,14 +1,6 @@
 #![forbid(unsafe_code)]
 
 //! Pure, synchronous verification for proof-carrying RACC evidence.
-//!
-//! VerifiedEvidence cannot be constructed externally:
-//! ~~~compile_fail
-//! use zero_cert::{EvidenceCertificate, VerifiedEvidence};
-//! fn forge(c: &'static EvidenceCertificate<'static>) -> VerifiedEvidence<'static, 'static> {
-//!     VerifiedEvidence { certificate: c }
-//! }
-//! ~~~
 
 pub mod boundary_audit;
 pub mod effect_witness;
@@ -18,46 +10,41 @@ pub mod worker_trust;
 
 pub use boundary_audit::{
     AuthorityBoundaryAuditReport, AuthoritySurface, BOUNDARY_AUDIT_ABI_VERSION,
-    BOUNDARY_AUDIT_DOMAIN, BOUNDARY_AUDIT_SCHEMA_VERSION, BoundaryAuditError,
-    ConstructionSurface, authority_boundary_audit, verify_commit_authority,
-    verify_decision_authority,
+    BOUNDARY_AUDIT_DOMAIN, BOUNDARY_AUDIT_SCHEMA_VERSION, BoundaryAuditError, ConstructionSurface,
+    authority_boundary_audit, verify_commit_authority, verify_decision_authority,
 };
 
 pub use effect_witness::{
     EFFECT_ACCEPTED_DOMAIN, EFFECT_EVIDENCE_REF_DOMAIN, EFFECT_WITNESS_CONTRACT_VERSION,
-    EFFECT_WITNESS_DOMAIN, EFFECT_WITNESS_MAX_CANONICAL_BYTES,
-    EFFECT_WITNESS_MAX_EVIDENCE_REFS, EFFECT_WITNESS_MAX_EXPANSIONS, EffectAccepted,
-    EffectLocalizationClass, EffectLocalization, EffectVerificationOutcome,
-    EffectWitnessError, EffectWitnessFailureCode, EffectWitnessKind, EffectWitness,
-    accept_effect_verification, effect_witness_contract_digest,
-    effect_witness_contract_manifest, incomplete_effect_verification,
-    reject_effect_verification,
+    EFFECT_WITNESS_DOMAIN, EFFECT_WITNESS_MAX_CANONICAL_BYTES, EFFECT_WITNESS_MAX_EVIDENCE_REFS,
+    EFFECT_WITNESS_MAX_EXPANSIONS, EffectAccepted, EffectLocalization, EffectLocalizationClass,
+    EffectVerificationOutcome, EffectWitness, EffectWitnessError, EffectWitnessFailureCode,
+    EffectWitnessKind, accept_effect_verification, effect_witness_contract_digest,
+    effect_witness_contract_manifest, incomplete_effect_verification, reject_effect_verification,
 };
 pub use kernel_runtime::{
-    CACHE_ADMISSION_DOMAIN, CacheAdmissionGate, CacheAdmissionRecord,
-    EVENT_JOURNAL_RECORDS_FILE, EVENT_JOURNAL_SEALED_HEAD_FILE, FileEventJournalStore,
-    InMemoryJournalStore, KERNEL_RUNTIME_VERSION, KernelEventJournal, KernelRuntimeError,
-    JournalStore, ProjectRootGate, RootGateFault, RootGateSession,
+    CACHE_ADMISSION_DOMAIN, CacheAdmissionGate, CacheAdmissionRecord, EVENT_JOURNAL_RECORDS_FILE,
+    EVENT_JOURNAL_SEALED_HEAD_FILE, FileEventJournalStore, InMemoryJournalStore, JournalStore,
+    KERNEL_RUNTIME_VERSION, KernelEventJournal, KernelRuntimeError, ProjectRootGate, RootGateFault,
+    RootGateSession,
 };
 pub use trace_export::{
     BenchmarkReproducibility, DecisionBoundaryAnnotation, DecisionBoundaryKind,
-    DecisionBoundaryLine, DecisionBoundarySummary, SealedBenchmarkManifest,
-    SealedManifestFile, TRACE_EXPORT_ABI_VERSION, TRACE_EXPORT_DOMAIN,
-    TRACE_EXPORT_MANIFEST_FILE, TRACE_EXPORT_MAX_BATCH_RECORDS,
-    TRACE_EXPORT_MAX_RECORD_BYTES, TRACE_EXPORT_RECORDS_FILE,
-    TRACE_EXPORT_SCHEMA_VERSION, TRACE_EXPORT_SEALED_HEAD_FILE, TraceEventKind,
-    TraceExportError, TraceExportReceipt, TraceExportSnapshot, TraceRecord,
-    TraceSealedHead, append_trace_record, export_benchmark_manifest,
-    export_trace_pipeline, open_trace_export, read_exported_benchmark_manifest,
-    read_trace_export, seal_trace_export, summarize_decision_boundaries,
+    DecisionBoundaryLine, DecisionBoundarySummary, SealedBenchmarkManifest, SealedManifestFile,
+    TRACE_EXPORT_ABI_VERSION, TRACE_EXPORT_DOMAIN, TRACE_EXPORT_MANIFEST_FILE,
+    TRACE_EXPORT_MAX_BATCH_RECORDS, TRACE_EXPORT_MAX_RECORD_BYTES, TRACE_EXPORT_RECORDS_FILE,
+    TRACE_EXPORT_SCHEMA_VERSION, TRACE_EXPORT_SEALED_HEAD_FILE, TraceEventKind, TraceExportError,
+    TraceExportReceipt, TraceExportSnapshot, TraceRecord, TraceSealedHead, append_trace_record,
+    export_benchmark_manifest, export_trace_pipeline, open_trace_export,
+    read_exported_benchmark_manifest, seal_trace_export, summarize_decision_boundaries,
     trace_export_contract,
 };
 pub use worker_trust::{
     TrustContext, WORKER_TRUST_ABI_VERSION, WORKER_TRUST_ADMISSION_DOMAIN,
-    WORKER_TRUST_ENVELOPE_DOMAIN, WORKER_TRUST_REFUSAL_DOMAIN,
-    WORKER_TRUST_SCHEMA_VERSION, WorkerAdmissionReceipt, WorkerTrustEnvelope,
-    WorkerFrame, WorkerIdentityClaim, WorkerRefusalReason, WorkerRefusalRecord,
-    WorkerTrustTrace, WorkerTrustBoundary, WorkerTrustError, worker_trust_contract,
+    WORKER_TRUST_ENVELOPE_DOMAIN, WORKER_TRUST_REFUSAL_DOMAIN, WORKER_TRUST_SCHEMA_VERSION,
+    WorkerAdmissionReceipt, WorkerFrame, WorkerIdentityClaim, WorkerRefusalReason,
+    WorkerRefusalRecord, WorkerTrustBoundary, WorkerTrustEnvelope, WorkerTrustError,
+    WorkerTrustTrace, worker_trust_contract,
 };
 
 use serde::{Deserialize, Serialize};
@@ -318,7 +305,8 @@ impl EvidenceCertificate<'_> {
     }
 }
 
-/// Immutable resident bytes and verifier-owned trusted lock lookup. Implementations must not perform I/O.
+/// Immutable resident bytes and verifier-owned trusted lock lookup. Implementations must not
+/// perform I/O.
 pub trait Resolver {
     fn resolve<'a>(&'a self, object_id: &ObjectId) -> Option<&'a [u8]>;
     fn trusted_operator_version<'a>(&'a self, operator_id: &str) -> Option<&'a str>;

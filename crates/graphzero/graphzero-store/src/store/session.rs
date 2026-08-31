@@ -1,10 +1,4 @@
-//! P4.3 session providers: seen-set + navigation traces (ref-contract §5).
-//!
-//! Standalone [`LocalSeenProvider`] / [`LocalTraceProvider`] back byte-span
-//! identity. Default snap ranking wraps them in [`EntityAwareSeenProvider`] so
-//! session dedup also treats linked entities as known facts (bead `.3`).
-//! Dedup counters classify byte vs entity hits for the `.4` ledger metric.
-//! Optional TokenZero enrichment lives in `tokenzero_adapter`.
+//! Session providers for seen sets, navigation traces, and byte-span identity.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::File;
@@ -24,7 +18,7 @@ use super::indexer::{EdgeRecord, IndexData};
 use super::query::DestinationRef;
 use super::refs::GzRef;
 
-pub const TRACE_SCHEMA: &str = "graphzero-trace/v1";
+pub const TRACE_SCHEMA: &str = "graphzero-trace";
 pub const SOURCE_TRACE_INGEST: &str = "trace-ingest";
 
 /// Default max destinations retained per seen-scope in the process ledger.
@@ -117,11 +111,9 @@ pub struct SeenStatus {
     pub source: &'static str,
 }
 
-/// Content hash + byte span key for batch seen lookup.
-///
-/// Span identity stays byte-addressed (`blob` + `#Bstart-end`). Entity novelty
-/// is layered on top by [`EntityAwareSeenProvider`] via view→entity links; this
-/// key is never rewritten to an entity id.
+/// Content hash + byte span key for batch seen lookup. Span identity stays
+/// byte-addressed (`blob` + `#Bstart-end`). Entity novelty is layered on top by
+/// [`EntityAwareSeenProvider`] via view→entity links; this key is never rewritten to an entity id.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct SeenKey {
     pub blob_sha256: String,
@@ -182,7 +174,7 @@ pub trait TraceProvider: Send + Sync {
 }
 
 fn destination_key(blob_sha256: &str, start: u64, end: u64) -> String {
-    format!("gz://blob/{blob_sha256}#B{start}-{end}")
+    format!("z://blob/{blob_sha256}#B{start}-{end}")
 }
 
 /// Resolve the entity behind a destination / view ref, if linked or direct.
@@ -371,11 +363,9 @@ impl SeenProvider for LocalSeenProvider {
     }
 }
 
-/// Layers [`EntityNovelty`] over a byte-level [`SeenProvider`].
-///
-/// Destination ranking / session dedup treat a destination as seen when either
-/// the inner provider has seen these bytes **or** the linked entity is already
-/// known in scope. [`SeenKey`] remains a byte span key.
+/// Layers [`EntityNovelty`] over a byte-level [`SeenProvider`]. Destination ranking /
+/// session dedup treat a destination as seen when either the inner provider has seen these
+/// bytes **or** the linked entity is already known in scope. [`SeenKey`] remains a byte span key.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct EntityAwareSeenProvider<P = LocalSeenProvider> {
     pub inner: P,
@@ -464,18 +454,10 @@ impl TraceProvider for LocalTraceProvider {
     }
 }
 
-/// Clears process session ledger + process dedup ledger.
-///
-/// Production-safe reset for long-lived MCP/daemon sessions (also used by tests).
+/// Clear the process-local session and deduplication ledgers.
 pub fn clear_session_state() {
     DEFAULT_LEDGER.clear();
     super::entity::clear_process_dedup_ledger();
-}
-
-/// Alias of [`clear_session_state`] for operator-facing docs.
-#[inline]
-pub fn reset_session_state() {
-    clear_session_state();
 }
 
 pub fn default_seen_provider() -> EntityAwareSeenProvider<LocalSeenProvider> {
@@ -486,10 +468,9 @@ pub fn default_trace_provider() -> LocalTraceProvider {
     LocalTraceProvider
 }
 
-/// Apply seen-set to capsule destinations; marks newly served refs in session scope.
-///
-/// Classifies removals into byte vs entity (cross-view) hits and records them on
-/// the process [`super::entity::EntityDedupLedger`].
+/// Apply seen-set to capsule destinations; marks newly served refs in
+/// session scope. Classifies removals into byte vs entity (cross-view)
+/// hits and records them on the process [`super::entity::EntityDedupLedger`].
 pub fn apply_seen_to_destinations(
     session_id: Option<&str>,
     seen: &dyn SeenProvider,

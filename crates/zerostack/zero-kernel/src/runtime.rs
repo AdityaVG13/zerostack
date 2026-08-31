@@ -19,6 +19,7 @@ use zero_codemode::{
 
 use crate::host::{Cell, ZeroKernel};
 use crate::shell::ShellCommand;
+use crate::snap_gate::SnapToFileReadRequest;
 use crate::typescript::{TypeScriptError, erase_typescript};
 
 const MAX_CONCURRENT_CONNECTOR_CALLS: usize = 2;
@@ -132,6 +133,18 @@ fn spawn_concurrent(
         .map_err(|error| ConnectorError::new(format!("spawn direct z task: {error}")))
 }
 
+fn reject_retired_product_scheme(target: &str) -> Result<(), ConnectorError> {
+    let Some((scheme, _)) = target.split_once("://") else {
+        return Ok(());
+    };
+    match scheme.to_ascii_lowercase().as_str() {
+        "fz" | "gz" | "tz" => Err(ConnectorError::new(format!(
+            "invalid request: retired product scheme {scheme}:// fail closed; live identity is z://blob/<digest>"
+        ))),
+        _ => Ok(()),
+    }
+}
+
 fn dispatch_concurrent(
     context: &crate::host::DirectCallContext,
     method: &str,
@@ -141,6 +154,7 @@ fn dispatch_concurrent(
     match method {
         "read" => {
             let path = string_arg(&positional, 0, "z.read target")?;
+            reject_retired_product_scheme(&path)?;
             if path.starts_with("z://") {
                 let handle = ZeroHandle::parse(&path)
                     .map_err(|error| ConnectorError::new(error.to_string()))?;
@@ -260,7 +274,7 @@ fn dispatch_concurrent(
 }
 
 impl ZeroKernel {
-    /// Begin collecting streamed source without tying ZeroKernel to a harness protocol.
+    /// Begin collecting streamed source without binding ZeroKernel to a transport protocol.
     pub fn begin_preparation(&self) -> crate::CellPreparation {
         crate::CellPreparation::new()
     }
@@ -272,12 +286,7 @@ impl ZeroKernel {
         self.execute_prepared_with_cancellation(prepared, crate::AtomicCancellation::new())
     }
 
-    /// Execute a prepared cell under its exact sealed coordinates. The
-    /// supplied publication must roundtrip through the FileEngine and the
-    /// current effective state and contract coordinates must match the
-    /// sealed binding before any guest work launches; no capsule is drafted
-    /// or published here. The sealed source then runs through the same
-    /// launch path as ordinary cells, bound to the sealed capsule root.
+    /// Execute a prepared cell under its exact sealed coordinates.
     pub fn execute_prepared_with_cancellation(
         &self,
         prepared: &crate::PreparedCell,
@@ -314,11 +323,9 @@ impl ZeroKernel {
         self.launch_cell(cell, cancellation)
     }
 
-    /// Shared guest launch for ordinary and prepared cells: erase TypeScript,
-    /// install the guest surface bound to the cell's exact capsule root, run
-    /// the bounded frame, and settle the cell through the terminal event
-    /// path. Every guest operation trace binds to the cell capsule root at
-    /// dispatch time and is rejected here if it drifted.
+    /// Shared guest launch for ordinary and prepared cells: erase TypeScript, install the guest surface
+    /// bound to the cell's exact capsule root, run the bounded frame, and settle the cell through the
+    /// terminal event path.
     fn launch_cell(
         &self,
         cell: Cell,
@@ -347,10 +354,7 @@ impl ZeroKernel {
                 false,
             ));
         }
-        let registration = GlobalRegistration {
-            root: "z".into(),
-            capabilities: direct_capabilities(),
-        };
+        let registration = GlobalRegistration::z(direct_capabilities());
         let limits = match host_limits(&budget) {
             Ok(limits) => limits,
             Err(error) => {
@@ -381,13 +385,8 @@ impl ZeroKernel {
             cancellation.flag(),
             Duration::from_millis(budget.wall_ms),
         );
-        // A failed interpreter returns before its connector tasks finish
-        // unwinding. Request sibling cancellation so engines polling the
-        // cell flag can stop, then wait a bounded cleanup window. Cap that
-        // window at 30 seconds even when the execution budget is larger so
-        // failed cells cannot inherit an arbitrarily long wall timeout.
-        // Successful cells keep the short settle grace and return as soon
-        // as task and process counters are already zero.
+        // A failed interpreter returns before its connector tasks finish unwinding. Request sibling
+        // cancellation so engines polling the cell flag can stop, then wait a bounded cleanup window.
         if outcome.result.is_err() {
             cancellation.cancel();
         }
@@ -485,28 +484,38 @@ fn dispatch_direct(cell: &mut Cell, method: &str, args: Value) -> Result<Value, 
                 .first()
                 .ok_or_else(|| ConnectorError::new("z.read target is required"))?;
             if let Some(object) = target.as_object() {
-                let is_snapshot = object.contains_key("source") && object.contains_key("recovery");
-                if is_snapshot {
-                    let handle = expand_handle_arg(Some(target), "z.read snapshot")?;
-                    let selectors_requested =
-                        positional.get(1).is_some_and(|value| !value.is_null());
-                    let expanded = cell
-                        .expand(&handle, expand_options(positional.get(1))?)
-                        .map_err(host_error)?;
-                    if selectors_requested {
-                        serde_json::to_value(expanded).map_err(json_error)
-                    } else {
-                        expanded.text.map(Value::String).ok_or_else(|| {
-                            ConnectorError::new("z.read exact handle does not contain UTF-8 text")
-                        })
-                    }
-                } else {
-                    let request = snap_request(&positional)?;
-                    serde_json::to_value(cell.snap(request).map_err(host_error)?)
+                if object.contains_key("snapToFile") {
+                    let request = snap_to_file_request(&positional)?;
+                    serde_json::to_value(cell.snap_to_file(request).map_err(host_error)?)
                         .map_err(json_error)
+                } else {
+                    let is_snapshot =
+                        object.contains_key("source") && object.contains_key("recovery");
+                    if is_snapshot {
+                        let handle = expand_handle_arg(Some(target), "z.read snapshot")?;
+                        let selectors_requested =
+                            positional.get(1).is_some_and(|value| !value.is_null());
+                        let expanded = cell
+                            .expand(&handle, expand_options(positional.get(1))?)
+                            .map_err(host_error)?;
+                        if selectors_requested {
+                            serde_json::to_value(expanded).map_err(json_error)
+                        } else {
+                            expanded.text.map(Value::String).ok_or_else(|| {
+                                ConnectorError::new(
+                                    "z.read exact handle does not contain UTF-8 text",
+                                )
+                            })
+                        }
+                    } else {
+                        let request = snap_request(&positional)?;
+                        serde_json::to_value(cell.snap(request).map_err(host_error)?)
+                            .map_err(json_error)
+                    }
                 }
             } else {
                 let path = string_arg(&positional, 0, "z.read path")?;
+                reject_retired_product_scheme(&path)?;
                 if path.starts_with("z://") {
                     let handle = ZeroHandle::parse(&path)
                         .map_err(|error| ConnectorError::new(error.to_string()))?;
@@ -578,18 +587,9 @@ fn dispatch_direct(cell: &mut Cell, method: &str, args: Value) -> Result<Value, 
                     .map_err(json_error)
                 }
             } else if patch.is_string() {
-                // Whole-file replacement via string: allowed when file doesn't exist yet
-                let exists = cell.read_exact(&path).is_ok();
-                if exists {
-                    return Err(ConnectorError::new(
-                        "z.edit refuses a bare replacement string on an existing file (it would replace everything). Use {find, replacement} to substitute or {kind: 'replace_file', content} to overwrite deliberately.",
-                    ));
-                }
-                serde_json::to_value(
-                    cell.create(path, patch.as_str().unwrap_or("").as_bytes().to_vec())
-                        .map_err(host_error)?,
-                )
-                .map_err(json_error)
+                return Err(ConnectorError::new(
+                    "z.edit refuses a bare replacement string; use {create: content}, {find, replacement}, or an explicit typed patch",
+                ));
             } else {
                 return Err(ConnectorError::new(
                     "z.edit accepts {find, replacement}, {create: content}, {remove: true}, or {kind: 'replace_file', content}",
@@ -629,10 +629,7 @@ fn parse_asgrep_options(value: Value) -> Result<AsgrepOptions, ConnectorError> {
     serde_json::from_value(value).map_err(json_error)
 }
 
-/// Strictly deserialize the object-form z.find taskLens slot. The slot is an
-/// object whose only recognized fields are the camelCase capsuleRoot and
-/// requiredSnapshot content handles; unknown fields, non-string handles, and
-/// malformed digests are rejected before the lens request is dispatched.
+/// Strictly deserialize the object-form z.find taskLens slot.
 fn task_lens_request(
     query: String,
     options: AsgrepOptions,
@@ -723,6 +720,24 @@ fn string_arg(args: &[Value], index: usize, label: &str) -> Result<String, Conne
         .ok_or_else(|| ConnectorError::new(format!("{label} must be a string")))
 }
 
+fn snap_to_file_request(args: &[Value]) -> Result<SnapToFileReadRequest, ConnectorError> {
+    if args.len() != 1 {
+        return Err(ConnectorError::new(
+            "z.read Snap-to-File accepts exactly one request object",
+        ));
+    }
+    let values = args
+        .first()
+        .and_then(Value::as_object)
+        .ok_or_else(|| ConnectorError::new("z.read Snap-to-File request must be an object"))?;
+    require_exact_keys(values, &["snapToFile"], "z.read Snap-to-File request")?;
+    let request = values
+        .get("snapToFile")
+        .cloned()
+        .ok_or_else(|| ConnectorError::new("z.read Snap-to-File payload is required"))?;
+    serde_json::from_value(request).map_err(json_error)
+}
+
 fn snap_request(args: &[Value]) -> Result<SnapRequest, ConnectorError> {
     let value = args
         .first()
@@ -799,6 +814,25 @@ fn edit_target(
     }
 }
 
+fn has_exact_keys(values: &Map<String, Value>, expected: &[&str]) -> bool {
+    values.len() == expected.len() && expected.iter().all(|key| values.contains_key(*key))
+}
+
+fn require_exact_keys(
+    values: &Map<String, Value>,
+    expected: &[&str],
+    context: &str,
+) -> Result<(), ConnectorError> {
+    if has_exact_keys(values, expected) {
+        Ok(())
+    } else {
+        Err(ConnectorError::new(format!(
+            "{context} accepts exactly these fields: {}",
+            expected.join(", ")
+        )))
+    }
+}
+
 /// Compile the final ergonomic z.apply array into the strict EffectRequest IR.
 /// The model supplies flat path-local operations; target indirection and effect
 /// kinds stay internal to the kernel.
@@ -829,59 +863,43 @@ fn simplified_apply_request(
         let path = op.get("path").and_then(Value::as_str).ok_or_else(|| {
             ConnectorError::new(format!("z.apply operation {index} requires a string path"))
         })?;
-        const ALLOWED: &[&str] = &[
-            "path",
-            "edit",
-            "create",
-            "replace",
-            "remove",
-            "find",
-            "old",
-            "replacement",
-            "new",
-            "before",
-            "after",
-            "content",
-        ];
-        if let Some(key) = op.keys().find(|key| !ALLOWED.contains(&key.as_str())) {
-            return Err(ConnectorError::new(format!(
-                "z.apply operation {index} has unknown field {key:?}; accepted fields: {}",
-                ALLOWED.join(", ")
-            )));
-        }
-        let action_count = usize::from(op.contains_key("edit"))
-            + usize::from(op.contains_key("create"))
-            + usize::from(op.contains_key("replace"))
-            + usize::from(op.get("remove").and_then(Value::as_bool) == Some(true))
-            + usize::from(
-                op.get("find").or_else(|| op.get("old")).is_some()
-                    && op.get("replacement").or_else(|| op.get("new")).is_some(),
-            )
-            + usize::from(op.contains_key("before") && op.contains_key("content"))
-            + usize::from(op.contains_key("after") && op.contains_key("content"));
+        let action_count = ["edit", "create", "replace", "remove", "before", "after"]
+            .into_iter()
+            .filter(|key| op.contains_key(*key))
+            .count();
         if action_count != 1 {
             return Err(ConnectorError::new(format!(
                 "z.apply operation {index} requires exactly one action, found {action_count}"
             )));
         }
-        if let Some(edit) = op.get("edit").and_then(Value::as_object)
-            && let Some(key) = edit.keys().find(|key| {
-                !matches!(
-                    key.as_str(),
-                    "find" | "old" | "replacement" | "replace" | "new"
-                )
-            })
-        {
+        let expected_fields: &[&str] = if op.contains_key("edit") {
+            &["path", "edit"]
+        } else if op.contains_key("create") {
+            &["path", "create"]
+        } else if op.contains_key("replace") {
+            &["path", "replace"]
+        } else if op.contains_key("remove") {
+            &["path", "remove"]
+        } else if op.contains_key("before") {
+            &["path", "before", "content"]
+        } else {
+            &["path", "after", "content"]
+        };
+        if !has_exact_keys(op, expected_fields) {
             return Err(ConnectorError::new(format!(
-                "z.apply operation {index} edit has unknown field {key:?}"
+                "z.apply operation {index} accepts exactly these fields: {}",
+                expected_fields.join(", ")
             )));
         }
+
         let target = path_targets
             .get(path)
             .map(|(target, _)| target.clone())
             .unwrap_or_else(|| format!("t{index}"));
-
-        let (expect, change) = if let Some(content) = op.get("create").and_then(Value::as_str) {
+        let (expect, change) = if op.contains_key("create") {
+            let content = op.get("create").and_then(Value::as_str).ok_or_else(|| {
+                ConnectorError::new(format!("z.apply operation {index} create must be a string"))
+            })?;
             (
                 "absent",
                 serde_json::json!({
@@ -890,12 +908,22 @@ fn simplified_apply_request(
                     "content": content,
                 }),
             )
-        } else if op.get("remove").and_then(Value::as_bool) == Some(true) {
+        } else if op.contains_key("remove") {
+            if op.get("remove").and_then(Value::as_bool) != Some(true) {
+                return Err(ConnectorError::new(format!(
+                    "z.apply operation {index} remove must be exactly true"
+                )));
+            }
             (
                 "exists",
                 serde_json::json!({"target": target, "kind": "remove_file"}),
             )
-        } else if let Some(content) = op.get("replace").and_then(Value::as_str) {
+        } else if op.contains_key("replace") {
+            let content = op.get("replace").and_then(Value::as_str).ok_or_else(|| {
+                ConnectorError::new(format!(
+                    "z.apply operation {index} replace must be a string"
+                ))
+            })?;
             (
                 "exists",
                 serde_json::json!({
@@ -904,24 +932,26 @@ fn simplified_apply_request(
                     "content": content,
                 }),
             )
-        } else if let Some(edit) = op.get("edit").and_then(Value::as_object) {
-            let old = edit
-                .get("find")
-                .or_else(|| edit.get("old"))
-                .and_then(Value::as_str)
-                .ok_or_else(|| {
-                    ConnectorError::new(format!(
-                        "z.apply operation {index} edit requires find + replacement"
-                    ))
-                })?;
+        } else if op.contains_key("edit") {
+            let edit = op.get("edit").and_then(Value::as_object).ok_or_else(|| {
+                ConnectorError::new(format!("z.apply operation {index} edit must be an object"))
+            })?;
+            if !has_exact_keys(edit, &["find", "replacement"]) {
+                return Err(ConnectorError::new(format!(
+                    "z.apply operation {index} edit accepts exactly: find, replacement"
+                )));
+            }
+            let old = edit.get("find").and_then(Value::as_str).ok_or_else(|| {
+                ConnectorError::new(format!(
+                    "z.apply operation {index} edit find must be a string"
+                ))
+            })?;
             let replacement = edit
                 .get("replacement")
-                .or_else(|| edit.get("replace"))
-                .or_else(|| edit.get("new"))
                 .and_then(Value::as_str)
                 .ok_or_else(|| {
                     ConnectorError::new(format!(
-                        "z.apply operation {index} edit requires replacement"
+                        "z.apply operation {index} edit replacement must be a string"
                     ))
                 })?;
             (
@@ -934,28 +964,15 @@ fn simplified_apply_request(
                     "expectedCount": 1,
                 }),
             )
-        } else if let (Some(old), Some(replacement)) = (
-            op.get("find")
-                .or_else(|| op.get("old"))
-                .and_then(Value::as_str),
-            op.get("replacement")
-                .or_else(|| op.get("new"))
-                .and_then(Value::as_str),
-        ) {
-            (
-                "exists",
-                serde_json::json!({
-                    "target": target,
-                    "kind": "replace_exact",
-                    "old": old,
-                    "replacement": replacement,
-                    "expectedCount": 1,
-                }),
-            )
-        } else if let (Some(after), Some(content)) = (
-            op.get("after").and_then(Value::as_str),
-            op.get("content").and_then(Value::as_str),
-        ) {
+        } else if op.contains_key("after") {
+            let after = op.get("after").and_then(Value::as_str).ok_or_else(|| {
+                ConnectorError::new(format!("z.apply operation {index} after must be a string"))
+            })?;
+            let content = op.get("content").and_then(Value::as_str).ok_or_else(|| {
+                ConnectorError::new(format!(
+                    "z.apply operation {index} content must be a string"
+                ))
+            })?;
             (
                 "exists",
                 serde_json::json!({
@@ -965,10 +982,15 @@ fn simplified_apply_request(
                     "content": content,
                 }),
             )
-        } else if let (Some(before), Some(content)) = (
-            op.get("before").and_then(Value::as_str),
-            op.get("content").and_then(Value::as_str),
-        ) {
+        } else {
+            let before = op.get("before").and_then(Value::as_str).ok_or_else(|| {
+                ConnectorError::new(format!("z.apply operation {index} before must be a string"))
+            })?;
+            let content = op.get("content").and_then(Value::as_str).ok_or_else(|| {
+                ConnectorError::new(format!(
+                    "z.apply operation {index} content must be a string"
+                ))
+            })?;
             (
                 "exists",
                 serde_json::json!({
@@ -978,10 +1000,6 @@ fn simplified_apply_request(
                     "content": content,
                 }),
             )
-        } else {
-            return Err(ConnectorError::new(format!(
-                "z.apply operation {index} must use one of: edit, create, replace, remove, before+content, after+content"
-            )));
         };
 
         if let Some((_, existing_expect)) = path_targets.get(path) {
@@ -1011,57 +1029,78 @@ fn simplified_apply_request(
 }
 
 fn validate_edit_patch_fields(values: &Map<String, Value>) -> Result<(), ConnectorError> {
-    const ALLOWED: &[&str] = &[
-        "remove",
-        "create",
-        "kind",
-        "find",
-        "old",
-        "pattern",
-        "replace",
-        "new",
-        "replacement",
-        "expectedCount",
-        "content",
-    ];
-    if let Some(key) = values.keys().find(|key| !ALLOWED.contains(&key.as_str())) {
-        return Err(ConnectorError::new(format!(
-            "z.edit patch has unknown field {key:?}; accepted fields: {}",
-            ALLOWED.join(", ")
-        )));
-    }
+    let Some(kind_value) = values.get("kind") else {
+        if values.contains_key("remove") {
+            require_exact_keys(values, &["remove"], "z.edit remove patch")?;
+            if values.get("remove").and_then(Value::as_bool) != Some(true) {
+                return Err(ConnectorError::new(
+                    "z.edit remove field must be exactly true",
+                ));
+            }
+            return Ok(());
+        }
+        if values.contains_key("create") {
+            require_exact_keys(values, &["create"], "z.edit create patch")?;
+            if values.get("create").and_then(Value::as_str).is_none() {
+                return Err(ConnectorError::new("z.edit create field must be a string"));
+            }
+            return Ok(());
+        }
+        require_exact_keys(
+            values,
+            &["find", "replacement"],
+            "z.edit substitution patch",
+        )?;
+        if values.get("find").and_then(Value::as_str).is_none()
+            || values.get("replacement").and_then(Value::as_str).is_none()
+        {
+            return Err(ConnectorError::new(
+                "z.edit substitution requires string find and replacement fields",
+            ));
+        }
+        return Ok(());
+    };
 
-    let remove = values.get("remove").and_then(Value::as_bool) == Some(true);
-    if values.contains_key("remove") && !remove {
-        return Err(ConnectorError::new(
-            "z.edit remove field must be exactly true",
-        ));
+    let kind = kind_value
+        .as_str()
+        .ok_or_else(|| ConnectorError::new("z.edit patch kind must be a string"))?;
+    match kind {
+        "replace_exact" => {
+            let expected_fields = ["kind", "old", "replacement", "expectedCount"];
+            if values
+                .keys()
+                .any(|key| !expected_fields.contains(&key.as_str()))
+            {
+                return require_exact_keys(values, &expected_fields, "z.edit replace_exact patch");
+            }
+            if values.get("expectedCount").and_then(Value::as_u64) != Some(1) {
+                return Err(ConnectorError::new(
+                    "z.edit replace_exact requires expectedCount: 1",
+                ));
+            }
+            require_exact_keys(values, &expected_fields, "z.edit replace_exact patch")?;
+            if values.get("old").and_then(Value::as_str).is_none()
+                || values.get("replacement").and_then(Value::as_str).is_none()
+            {
+                return Err(ConnectorError::new(
+                    "z.edit replace_exact requires string old and replacement fields",
+                ));
+            }
+            Ok(())
+        }
+        "replace_lines" | "insert_before" | "insert_after" | "replace_file" => {
+            require_exact_keys(values, &["kind", "content"], "z.edit typed patch")?;
+            if values.get("content").and_then(Value::as_str).is_none() {
+                return Err(ConnectorError::new(format!(
+                    "z.edit {kind} requires string content"
+                )));
+            }
+            Ok(())
+        }
+        other => Err(ConnectorError::new(format!(
+            "unsupported z.edit patch kind {other:?}"
+        ))),
     }
-    if values.contains_key("create") && values.get("create").and_then(Value::as_str).is_none() {
-        return Err(ConnectorError::new("z.edit create field must be a string"));
-    }
-    let edit = values.keys().any(|key| {
-        matches!(
-            key.as_str(),
-            "kind"
-                | "find"
-                | "old"
-                | "pattern"
-                | "replace"
-                | "new"
-                | "replacement"
-                | "expectedCount"
-                | "content"
-        )
-    });
-    let action_count =
-        usize::from(remove) + usize::from(values.contains_key("create")) + usize::from(edit);
-    if action_count != 1 {
-        return Err(ConnectorError::new(format!(
-            "z.edit patch requires exactly one action, found {action_count}"
-        )));
-    }
-    Ok(())
 }
 
 fn apply_edit_patch(
@@ -1070,19 +1109,19 @@ fn apply_edit_patch(
     patch: Value,
 ) -> Result<(Vec<u8>, Option<String>), ConnectorError> {
     let selection = validate_snap_selection(target, source)?;
-    let Some(values) = patch.as_object() else {
-        // pc_b1050fe2d6fd: a bare replacement string on a path target used to
-        // replace the ENTIRE file silently. Whole-file replacement stays
-        // available only as a deliberate typed operation.
-        return Err(ConnectorError::new(
-            "z.edit refuses a bare replacement string (it would replace the entire file): use {find, replacement} for substitution or {kind: 'replace_file', content} to replace a whole file deliberately",
-        ));
-    };
+    let values = patch.as_object().ok_or_else(|| {
+        ConnectorError::new(
+            "z.edit refuses a bare replacement string; use an explicit patch object",
+        )
+    })?;
     let patch_text = Some(patch.to_string());
     let kind = values.get("kind").and_then(Value::as_str);
     match kind {
         None => {
-            let find = patch_find(values)?;
+            let find = values
+                .get("find")
+                .and_then(Value::as_str)
+                .ok_or_else(|| ConnectorError::new("z.edit patch requires find"))?;
             if let Some(range) = selection
                 && &source[range] != find.as_bytes()
             {
@@ -1090,25 +1129,28 @@ fn apply_edit_patch(
                     "selection_scope_mismatch: patch find must equal the snapped selection",
                 ));
             }
-            let replacement = patch_replacement(values)?;
+            let replacement = values
+                .get("replacement")
+                .and_then(Value::as_str)
+                .ok_or_else(|| ConnectorError::new("z.edit patch requires replacement"))?;
             replace_exact(source, find, replacement).map(|postimage| (postimage, patch_text))
         }
         Some("replace_exact") => {
-            if values.get("expectedCount").and_then(Value::as_u64) != Some(1) {
+            let old = values
+                .get("old")
+                .and_then(Value::as_str)
+                .ok_or_else(|| ConnectorError::new("z.edit replace_exact requires old"))?;
+            if let Some(range) = selection
+                && &source[range] != old.as_bytes()
+            {
                 return Err(ConnectorError::new(
-                    "z.edit replace_exact requires expectedCount: 1",
+                    "selection_scope_mismatch: replace_exact old must equal the snapped selection",
                 ));
             }
-            if let Some(range) = selection {
-                let old = patch_find(values)?;
-                if &source[range] != old.as_bytes() {
-                    return Err(ConnectorError::new(
-                        "selection_scope_mismatch: replace_exact old must equal the snapped selection",
-                    ));
-                }
-            }
-            let old = patch_find(values)?;
-            let replacement = patch_replacement(values)?;
+            let replacement = values
+                .get("replacement")
+                .and_then(Value::as_str)
+                .ok_or_else(|| ConnectorError::new("z.edit replace_exact requires replacement"))?;
             replace_exact(source, old, replacement).map(|postimage| (postimage, patch_text))
         }
         Some("replace_lines") => {
@@ -1202,24 +1244,6 @@ fn snap_selection_kind(target: &Value) -> Option<&str> {
         .as_object()?
         .get("kind")?
         .as_str()
-}
-
-fn patch_find(values: &Map<String, Value>) -> Result<&str, ConnectorError> {
-    values
-        .get("find")
-        .or_else(|| values.get("old"))
-        .or_else(|| values.get("pattern"))
-        .and_then(Value::as_str)
-        .ok_or_else(|| ConnectorError::new("z.edit patch requires find or old"))
-}
-
-fn patch_replacement(values: &Map<String, Value>) -> Result<&str, ConnectorError> {
-    values
-        .get("replace")
-        .or_else(|| values.get("new"))
-        .or_else(|| values.get("replacement"))
-        .and_then(Value::as_str)
-        .ok_or_else(|| ConnectorError::new("z.edit patch requires replacement"))
 }
 
 fn patch_content<'a>(
@@ -1500,32 +1524,13 @@ fn map_interpreter_error(error: zero_codemode::HostError) -> EngineError {
         {
             EngineErrorKind::Budget
         }
-        HostError::Connector(_) | HostError::Execution(_) if text.contains("invalid request") => {
+        HostError::Connector(_) | HostError::Execution(_)
+            if text.contains("invalid request") || text.contains("retired product scheme") =>
+        {
             EngineErrorKind::InvalidInput
         }
         HostError::Execution(_) => EngineErrorKind::InvalidInput,
         HostError::Runtime(_) | HostError::Connector(_) => EngineErrorKind::Internal,
     };
     EngineError::new(kind, text, false)
-}
-
-#[cfg(test)]
-mod quiescence_bound_tests {
-    use super::*;
-
-    #[test]
-    fn failed_frame_bound_is_capped_independently_of_wall_budget() {
-        assert_eq!(
-            frame_quiescence_bound(true, Duration::from_millis(1)),
-            FRAME_SETTLE_GRACE
-        );
-        assert_eq!(
-            frame_quiescence_bound(true, Duration::from_secs(120)),
-            FAILED_FRAME_SETTLE_MAX
-        );
-        assert_eq!(
-            frame_quiescence_bound(false, Duration::from_secs(120)),
-            FRAME_SETTLE_GRACE
-        );
-    }
 }

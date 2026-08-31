@@ -1,11 +1,8 @@
 #![forbid(unsafe_code)]
 
-//! Engine-agnostic contracts shared by ZeroKernel and its domain engines.
-//!
-//! FSZero, GraphZero, and TokenZero implement typed traits. They do not expose
-//! model-facing operation registries or catalogs. This crate owns the shared
-//! wire invariants: canonical encoding, schema normalization, contract
-//! digests, bounded requests, typed receipts, and direct ZeroKernel results.
+//! Engine-agnostic contracts shared by ZeroKernel and its domain engines. FSZero, GraphZero, and
+//! TokenZero implement typed traits. They do not expose model-facing operation registries or
+//! catalogs.
 
 pub mod assembly;
 pub mod cache_entry;
@@ -24,11 +21,8 @@ pub mod exec_stream;
 pub mod exec_trace;
 pub mod freshness;
 pub mod identity;
-pub mod job;
-pub mod raw_worker;
 pub mod reasoning;
 pub mod redaction;
-pub mod result;
 pub mod robust_snap;
 pub mod safe_expand;
 pub mod schema;
@@ -87,26 +81,26 @@ pub use decision_view::{
 pub use digest::{contract_digest, contract_digest_hex, hex_lower_32, sha256, sha256_hex};
 pub use dispatch::{
     ALL_DISPATCH_ERROR_CLASSES, ApprovalGrant, ApprovalRequirement, CANONICAL_DISPATCH_VERSION,
-    CanonicalOperation, CanonicalRegistry, CanonicalResource, DispatchContractError,
-    DispatchErrorClass, DispatchMachine, DispatchStage, EffectGrant, EffectPolicy, PermitGrant,
-    PermitRequirement, RegistryEngine, SourceDiagnostic, SourceForm,
+    CanonicalOperation, CanonicalRegistry, DispatchContractError, DispatchErrorClass,
+    DispatchMachine, DispatchStage, EffectGrant, EffectPolicy, PermitGrant, PermitRequirement,
+    RegistryEngine,
 };
 pub use effect::{
     EFFECT_IR_ACTION_DOMAIN, EFFECT_IR_CONTRACT_VERSION, EFFECT_IR_MAX_CANONICAL_BYTES,
     EFFECT_IR_MAX_CAPABILITIES, EFFECT_IR_MAX_EXCEPTIONS, EFFECT_IR_MAX_INTENTS,
     EFFECT_IR_MAX_LITERAL_BYTES, EFFECT_IR_MAX_OPERATIONS, EFFECT_IR_MAX_PRECONDITIONS,
     EFFECT_IR_MAX_REFS_PER_OPERATION, EFFECT_IR_MAX_STRING_BYTES, EFFECT_IR_MAX_TARGETS,
-    EFFECT_IR_MAX_VERIFICATION_STEPS, EffectAdmission, EffectCapabilityBinding, EffectException,
-    EffectIrError, EffectIrFailureCode, EffectPredicate, EffectProgram, EffectRollback,
-    EffectTarget, EffectVerificationPlan, EffectVerificationStep, TypedEffectOperation,
-    effect_ir_contract_digest, effect_ir_contract_manifest,
+    EFFECT_IR_MAX_VERIFICATION_STEPS, EffectAdmission, EffectCapabilityBinding, EffectClass,
+    EffectException, EffectIrError, EffectIrFailureCode, EffectPredicate, EffectProgram,
+    EffectRollback, EffectTarget, EffectVerificationPlan, EffectVerificationStep,
+    TypedEffectOperation, effect_ir_contract_digest, effect_ir_contract_manifest,
 };
 pub use etnf::{
     CheckerIdentity, ETNF_HEX_DIGEST_LEN, ETNF_MAX_EVIDENCE_ITEMS, ETNF_MAX_FALSIFIERS,
     ETNF_MAX_ID_BYTES, ETNF_MAX_STRING_BYTES, ETNF_MAX_WITNESS_FACTS, ETNF_SCHEMA_ID, EtnfError,
-    EvidenceItem, ExplicitFallback, FallbackKind, Falsifier, FiniteWitness,
+    EtnfShadowReport, EvidenceItem, ExplicitFallback, FallbackKind, Falsifier, FiniteWitness,
     ProposedAuthorityTransition, ProposedTransitionKind, ResourceLedger, RootedEvidence,
-    ShadowCertificate, V7ShadowReport,
+    ShadowCertificate,
 };
 pub use etnf_checks::{
     BaselineSegment, CausalClosureDocument, ClosureEdge, ClosureNode, KillMetrics, SavingsCategory,
@@ -138,33 +132,13 @@ pub use freshness::{
     freshness_contract_digest, freshness_contract_manifest, influence_closure,
 };
 pub use identity::{
-    CONTRACT_VERSION, CancellationSemantics, CoverageGrade, EventLog, EventRecord, FallbackPolicy,
-    HarnessContract, IdentityKernelError, MIGRATION_RECEIPT_MAX_CANONICAL_BYTES,
-    MIGRATION_RECEIPT_MAX_REASON_BYTES, MessageOrdering, ObjectClass, PayloadFormationReceipt,
-    ProjectSuccessorCas, ProtectedDimension, ProtectedScopeObligations, ROOT_HASH_ALGORITHM,
-    ROOTED_ABI_VERSION, RootedAbiMigrationReceipt, ScopeObligation, SerializationScheme,
-    SideEffectPolicy, StructuredTaskContract, SuccessorOutcome, SuccessorRecord,
-    SuccessorUnchangedReason, TaskBudget, TranscriptPolicy, canonical_object_bytes,
-    event_log_genesis, object_root, root_preimage, verify_object_root,
-};
-pub use job::{
-    TOKEN_JOB_ABI_VERSION, TOKEN_JOB_DEFAULT_TAIL_BYTES, TOKEN_JOB_DEFAULT_WAIT_MS,
-    TOKEN_JOB_MAX_ID_BYTES, TOKEN_JOB_MAX_TAIL_BYTES, TOKEN_JOB_MAX_WAIT_MS, TOKEN_JOB_OPERATION,
-    TokenJobContractError, TokenJobPollRequest, TokenJobPollResult, TokenJobStatus,
-    token_job_contract_digest, token_job_contract_manifest,
-};
-pub use raw_worker::{
-    ApprovalMetadata, ApprovalState, CallRequest, CancelRequest, DEFAULT_MAX_FRAME_BYTES,
-    ENGINE_TIMELINE_MAX_SPANS, EffectClass, EngineIdentity, EngineStageSpan, EngineStageTimeline,
-    FrameCodecError, HandshakeAck, HandshakeRequest, ProtocolLimits, RAW_WORKER_PROTOCOL_VERSION,
-    RW10_FORBIDDEN_OPS, RefOwnership, RevertMetadata, ShutdownRequest, SnapshotIdentity,
-    TIMELINE_CLOSURE_TOLERANCE_NS, TelemetryRequest, WORKER_ERROR_KINDS, WorkerBinding,
-    WorkerCapabilities, WorkerError, WorkerRequestFrame, WorkerResponseFrame, WorkerResult,
-    WorkerResultMetadata, WorkerTokenAccounting, WorkerTokenCountKind, WorkerTrace,
-    canonical_worker_error_kind, decode_request_frame, decode_response_frame, encode_frame,
-    is_rw10_forbidden_op, is_typed_worker_error_kind, raw_worker_protocol_digest_hex,
-    raw_worker_protocol_manifest, validate_engine_stage_timeline, validate_handshake_request,
-    validate_request_frame, validate_response_frame, validate_worker_token_accounting,
+    CONTRACT_VERSION, CoverageGrade, EngineIdentity, EventLog, EventRecord, FallbackPolicy,
+    IdentityKernelError, MIGRATION_RECEIPT_MAX_CANONICAL_BYTES, MIGRATION_RECEIPT_MAX_REASON_BYTES,
+    ObjectClass, PayloadFormationReceipt, ProjectSuccessorCas, ProtectedDimension,
+    ProtectedScopeObligations, ROOT_HASH_ALGORITHM, ROOTED_ABI_VERSION, RootedAbiMigrationReceipt,
+    ScopeObligation, SideEffectPolicy, StructuredTaskContract, SuccessorOutcome, SuccessorRecord,
+    SuccessorUnchangedReason, TaskBudget, canonical_object_bytes, event_log_genesis, object_root,
+    root_preimage, verify_object_root,
 };
 pub use reasoning::{
     NativeStatePolicy, REASONING_CONTRACT_MAX_CANONICAL_BYTES,
@@ -181,10 +155,6 @@ pub use reasoning::{
 };
 pub use redaction::DEFAULT_REDACTION_TOKEN;
 pub use redaction::{EffectTrace, RedactionPolicy, Redactor, SecretsError};
-pub use result::{
-    MAX_ACK_CHARS, MAX_PREVIEW_CHARS, ZERO_RESULT, ZeroResult, ZeroResultAccessError,
-    ZeroResultBuildError, from_step, to_wire,
-};
 pub use robust_snap::{
     EvidenceDecisionTree, EvidenceLeaf, EvidenceObservation, ProtectedEffect, ProtectedEffectClass,
     ProtectedEffectSet, ROBUST_SNAP_CONTRACT_VERSION, ROBUST_SNAP_MAX_ASSUMPTION_BYTES,
@@ -216,10 +186,7 @@ pub use speculation::{
     SpeculationAdmission, SpeculationBinding, SpeculationCandidate, SpeculationLedger,
     SpeculationPermit, SpeculationState, SpeculativeOperation, compile_finalized_speculation_plan,
 };
-pub use surface::{
-    CapabilityDescriptor, DomainAdapterRegistration, GlobalRegistration, RegistrationError,
-    SURFACE_CONTRACT_VERSION, SurfaceContractError, SurfaceKind, SurfaceRegistration,
-};
+pub use surface::{CapabilityDescriptor, GlobalRegistration, RegistrationError};
 #[doc(hidden)]
 pub use task_lens::{
     TASK_LENS_CONTRACT_VERSION, TaskLensCompilerImpact, TaskLensError, TaskLensRequest,

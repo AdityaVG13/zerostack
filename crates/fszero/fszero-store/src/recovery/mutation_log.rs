@@ -30,12 +30,9 @@ pub struct MutationRow {
 }
 
 impl RecoveryStore {
-    /// Append one row to the mutation journal. `pre_ref`/`post_ref` are
-    /// content-addressed fz://blob refs (empty pre_ref + created=true for
-    /// files that did not exist). `pre_mtime_ns` is the file's mtime before
-    /// the mutation, nanoseconds since UNIX_EPOCH (0 = unknown/new file), so
-    /// undo can restore the timestamp bit-perfect (fszero-md6). `pre_mode`
-    /// is the pre-mutation permission bits, -1 = unknown (fszero-7be).
+    /// Append one mutation with content-addressed `z://blob` pre/post refs.
+    /// Empty `pre_ref` plus `created=true` denotes a newly created file.
+    /// `pre_mtime_ns` is the prior mtime in nanoseconds, or zero if unknown.
     #[allow(clippy::too_many_arguments)]
     pub fn append_mutation(
         &mut self,
@@ -51,8 +48,8 @@ impl RecoveryStore {
         pre_mode: i64,
         pre_xattrs: &str,
     ) -> Result<i64, String> {
-        // Fail-closed (fszero-w2g.12 / .46): never ack a mutation whose
-        // journal INSERT failed — silent holes break undo/history.
+        // Never acknowledge a mutation whose journal insert failed.
+        // Silent sequence holes break undo and history.
         let seq = query_i64(&self.conn, SQL_NEXT_MUTATION_SEQ).unwrap_or(1);
         self.conn
             .execute_with_params(

@@ -1,12 +1,5 @@
-//! Single-blob extraction engine (FR-001, FR-004, FR-005, FR-010, FR-015).
-//!
-//! Pure function: BlobInput → BlobFacts. Zero cross-blob state.
-//! Deterministic given identical blob bytes (NFR-004).
-//!
-//! Layout:
-//! - [`parse`] — grammar setup and tree-sitter parse
-//! - [`extract`] — definition/call/import/implements query passes
-//! - [`facts`] — BlobFacts assembly and public entry points
+//! Single-blob extraction engine. Pure function: BlobInput
+//! → BlobFacts. Zero cross-blob state. Deterministic given identical blob bytes.
 
 mod extract;
 mod facts;

@@ -1,9 +1,6 @@
-//! Store schema version stamps + skew rules (fszero-9smz).
-//!
-//! Three independently-released binaries share one `.zerostack` store.
-//! Segments (journal, bookmarks, quarantine metadata) carry stamped versions.
+//! Store schema version stamps + skew rules. Three independently-released binaries share one
+//! `.zerostack` store. Segments (journal, bookmarks, quarantine metadata) carry stamped versions.
 //! Newer major => refuse loudly. Older minor (same major) => degrade gracefully.
-//! Missing / older major => stamp current on open (upgrade path).
 
 /// Current major. Newer major found on disk is a hard refuse.
 pub const STORE_SCHEMA_MAJOR: u32 = 1;
@@ -43,7 +40,7 @@ pub enum SchemaSkew {
 }
 
 /// Decode a stored flat version into (major, minor).
-/// Values `< 1000` are legacy flat majors (v1 => major 1 minor 0).
+/// Values `< 1000` are legacy flat majors with minor zero.
 pub fn decode_version(v: u32) -> (u32, u32) {
     if v == 0 {
         (0, 0)
@@ -81,7 +78,7 @@ pub fn check_schema_skew(found: u32) -> SchemaSkew {
             expected_minor,
         }
     } else if found_minor > expected_minor {
-        // Newer minor on same major: fields we may not understand — refuse.
+        // Refuse a newer minor version because it may contain unknown fields.
         SchemaSkew::DowngradeRefused {
             found,
             expected: STORE_SCHEMA_VERSION,

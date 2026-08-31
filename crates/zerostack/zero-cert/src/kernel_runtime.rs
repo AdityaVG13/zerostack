@@ -1,44 +1,4 @@
-//! Identity-kernel runtime wiring (ZS-KERNEL-003/006/008, V6-R6).
-//!
-//! The W1 identity kernel types ([`EventLog`], [`ProjectSuccessorCas`],
-//! [`PayloadFormationReceipt`]) are verified library contracts consumed
-//! nowhere outside zero-abi. This module is the hub-side runtime mechanism
-//! that enforces them at join points:
-//!
-//! - **ZS-KERNEL-006**: [`KernelEventJournal`] persists the parent-rooted
-//!   event chain through a [`JournalStore`] (append-only, one canonical JSON
-//!   record per line), replays fail-closed on open (torn tail, missing or
-//!   reordered records, tampered lines), and verifies the replayed head
-//!   against a persisted sealed head. The typed boundary is
-//!   [`EventClass`]: all nine authoritative event classes -- state
-//!   transitions, evidence observations, cache decisions, executions,
-//!   verification, authority issuance, commits, rollbacks, and resource
-//!   charges -- are the only classes a journal can append.
-//! - **ZS-KERNEL-008**: [`ProjectRootGate`] drives [`ProjectSuccessorCas`]
-//!   through the verify -> authorize -> commit phases. Verify and authorize
-//!   are pure observations; commit is the ONLY mutation and emits a
-//!   [`SuccessorRecord`] receipt plus a `Commit` journal event. Stale
-//!   handles and double-commits fail loud with an unchanged-successor
-//!   receipt. [`RootGateFault`] injects runtime faults around
-//!   authorize/commit so crash boundaries are exercised mechanically.
-//! - **ZS-KERNEL-003**: [`CacheAdmissionGate`] gates cache admission on a
-//!   [`PayloadFormationReceipt`]: the offered receipt must be the exact
-//!   rooted object it claims to be, the payload/contract bindings must hold,
-//!   and the current dependency roots must still exactly match the
-//!   formation-time set ([`PayloadFormationReceipt::verify_against`]).
-//!   Dependency mutation revokes reuse; every decision is sealed as a
-//!   [`CacheAdmissionRecord`] and journaled as a `CacheDecision` event.
-//!
-//! All roots are content-derived (sha256 over canonical bytes), never
-//! wall-clock. Invariant violations return loud [`KernelRuntimeError`]s and,
-//! where a decision is involved, a sealed receipt.
-//!
-//! **Residual wiring (next wave, not this one):** zero-store
-//! `session_wal`/`durable_journal` and zero-gate `transaction.rs` adopt
-//! [`KernelEventJournal`] + [`ProjectRootGate`]; zero-store's
-//! `cache_entry` admission path adopts [`CacheAdmissionGate`]. This module
-//! stays library-level with in-memory and file-backed fixtures so the
-//! semantics are proven before the store/gate join points are cut.
+//! Runtime verification and persistence for identity event logs, successor objects, and payload receipts.
 
 use std::error::Error;
 use std::fmt;
@@ -48,14 +8,13 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+use zero_abi::cache_entry::CacheKey;
 use zero_abi::identity::EventClass;
 use zero_abi::{
-    Sha256Digest, EventLog, EventRecord, IdentityKernelError, ObjectClass,
-    PayloadFormationReceipt, ProjectSuccessorCas, ROOTED_ABI_VERSION,
-    SuccessorOutcome, SuccessorRecord, SuccessorUnchangedReason, canonical_json,
-    event_log_genesis, verify_object_root,
+    EventLog, EventRecord, IdentityKernelError, ObjectClass, PayloadFormationReceipt,
+    ProjectSuccessorCas, ROOTED_ABI_VERSION, Sha256Digest, SuccessorOutcome, SuccessorRecord,
+    SuccessorUnchangedReason, canonical_json, event_log_genesis, verify_object_root,
 };
-use zero_abi::cache_entry::CacheKey;
 
 /// Runtime mechanism version domain for the identity kernel.
 pub const KERNEL_RUNTIME_VERSION: &str = "zerostack.kernel-runtime";
@@ -78,9 +37,15 @@ pub enum KernelRuntimeError {
     /// The last persisted line is a partial write: the process died mid-append.
     TornJournalTail { seq: u64 },
     /// The persisted chain replays to a head different from the sealed head.
-    JournalHeadMismatch { sealed: Sha256Digest, replayed: Sha256Digest },
+    JournalHeadMismatch {
+        sealed: Sha256Digest,
+        replayed: Sha256Digest,
+    },
     /// Cache admission refused; the sealed decision record is the receipt.
-    AdmissionRefused { reason: String, record: CacheAdmissionRecord },
+    AdmissionRefused {
+        reason: String,
+        record: CacheAdmissionRecord,
+    },
     /// A mutation was attempted without an authorized session.
     Unauthorized { detail: String },
     /// The declared parent root no longer matches the current project root.
@@ -116,12 +81,19 @@ impl fmt::Display for KernelRuntimeError {
                 write!(formatter, "cache admission refused: {reason}")
             }
             Self::Unauthorized { detail } => write!(formatter, "unauthorized: {detail}"),
-            Self::StaleProjectHandle { declared_parent, current, .. } => write!(
+            Self::StaleProjectHandle {
+                declared_parent,
+                current,
+                ..
+            } => write!(
                 formatter,
                 "stale project handle: declared parent {declared_parent}, current root {current}"
             ),
             Self::NoVerifiedChange { .. } => {
-                write!(formatter, "no verified change: successor root equals current root")
+                write!(
+                    formatter,
+                    "no verified change: successor root equals current root"
+                )
             }
             Self::FaultInjected { phase } => {
                 write!(formatter, "injected fault fired at phase {phase:?}")
@@ -144,9 +116,7 @@ impl From<std::io::Error> for KernelRuntimeError {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Journal persistence (ZS-KERNEL-006).
-// ---------------------------------------------------------------------------
+// Journal persistence.
 
 /// Persistence surface for the authoritative event chain. One writer per
 /// journal; the single-writer law is enforced by the store implementations.
@@ -196,10 +166,9 @@ impl JournalStore for InMemoryJournalStore {
     }
 }
 
-/// File-backed journal store: `records.jsonl` (one canonical JSON record per
-/// line) plus a `sealed_head` marker. A partial final line is a torn tail
-/// from a killed process and fails closed; a malformed earlier line is an
-/// invalid record. Records are synced on append.
+/// File-backed journal store: `records.jsonl` (one canonical JSON record per line) plus a
+/// `sealed_head` marker. A partial final line is a torn tail from a killed process and
+/// fails closed; a malformed earlier line is an invalid record. Records are synced on append.
 #[derive(Clone, Debug)]
 pub struct FileEventJournalStore {
     dir: PathBuf,
@@ -319,13 +288,7 @@ fn map_replay_error(error: IdentityKernelError) -> KernelRuntimeError {
     }
 }
 
-/// Durable, parent-rooted authoritative event journal (ZS-KERNEL-006).
-///
-/// The in-memory [`EventLog`] is the chain authority; every append is
-/// persisted through the [`JournalStore`] BEFORE the in-memory chain is
-/// updated, so a killed process never observes an event that was not
-/// durably written. Opening replays all persisted records fail-closed and,
-/// when a sealed head exists, verifies the replayed head against it.
+/// Durable, parent-rooted authoritative event journal.
 #[derive(Clone, Debug)]
 pub struct KernelEventJournal<S: JournalStore> {
     store: S,
@@ -342,17 +305,20 @@ impl<S: JournalStore> KernelEventJournal<S> {
         let log = EventLog::from_records(records);
         let journal = Self { store, log };
         if let Some(sealed) = journal.store.load_sealed_head()? {
-            journal.log.verify_chain_against(sealed).map_err(|error| match error {
-                IdentityKernelError::TornEventLog {
-                    seq: _,
-                    expected,
-                    actual,
-                } => KernelRuntimeError::JournalHeadMismatch {
-                    sealed: expected,
-                    replayed: actual,
-                },
-                other => KernelRuntimeError::Identity(other),
-            })?;
+            journal
+                .log
+                .verify_chain_against(sealed)
+                .map_err(|error| match error {
+                    IdentityKernelError::TornEventLog {
+                        seq: _,
+                        expected,
+                        actual,
+                    } => KernelRuntimeError::JournalHeadMismatch {
+                        sealed: expected,
+                        replayed: actual,
+                    },
+                    other => KernelRuntimeError::Identity(other),
+                })?;
         }
         Ok(journal)
     }
@@ -370,10 +336,13 @@ impl<S: JournalStore> KernelEventJournal<S> {
         let authority = authority.into();
         let parent_root = self.log.head()?;
         let seq = self.log.records().len() as u64;
-        let record =
-            EventRecord::new(seq, parent_root, class.as_str(), payload_root, authority)?;
+        let record = EventRecord::new(seq, parent_root, class.as_str(), payload_root, authority)?;
         self.store.persist_record(&record)?;
-        let chained = self.log.append(class.as_str(), record.payload_root.clone(), record.authority.clone())?;
+        let chained = self.log.append(
+            class.as_str(),
+            record.payload_root.clone(),
+            record.authority.clone(),
+        )?;
         if chained != record {
             return Err(KernelRuntimeError::Io(
                 "journal chain diverged from persisted record".to_owned(),
@@ -420,14 +389,14 @@ impl<S: JournalStore> KernelEventJournal<S> {
             if record.event_type != EventClass::Commit.as_str() {
                 continue;
             }
-            root = Some(Sha256Digest::from_hex(&record.payload_root).map_err(|error| {
-                KernelRuntimeError::InvalidJournalRecord {
-                    seq: record.seq,
-                    detail: format!(
-                        "commit payload_root is not a successor root: {error}"
-                    ),
-                }
-            })?);
+            root = Some(
+                Sha256Digest::from_hex(&record.payload_root).map_err(|error| {
+                    KernelRuntimeError::InvalidJournalRecord {
+                        seq: record.seq,
+                        detail: format!("commit payload_root is not a successor root: {error}"),
+                    }
+                })?,
+            );
         }
         Ok(root)
     }
@@ -438,13 +407,15 @@ impl<S: JournalStore> KernelEventJournal<S> {
         &mut self,
         record: &CacheAdmissionRecord,
     ) -> Result<EventRecord, KernelRuntimeError> {
-        self.append(EventClass::CacheDecision, record.record_root(), "cache-gate")
+        self.append(
+            EventClass::CacheDecision,
+            record.record_root(),
+            "cache-gate",
+        )
     }
 }
 
-// ---------------------------------------------------------------------------
-// Project-root gate (ZS-KERNEL-008).
-// ---------------------------------------------------------------------------
+// Project-root gate.
 
 /// Runtime fault injection around the verify -> authorize -> commit loop.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -477,13 +448,9 @@ impl RootGateSession {
     }
 }
 
-/// Runtime driver for the project successor CAS (ZS-KERNEL-008).
-///
-/// Verify and authorize are pure observations that never mutate the CAS.
-/// Commit is the ONLY mutation and the only place a journal `Commit` event
-/// is emitted. A crash at any point before commit leaves the old root; a
-/// commit whose event was durably journaled leaves the complete new root
-/// recoverable from the journal.
+/// Runtime driver for the project successor CAS. Verify and authorize are pure
+/// observations that never mutate the CAS. Commit is the ONLY mutation and the only place a journal
+/// `Commit` event is emitted.
 #[derive(Clone, Debug)]
 pub struct ProjectRootGate {
     cas: ProjectSuccessorCas,
@@ -492,7 +459,10 @@ pub struct ProjectRootGate {
 }
 
 impl ProjectRootGate {
-    pub fn new(genesis: Sha256Digest, authority: impl Into<String>) -> Result<Self, KernelRuntimeError> {
+    pub fn new(
+        genesis: Sha256Digest,
+        authority: impl Into<String>,
+    ) -> Result<Self, KernelRuntimeError> {
         let authority = authority.into();
         if authority.is_empty() {
             return Err(KernelRuntimeError::Unauthorized {
@@ -512,7 +482,9 @@ impl ProjectRootGate {
         journal: &KernelEventJournal<S>,
         authority: impl Into<String>,
     ) -> Result<Self, KernelRuntimeError> {
-        let current = journal.current_project_root()?.unwrap_or_else(event_log_genesis);
+        let current = journal
+            .current_project_root()?
+            .unwrap_or_else(event_log_genesis);
         Self::new(current, authority)
     }
 
@@ -544,9 +516,8 @@ impl ProjectRootGate {
         .map_err(KernelRuntimeError::Identity)
     }
 
-    /// Phase 1 -- verify. Pure observation: checks the declared parent
-    /// against the current root and the successor root for verified change.
-    /// Violations are loud errors carrying an unchanged-successor receipt.
+    /// verify. Pure observation: checks the declared parent against the current root and the successor
+    /// root for verified change. Violations are loud errors carrying an unchanged-successor receipt.
     pub fn verify(
         &self,
         declared_parent_root: Sha256Digest,
@@ -571,7 +542,7 @@ impl ProjectRootGate {
         })
     }
 
-    /// Phase 2 -- authorize. Pure observation: marks the session authorized;
+    /// authorize. Pure observation: marks the session authorized;
     /// never mutates the CAS. Refuses under `AuthorizationRefused` faults.
     pub fn authorize(&mut self, session: &mut RootGateSession) -> Result<(), KernelRuntimeError> {
         if self.fault == Some(RootGateFault::AuthorizationRefused) {
@@ -586,9 +557,8 @@ impl ProjectRootGate {
         Ok(())
     }
 
-    /// Phase 3 -- commit. The ONLY mutation. Requires an authorized session;
-    /// advances the CAS and emits the `Commit` journal event with the new
-    /// project root as payload. Returns the sealed successor receipt.
+    /// commit. The ONLY mutation. Requires an authorized session; advances the CAS and emits the
+    /// `Commit` journal event with the new project root as payload. Returns the sealed successor receipt.
     pub fn commit<S: JournalStore>(
         &mut self,
         session: RootGateSession,
@@ -603,7 +573,10 @@ impl ProjectRootGate {
         if self.fault == Some(RootGateFault::CrashBeforeCommit) {
             return Err(KernelRuntimeError::FaultInjected { phase: "commit" });
         }
-        match self.cas.try_advance(session.declared_parent_root, session.verified_successor_root) {
+        match self.cas.try_advance(
+            session.declared_parent_root,
+            session.verified_successor_root,
+        ) {
             SuccessorOutcome::Advanced { new_current_root } => {
                 let receipt = SuccessorRecord::new(
                     session.declared_parent_root,
@@ -612,7 +585,11 @@ impl ProjectRootGate {
                     &self.authority,
                 )
                 .map_err(KernelRuntimeError::Identity)?;
-                journal.append(EventClass::Commit, new_current_root.to_hex(), &self.authority)?;
+                journal.append(
+                    EventClass::Commit,
+                    new_current_root.to_hex(),
+                    &self.authority,
+                )?;
                 Ok(receipt)
             }
             SuccessorOutcome::Unchanged { reason } => {
@@ -637,9 +614,7 @@ impl ProjectRootGate {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Cache admission gate (ZS-KERNEL-003).
-// ---------------------------------------------------------------------------
+// Cache admission gate.
 
 /// Sealed record of one cache admission decision. `admitted == false`
 /// carries a reason; the record root is content-derived and deterministic.
@@ -720,7 +695,8 @@ impl CacheAdmissionRecord {
     /// Content-derived, deterministic decision root: sha256 over the
     /// domain-tagged canonical JSON. Same inputs, same root.
     pub fn record_root(&self) -> String {
-        let value = serde_json::to_value(self).expect("cache admission record is JSON-serializable");
+        let value =
+            serde_json::to_value(self).expect("cache admission record is JSON-serializable");
         let mut tagged = Vec::with_capacity(CACHE_ADMISSION_DOMAIN.len() + 128);
         tagged.extend_from_slice(CACHE_ADMISSION_DOMAIN);
         tagged.extend_from_slice(canonical_json(&value).as_bytes());
@@ -728,20 +704,15 @@ impl CacheAdmissionRecord {
     }
 }
 
-/// Cache admission gate (ZS-KERNEL-003): no cache entry is admitted without
+/// Cache admission gate: no cache entry is admitted without
 /// a [`PayloadFormationReceipt`] whose rooted identity, payload/contract
 /// bindings, and formation-time dependency set all still hold.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct CacheAdmissionGate;
 
 impl CacheAdmissionGate {
-    /// Decide admission. Returns the sealed decision record; `admitted` is
-    /// false with a `reason` for every refusal. Structural identity failures
-    /// (noncanonical receipt, wrong ABI) are loud errors.
-    ///
-    /// `expected_receipt_root` is the root the cache authority sealed at
-    /// formation time; an offered receipt whose canonical bytes do not match
-    /// it is a tampered identity and is refused.
+    /// Decide admission. Returns the sealed decision record; `admitted` is false with a `reason` for
+    /// every refusal.
     pub fn decide(
         receipt: &PayloadFormationReceipt,
         expected_receipt_root: Sha256Digest,

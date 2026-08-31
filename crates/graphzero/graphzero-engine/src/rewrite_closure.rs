@@ -1,11 +1,4 @@
-//! Output-side closure: enumerate the mechanically implied edit sites for a
-//! root semantic decision (bead zerostack-racc-caching-output-vz89.8).
-//!
-//! Given a root symbol and a propagation policy, walk the reverse graph over
-//! statically resolvable relations only (calls / refs / imports) and return one
-//! snap-to-file HIT per implied edit site, using the same target grammar as
-//! def/ref/blast hits (bead 5htnw). No speculative propagation: an edge is
-//! either in the index with evidence, or it is not reported.
+//! Output-side closure: enumerate the mechanically implied edit sites for a root semantic decision.
 
 use std::collections::{BTreeSet, HashMap, VecDeque};
 

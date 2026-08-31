@@ -1,4 +1,4 @@
-//! Worktree overlay (FR-016): diverged blobs live as a delta-log layer in
+//! Worktree overlay: diverged blobs live as a delta-log layer in
 //! `.graphzero/worktrees/<id>/wal` over the shared snapshot. Reads combine
 //! shared + delta; coverage reflects the worktree.
 
@@ -49,7 +49,7 @@ fn append_worktree_file_entries(
         })?;
     }
     let digest = blob_hex(&hash.0);
-    // Opt-in outline + semantic provenance on def/span transforms (graphzero-3wbh.2).
+    // Opt-in outline + semantic provenance on def/span transforms.
     for d in &defs {
         let _ = super::provenance::attach_def_span_provenance(
             store_root,
@@ -76,7 +76,7 @@ fn append_worktree_file_entries(
                 None,
             )?,
         })?;
-        // Opt-in per-row provenance (graphzero-3wbh); no-op when disabled.
+        // Opt-in per-row provenance; no-op when disabled.
         let _ = super::provenance::attach_overlay_edge_provenance(
             store_root,
             &digest,
@@ -200,9 +200,8 @@ pub fn index_worktree_files(
     let blob_store = BlobStore::open(store_root)?;
     let mut log = DeltaLog::open_dir(&wal_dir)?;
 
-    // Batch blob durability: put_nosync per file + one sync_all before WAL
-    // commit (graphzero-lhnp9). Matches cold-index INV-DUR-1; avoids per-file
-    // flat+cas-local fsync when indexing many dirty worktree paths.
+    // Batch blob durability: put_nosync per file + one sync_all before WAL commit. Matches
+    // cold-index; avoids per-file flat+cas-local fsync when indexing many dirty worktree paths.
     for rel in rel_paths {
         let content = fs::read(repo_root.join(rel))?;
         let hash = ContentHash::of(&content);

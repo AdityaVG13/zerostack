@@ -1,7 +1,5 @@
-//! Path-component validation for store filesystem lookups.
-//!
-//! Rejects traversal sequences and separator characters before any user-controlled
-//! string is joined into `.graphzero/` paths.
+//! Path-component validation for store filesystem lookups. Rejects traversal sequences and
+//! separator characters before any user-controlled string is joined into `.graphzero/` paths.
 
 use std::path::{Path, PathBuf};
 
@@ -12,7 +10,7 @@ pub const MAX_MANIFEST_SNAPSHOT_COUNT: usize = 10_000;
 pub const MAX_MANIFEST_VEC_COUNT: usize = 100_000;
 pub const MAX_DELTA_SEGMENT_ENTRIES: u32 = 1_000_000;
 
-/// Safe opaque id for `gz://query/`, `gz://snap/`, `gz://node/`, `gz://edge/` tails.
+/// Safe opaque tail for query, snapshot, node, and edge refs.
 pub fn validate_safe_id(id: &str, context: &str) -> Result<()> {
     if id.is_empty() {
         bail!("{context}: empty id");
@@ -101,7 +99,3 @@ pub fn read_queries_file(store_root: &std::path::Path, file_name: &str) -> Resul
     }
     Ok(std::fs::read(canonical_path)?)
 }
-
-#[cfg(test)]
-#[path = "../../../../../tests/graphzero/unit/graphzero-store/path_safety_tests.rs"]
-mod tests;

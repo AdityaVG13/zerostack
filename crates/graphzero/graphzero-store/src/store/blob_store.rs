@@ -1,15 +1,6 @@
-//! Content-addressed blob store under the project store root.
-//!
-//! **Write layout (graphzero-56s1t):** new puts materialize a single physical
-//! object in the ZeroRef fan-out path
-//! `blobs/sha256/<hh>/<64-hex>` (via [`super::shared_cas::SharedCas`]). The
-//! legacy flat `blobs/<64-hex>` path is no longer dual-written (eliminates
-//! ~2x write amplification and single-dir densification pressure).
-//!
-//! **Read layout:** exact lookups try legacy flat first (old stores), then
-//! cas-local fan-out. Prefix scans cover both namespaces.
-//!
-//! Also owns the sha256 -> git OID secondary-key map used by expand fallback.
+//! Content-addressed blob store under the project store root. **Write layout:** new puts
+//! materialize a single physical object in the ZeroRef fan-out path `blobs/sha256/<hh>/<64-hex>`
+//! (via [`super::shared_cas::SharedCas`]).
 
 use std::fs;
 use std::io::Write;
@@ -23,9 +14,9 @@ use crate::ContentHash;
 
 use super::path_safety::{file_name_to_str, validate_blob_hash_component};
 
-/// Stored bytes did not hash to the requested identity. Typed so the expand
-/// fallback chain can tell corruption (terminal, INV-001) apart from a plain
-/// miss instead of collapsing both into an untyped read error.
+/// Stored bytes did not hash to the requested identity. This typed error lets
+/// expansion treat corruption as terminal while a plain miss may fall through
+/// to another store.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BlobDigestMismatch {
     pub expected: String,
@@ -50,19 +41,16 @@ impl std::error::Error for BlobDigestMismatch {}
 /// One blob path awaiting the [`BlobStore::sync_all`] durability barrier.
 struct PendingFsync {
     path: PathBuf,
-    /// Write handle retained across rename so the barrier can `sync_data`
-    /// without re-opening the final path (graphzero-3olfy). `None` when only
-    /// the path is known (e.g. SharedCas dual-write pending).
+    /// Write handle retained across rename so the barrier can `sync_data` without re-opening
+    /// the final path. `None` when only the path is known (e.g. SharedCas dual-write pending).
     file: Option<fs::File>,
 }
 
 pub struct BlobStore {
     root: PathBuf,
-    /// Final blob paths written by [`Self::put_nosync`] (cas-local fan-out)
-    /// that still need per-file `sync_data` before a durable publish (INV-DUR-1).
-    ///
-    /// Lock-free queue so rayon `put_nosync` paths never take a process-wide
-    /// Mutex on every new blob (graphzero-bn9e3). Drained once in [`Self::sync_all`].
+    /// Final blob paths written by [`Self::put_nosync`] (cas-local fan-out) that still need per-file
+    /// `sync_data` before a durable publish. Lock-free queue so rayon `put_nosync` paths
+    /// never take a process-wide Mutex on every new blob. Drained once in [`Self::sync_all`].
     pending_fsync: SegQueue<PendingFsync>,
 }
 
@@ -103,11 +91,9 @@ impl BlobStore {
         self.put_with_sync(ContentHash::of(data), data, false)
     }
 
-    /// Like [`Self::put_nosync`], with a typed caller-supplied content hash.
-    ///
-    /// `ContentHash` excludes malformed raw digest strings, but does not prove
-    /// correspondence to `data`. Re-hash before any final-path or shared-CAS
-    /// mutation so an untrusted caller cannot publish bytes under a false key.
+    /// Like [`Self::put_nosync`], with a typed caller-supplied content hash. `ContentHash` excludes
+    /// malformed raw digest strings, but does not prove correspondence to `data`. Re-hash before any
+    /// final-path or shared-CAS mutation so an untrusted caller cannot publish bytes under a false key.
     pub fn put_nosync_prehashed(&self, hash: ContentHash, data: &[u8]) -> Result<ContentHash> {
         let actual = ContentHash::of(data);
         if actual != hash {
@@ -123,15 +109,12 @@ impl BlobStore {
     }
 
     fn put_with_sync(&self, hash: ContentHash, data: &[u8], sync: bool) -> Result<ContentHash> {
-        // Single physical write into cas-local fan-out (graphzero-56s1t).
-        // Legacy flat `blobs/<hash>` is not written; get falls back for old stores.
-        //
-        // Honor the caller's sync flag: put_nosync must not pay per-object
-        // SharedCas sync_all + dir fsync (graphzero-o1td4). Unsynced CAS
-        // paths join `pending_fsync` and drain in [`Self::sync_all`].
+        // Single physical write into cas-local fan-out. Legacy flat `blobs/<hash>` is not written; get
+        // falls back for old stores. Honor the caller's sync flag: put_nosync must not pay per-object
+        // SharedCas sync_all + dir fsync.
         let cas = super::shared_cas::SharedCas::open_labeled(&self.root, "cas-local");
-        // The no-sync batch extension trusts this pre-verified ContentHash and
-        // avoids rehashing (graphzero-qf9y5). Canonical synced publish verifies it.
+        // The no-sync batch extension trusts this pre-verified
+        // ContentHash and avoids rehashing. Canonical synced publish verifies it.
         if sync {
             cas.put_prehashed(hash, data)
                 .map_err(|e| anyhow::anyhow!("cas-local blob put failed: {e}"))?;
@@ -146,22 +129,17 @@ impl BlobStore {
                 });
             }
         }
-        // Bulk indexer uses nosync puts; recording every blob into the global
-        // NDJSON ref-index turns cold index into a shard-growth/CPU storm and
-        // makes later expands scan fat shards. Cross-root mint still uses
-        // sync `put()` (and explicit record sites).
+        // Bulk indexer uses nosync puts; recording every blob into the global NDJSON
+        // ref-index turns cold index into a shard-growth/CPU storm and makes later expands
+        // scan fat shards. Cross-root mint still uses sync `put` (and explicit record sites).
         if sync {
-            super::ref_index::record_ref(&format!("gz://blob/{}", hash.to_hex()), &self.root)?;
+            super::ref_index::record_ref(&format!("z://blob/{}", hash.to_hex()), &self.root)?;
         }
         Ok(hash)
     }
 
-    /// Durability barrier for relaxed blob puts (INV-DUR-1).
-    ///
-    /// Fsyncs each pending blob file's data, then fsyncs the `blobs/` directory
-    /// so both file contents and directory entries are durable. Directory-only
-    /// sync is insufficient on APFS/macOS (and other platforms) for guaranteeing
-    /// blob bytes survive a crash before manifest publish.
+    /// Durability barrier for relaxed blob puts. Fsyncs each pending blob file's data, then
+    /// fsyncs the `blobs/` directory so both file contents and directory entries are durable.
     pub fn sync_all(&self) -> Result<()> {
         // Drain the lock-free queue into a local Vec for parallel fsync.
         // Concurrent put_nosync during sync_all is not a supported publish
@@ -185,12 +163,8 @@ impl BlobStore {
             }
             Ok(())
         })?;
-        // std::fs::File cannot open directory handles on Windows without
-        // FILE_FLAG_BACKUP_SEMANTICS. Blob files were flushed above; skip the
-        // unsupported directory metadata barrier on that platform.
-        //
-        // Barrier covers cas-local fan-out parents (and any legacy flat paths
-        // still queued from older dual-write code paths).
+        // std::fs::File cannot open directory handles on Windows without FILE_FLAG_BACKUP_SEMANTICS. Blob
+        // files were flushed above; skip the unsupported directory metadata barrier on that platform.
         #[cfg(not(windows))]
         {
             use std::collections::HashSet;

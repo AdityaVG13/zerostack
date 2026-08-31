@@ -1,8 +1,6 @@
-//! Append-only provenance events stored outside immutable object bytes.
-//!
-//! Events use canonical JSON content digests as names. Retrieval ignores
-//! non-canonical debris and reports corrupt canonical events as malformed.
-//! Publication is atomic but intentionally adds no fsync durability barrier.
+//! Append-only provenance events stored outside immutable object bytes. Events use canonical JSON
+//! content digests as names. Retrieval ignores non-canonical debris and reports corrupt canonical
+//! events as malformed. Publication is atomic but intentionally adds no fsync durability barrier.
 
 use std::fs;
 use std::io::Write;

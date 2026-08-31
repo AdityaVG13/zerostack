@@ -1,20 +1,5 @@
-//! MMR (Merkle Mountain Range) transparency log for blob store durability
-//! (P0 graphzero-ea8i).
-//!
-//! Every blob written to the store appends a leaf to this append-only log.
-//! The MMR root provides a stack-wide conservation law: every gz://blob ref
-//! must have a valid inclusion proof against the current root. This makes
-//! silent blob deletion or corruption detectable.
-//!
-//! File format (`.graphzero/transparency.mmr`):
-//! ```text
-//! magic "GZMM" (4) | version u8 | leaf_count u32 | root [u8;32] |
-//! crc u32 | leaves (leaf_count * 32 bytes)
-//! ```
-//!
-//! Internal node hashing uses SHA-256 with domain separation:
-//! - leaf node: the blob's content SHA-256 directly (already a hash)
-//! - internal node: `SHA-256(0x01 || left || right)`
+//! Append-only Merkle Mountain Range log for blob-store durability.
+//! Each stored blob contributes one leaf.
 
 use std::fs;
 use std::io::Write;

@@ -1,4 +1,4 @@
-//! P5.1 semantic sidecar persistence (mmap read path).
+//! Semantic sidecar persistence with mmap reads.
 
 use std::path::{Path, PathBuf};
 
@@ -16,7 +16,7 @@ pub fn semantic_sidecar_exists(shard_path: &Path) -> bool {
     semantic_sidecar_path(shard_path).is_file()
 }
 
-/// Load semantic tier coverage percent from sidecar presence (walking skeleton).
+/// Load semantic coverage percent from sidecar presence.
 pub fn semantic_tier_percent_for_shards(shard_paths: &[PathBuf]) -> f64 {
     if shard_paths.is_empty() {
         return 0.0;

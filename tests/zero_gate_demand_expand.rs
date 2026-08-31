@@ -1,19 +1,4 @@
-//! Adjudicated corpus for the W9-E exact-scenario-closure demand family
-//! (`zerostack-rybb`).
-//!
-//! Every acceptance criterion is measured here:
-//! - false-complete (release blocker): a result is false-complete iff the
-//!   route claims a complete expansion whose returned atoms do not cover the
-//!   adjudicated ground truth;
-//! - first-try sufficiency: the first expansion covers the projection on the
-//!   first attempt, with no hidden retry;
-//! - visible bytes, backend (index) work, retry count, and native baseline
-//!   cost, all from the bounded expand ledger;
-//! - root/projection-exact first expansion;
-//! - continuation-bound incremental deltas that append only new atoms and
-//!   revalidate the live handle first;
-//! - Unknown coverage stays Unknown; nothing missing is ever labeled
-//!   complete.
+//! Contract cases for exact-scenario-closure demand expansion.
 
 use std::collections::BTreeSet;
 
@@ -23,13 +8,12 @@ use zero_gate::project_image::{
     ProofGraphRef, ShadowResourceLedger,
 };
 use zero_gate::{
-    CoverageAtom, DemandError, DemandRequest, GraphZeroCompletenessInput, IncrementalDeltaRequest,
-    NativeBaseline, ProtectedScope, RouteOutcome, W9eRoute, adjudicate,
+    CoverageAtom, DemandError, DemandRequest, ExactScenarioClosureRoute,
+    GraphZeroCompletenessInput, IncrementalDeltaRequest, NativeBaseline, ProtectedScope,
+    RouteOutcome, adjudicate,
 };
 
-// ---------------------------------------------------------------------------
 // Fixture helpers
-// ---------------------------------------------------------------------------
 
 fn digest(seed: u8) -> Sha256Digest {
     Sha256Digest::from_bytes(sha256(&[seed; 32]))
@@ -146,18 +130,18 @@ fn input(
     .unwrap()
 }
 
-fn route() -> W9eRoute {
-    W9eRoute::new(
+fn route() -> ExactScenarioClosureRoute {
+    ExactScenarioClosureRoute::new(
         [0x11; 32],
         "tenant-a".to_owned(),
         1,
         digest(0x31),
-        "index-v1".to_owned(),
+        "index-current".to_owned(),
     )
     .unwrap()
 }
 
-fn live_for(route: &W9eRoute, handle: &SafeExpandHandle) -> LiveExpandState {
+fn live_for(route: &ExactScenarioClosureRoute, handle: &SafeExpandHandle) -> LiveExpandState {
     route
         .current_live_state(handle, SafetyVerdict::Safe, false)
         .unwrap()
@@ -174,9 +158,7 @@ fn assert_refused(outcome: RouteOutcome) -> SafetyVerdict {
     }
 }
 
-// ---------------------------------------------------------------------------
 // Positive route: exact first expansion + adjudicated metrics
-// ---------------------------------------------------------------------------
 
 #[test]
 fn corpus_complete_multi_file_first_expansion_is_root_projection_exact() {
@@ -196,7 +178,7 @@ fn corpus_complete_multi_file_first_expansion_is_root_projection_exact() {
     let req = request("task-main", &all);
     let scp = scope(&[]);
     let inp = input(
-        "index-v1",
+        "index-current",
         &[(a, Some(true)), (b, Some(true)), (c, Some(true))],
         1,
     );
@@ -213,7 +195,7 @@ fn corpus_complete_multi_file_first_expansion_is_root_projection_exact() {
         panic!("complete multi-file demand must issue");
     };
     assert!(certificate_root != Sha256Digest::ZERO);
-    assert_eq!(checker_identity, "zerostack.w9e.completeness.total");
+    assert_eq!(checker_identity, "zerostack.demand.completeness.total");
     assert_eq!(checker_version, "1.0.0");
 
     // The certified closure is the full multi-file envelope -- never a primary-file subset.
@@ -228,7 +210,7 @@ fn corpus_complete_multi_file_first_expansion_is_root_projection_exact() {
 
     // Independently derived projection root (not via production helper)
     let expected_projection_root = {
-        const DOMAIN: &[u8] = b"zerostack.w9e.projection\0";
+        const DOMAIN: &[u8] = b"zerostack.demand.projection\0";
         let mut hex_sorted = vec![a.to_hex(), b.to_hex(), c.to_hex()];
         hex_sorted.sort();
         let canonical = zero_abi::canonical_json(&serde_json::json!({ "atoms": hex_sorted }));
@@ -288,7 +270,7 @@ fn corpus_complete_multi_file_permit_and_plan_roots_are_canonical() {
     let req = request("task-main", &all);
     let scp = scope(&[]);
     let inp = input(
-        "index-v1",
+        "index-current",
         &[(a, Some(true)), (b, Some(true)), (c, Some(true))],
         1,
     );
@@ -304,7 +286,7 @@ fn corpus_complete_multi_file_permit_and_plan_roots_are_canonical() {
         .unwrap();
     // Plan root independent: domain || canonical JSON of demanded atoms
     let expected_plan_root = {
-        const DOMAIN: &[u8] = b"zerostack.w9e.demand_plan\0";
+        const DOMAIN: &[u8] = b"zerostack.demand.demand_plan\0";
         let mut demanded_hex: Vec<String> = vec![a.to_hex(), b.to_hex(), c.to_hex()];
         demanded_hex.sort();
         let canonical = zero_abi::canonical_json(&serde_json::json!({
@@ -341,7 +323,7 @@ fn corpus_complete_multi_file_metrics_are_reconciled() {
     let req = request("task-main", &all);
     let scp = scope(&[]);
     let inp = input(
-        "index-v1",
+        "index-current",
         &[(a, Some(true)), (b, Some(true)), (c, Some(true))],
         1,
     );
@@ -369,9 +351,7 @@ fn corpus_complete_multi_file_metrics_are_reconciled() {
     assert_eq!(metrics.native_savings_bytes, 4000 - sum);
 }
 
-// ---------------------------------------------------------------------------
 // Continuation-bound incremental deltas: new atoms only, live revalidation
-// ---------------------------------------------------------------------------
 
 #[test]
 fn corpus_partial_projection_deltas_append_only_new_atoms() {
@@ -393,7 +373,7 @@ fn corpus_partial_projection_deltas_append_only_new_atoms() {
     let req = request("task-main", &[a, b]);
     let scp = scope(&[]);
     let inp = input(
-        "index-v1",
+        "index-current",
         &[
             (a, Some(true)),
             (b, Some(true)),
@@ -490,7 +470,7 @@ fn corpus_partial_projection_rejects_already_expanded() {
     let req = request("task-main", &[a, b]);
     let scp = scope(&[]);
     let inp = input(
-        "index-v1",
+        "index-current",
         &[
             (a, Some(true)),
             (b, Some(true)),
@@ -549,7 +529,7 @@ fn corpus_partial_projection_rejects_not_certified() {
     let req = request("task-main", &[a, b]);
     let scp = scope(&[]);
     let inp = input(
-        "index-v1",
+        "index-current",
         &[
             (a, Some(true)),
             (b, Some(true)),
@@ -600,7 +580,7 @@ fn corpus_partial_projection_rejects_stale_and_exhausted() {
     let req = request("task-main", &[a, b]);
     let scp = scope(&[]);
     let inp = input(
-        "index-v1",
+        "index-current",
         &[
             (a, Some(true)),
             (b, Some(true)),
@@ -680,7 +660,7 @@ fn corpus_delta_revalidates_live_handle_before_appending() {
     let req = request("task-main", &[a, b]);
     let scp = scope(&[]);
     let inp = input(
-        "index-v1",
+        "index-current",
         &[(a, Some(true)), (b, Some(true)), (c, Some(true))],
         1,
     );
@@ -698,7 +678,7 @@ fn corpus_delta_revalidates_live_handle_before_appending() {
 
     // Stale live index: the delta is refused before any atom is appended.
     let mut stale_live = live.clone();
-    stale_live.index_version = "index-v2".to_owned();
+    stale_live.index_version = "index-stale".to_owned();
     match route.expand_delta(
         &session,
         &IncrementalDeltaRequest::new(vec![c]).unwrap(),
@@ -729,16 +709,13 @@ fn corpus_delta_revalidates_live_handle_before_appending() {
     assert_eq!(delta.atoms[0].atom_root, c);
 }
 
-// ---------------------------------------------------------------------------
 // False-complete blocker and Unknown honesty
-// ---------------------------------------------------------------------------
 
 #[test]
 fn corpus_false_complete_blocker_under_declared_envelope_is_unsafe() {
-    // Adjudicated ground truth: {A, B, C}. The request scenario declares only
-    // {A, B}; the published coverage universe positively establishes C as
-    // part of the task closure. The route must refuse -- selling {A, B} as
-    // complete would be a false-complete.
+    // Ground truth is {A, B, C}, but the request declares only {A, B}.
+    // Published coverage establishes C, so the route must reject the incomplete
+    // claim.
     let a = digest(1);
     let b = digest(2);
     let c = digest(3);
@@ -754,7 +731,7 @@ fn corpus_false_complete_blocker_under_declared_envelope_is_unsafe() {
     let req = request("task-main", &[a, b]);
     let scp = scope(&[]);
     let inp = input(
-        "index-v1",
+        "index-current",
         &[(a, Some(true)), (b, Some(true)), (c, Some(true))],
         1,
     );
@@ -787,7 +764,7 @@ fn corpus_unknown_coverage_is_unknown_never_safe() {
     let req = request("task-main", &all);
     let scp = scope(&[]);
     let inp = input(
-        "index-v1",
+        "index-current",
         &[(a, Some(true)), (b, None), (c, Some(true))],
         1,
     );
@@ -818,7 +795,7 @@ fn corpus_demanded_atom_without_coverage_evidence_is_unknown() {
     );
     let req = request("task-main", &all);
     let scp = scope(&[]);
-    let inp = input("index-v1", &[(a, Some(true)), (b, Some(true))], 1);
+    let inp = input("index-current", &[(a, Some(true)), (b, Some(true))], 1);
     let mut route = route();
     let verdict = assert_refused(route.compile_and_check(&m, &req, &scp, &inp).unwrap());
     assert_eq!(
@@ -844,7 +821,7 @@ fn corpus_empty_coverage_universe_is_unknown() {
     );
     let req = request("task-main", &all);
     let scp = scope(&[]);
-    let inp = input("index-v1", &[], 1);
+    let inp = input("index-current", &[], 1);
     let mut route = route();
     let verdict = assert_refused(route.compile_and_check(&m, &req, &scp, &inp).unwrap());
     let mut expected_reasons = sorted(&all)
@@ -874,7 +851,7 @@ fn corpus_scenario_without_declared_envelope_is_unknown() {
     );
     let req = request("task-main", &[a, b]);
     let scp = scope(&[]);
-    let inp = input("index-v1", &[(a, Some(true)), (b, Some(true))], 1);
+    let inp = input("index-current", &[(a, Some(true)), (b, Some(true))], 1);
     let mut route = route();
     let verdict = assert_refused(route.compile_and_check(&m, &req, &scp, &inp).unwrap());
     assert_eq!(
@@ -885,9 +862,7 @@ fn corpus_scenario_without_declared_envelope_is_unknown() {
     );
 }
 
-// ---------------------------------------------------------------------------
 // Positive falsification -> Unsafe
-// ---------------------------------------------------------------------------
 
 #[test]
 fn corpus_positively_uncovered_atom_is_unsafe() {
@@ -907,7 +882,7 @@ fn corpus_positively_uncovered_atom_is_unsafe() {
     let req = request("task-main", &all);
     let scp = scope(&[]);
     let inp = input(
-        "index-v1",
+        "index-current",
         &[(a, Some(true)), (b, Some(false)), (c, Some(true))],
         1,
     );
@@ -939,7 +914,7 @@ fn corpus_protected_atom_demand_is_unsafe() {
     let req = request("task-main", &all);
     let scp = scope(&[b]);
     let inp = input(
-        "index-v1",
+        "index-current",
         &[(a, Some(true)), (b, Some(true)), (c, Some(true))],
         1,
     );
@@ -971,7 +946,7 @@ fn corpus_l2_invalid_demanded_atom_is_unsafe() {
     let req = request("task-main", &all);
     let scp = scope(&[]);
     let inp = input(
-        "index-v1",
+        "index-current",
         &[(a, Some(true)), (b, Some(true)), (c, Some(true))],
         1,
     );
@@ -1004,7 +979,7 @@ fn corpus_projection_exceeding_envelope_is_unsafe() {
     let req = request("task-main", &[a, b, d]);
     let scp = scope(&[]);
     let inp = input(
-        "index-v1",
+        "index-current",
         &[
             (a, Some(true)),
             (b, Some(true)),
@@ -1023,9 +998,7 @@ fn corpus_projection_exceeding_envelope_is_unsafe() {
     );
 }
 
-// ---------------------------------------------------------------------------
 // Unknown image-side evidence
-// ---------------------------------------------------------------------------
 
 #[test]
 fn corpus_l2_unknown_demanded_atom_is_unknown() {
@@ -1045,7 +1018,7 @@ fn corpus_l2_unknown_demanded_atom_is_unknown() {
     let req = request("task-main", &all);
     let scp = scope(&[]);
     let inp = input(
-        "index-v1",
+        "index-current",
         &[(a, Some(true)), (b, Some(true)), (c, Some(true))],
         1,
     );
@@ -1077,7 +1050,7 @@ fn corpus_demanded_atom_missing_from_image_is_unknown() {
     let req = request("task-main", &[a, b, c]);
     let scp = scope(&[]);
     let inp = input(
-        "index-v1",
+        "index-current",
         &[
             (a, Some(true)),
             (b, Some(true)),
@@ -1106,7 +1079,7 @@ fn corpus_scenario_not_found_is_typed_error() {
     );
     let req = request("other-scenario", &[a]);
     let scp = scope(&[]);
-    let inp = input("index-v1", &[(a, Some(true))], 1);
+    let inp = input("index-current", &[(a, Some(true))], 1);
     let mut route = route();
     match route.compile_and_check(&m, &req, &scp, &inp) {
         Err(DemandError::ScenarioNotFound { scenario_id }) => {
@@ -1116,9 +1089,7 @@ fn corpus_scenario_not_found_is_typed_error() {
     }
 }
 
-// ---------------------------------------------------------------------------
 // Hidden retry and index evidence honesty
-// ---------------------------------------------------------------------------
 
 #[test]
 fn corpus_retried_completeness_check_is_unsafe_at_issuance() {
@@ -1130,7 +1101,7 @@ fn corpus_retried_completeness_check_is_unsafe_at_issuance() {
     );
     let req = request("task-main", &[a]);
     let scp = scope(&[]);
-    let inp = input("index-v1", &[(a, Some(true))], 2);
+    let inp = input("index-current", &[(a, Some(true))], 2);
     let mut route = route();
     let verdict = assert_refused(route.compile_and_check(&m, &req, &scp, &inp).unwrap());
     assert_eq!(
@@ -1151,7 +1122,7 @@ fn corpus_stale_index_evidence_is_unsafe_at_issuance() {
     );
     let req = request("task-main", &[a]);
     let scp = scope(&[]);
-    let inp = input("index-v2", &[(a, Some(true))], 1);
+    let inp = input("index-stale", &[(a, Some(true))], 1);
     let mut route = route();
     let verdict = assert_refused(route.compile_and_check(&m, &req, &scp, &inp).unwrap());
     assert_eq!(
@@ -1162,11 +1133,9 @@ fn corpus_stale_index_evidence_is_unsafe_at_issuance() {
     );
 }
 
-// ---------------------------------------------------------------------------
 // Live revalidation of the handle (stale/mismatch/cross-tenant)
-// ---------------------------------------------------------------------------
 
-fn issue_complete_three_atom(route: &mut W9eRoute) -> SafeExpandHandle {
+fn issue_complete_three_atom(route: &mut ExactScenarioClosureRoute) -> SafeExpandHandle {
     let a = digest(1);
     let b = digest(2);
     let c = digest(3);
@@ -1183,7 +1152,7 @@ fn issue_complete_three_atom(route: &mut W9eRoute) -> SafeExpandHandle {
     let req = request("task-main", &[a, b]);
     let scp = scope(&[]);
     let inp = input(
-        "index-v1",
+        "index-current",
         &[(a, Some(true)), (b, Some(true)), (c, Some(true))],
         1,
     );
@@ -1198,7 +1167,7 @@ fn corpus_stale_index_revokes_live_handle() {
     let mut route = route();
     let handle = issue_complete_three_atom(&mut route);
     let mut live = live_for(&route, &handle);
-    live.index_version = "index-v2".to_owned();
+    live.index_version = "index-stale".to_owned();
     let error = route
         .expand_first(&handle, &live, &NativeBaseline::new(1000, 3))
         .expect_err("stale index must revoke");
@@ -1284,9 +1253,7 @@ fn corpus_altered_projection_revokes_live_handle() {
     }
 }
 
-// ---------------------------------------------------------------------------
 // Exactly one first expansion
-// ---------------------------------------------------------------------------
 
 #[test]
 fn corpus_exactly_one_first_expansion_per_handle() {
@@ -1303,9 +1270,7 @@ fn corpus_exactly_one_first_expansion_per_handle() {
     }
 }
 
-// ---------------------------------------------------------------------------
 // Determinism and bounds
-// ---------------------------------------------------------------------------
 
 #[test]
 fn corpus_plan_and_projection_roots_are_deterministic_across_routes() {
@@ -1325,17 +1290,17 @@ fn corpus_plan_and_projection_roots_are_deterministic_across_routes() {
     let req = request("task-main", &all);
     let scp = scope(&[]);
     let inp = input(
-        "index-v1",
+        "index-current",
         &[(a, Some(true)), (b, Some(true)), (c, Some(true))],
         1,
     );
     let mut first = route();
-    let mut second = W9eRoute::new(
+    let mut second = ExactScenarioClosureRoute::new(
         [0x99; 32],
         "tenant-a".to_owned(),
         7,
         digest(0x31),
-        "index-v1".to_owned(),
+        "index-current".to_owned(),
     )
     .unwrap();
     let outcome_a = first.compile_and_check(&m, &req, &scp, &inp).unwrap();
@@ -1350,7 +1315,7 @@ fn corpus_plan_and_projection_roots_are_deterministic_across_routes() {
     assert_eq!(plan_a.projection_root, plan_b.projection_root);
     // Independent projection root without helper
     let expected = {
-        const DOMAIN: &[u8] = b"zerostack.w9e.projection\0";
+        const DOMAIN: &[u8] = b"zerostack.demand.projection\0";
         let mut hex_sorted = vec![a.to_hex(), b.to_hex(), c.to_hex()];
         hex_sorted.sort();
         let canonical = zero_abi::canonical_json(&serde_json::json!({ "atoms": hex_sorted }));
@@ -1368,7 +1333,7 @@ fn corpus_over_budget_coverage_universe_fails_closed() {
         .collect();
     match GraphZeroCompletenessInput::new(
         digest(0x31),
-        "index-v1".to_owned(),
+        "index-current".to_owned(),
         "task-main".to_owned(),
         universe(&pairs),
         1,

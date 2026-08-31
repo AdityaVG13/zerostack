@@ -1,4 +1,4 @@
-//! Indexed-vs-disk delta since last `graphzero index` (snapshot baseline).
+//! Indexed-vs-disk delta since the last ZeroKernel snapshot publication.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -52,11 +52,9 @@ pub fn compute_repo_delta(snapshot: &Snapshot) -> Result<DeltaComputation, Query
     }
 
     let indexed_paths: BTreeSet<String> = indexed.keys().cloned().collect();
-    // The index dedupes blobs by content hash (one PathRecord per hash), so a
-    // path can be absent from the index while its exact bytes are already
-    // known (e.g. two identical fixture files). "Added" means NOVEL content:
-    // unknown path AND unknown hash. Known-hash aliases are counted as
-    // unchanged — the model has comprehended those bytes.
+    // The index dedupes blobs by content hash (one PathRecord per hash), so a path can be absent from
+    // the index while its exact bytes are already known (e.g. two identical fixture files). "Added"
+    // means NOVEL content unknown path AND unknown hash.
     let indexed_hashes: BTreeSet<&str> = indexed
         .values()
         .map(|(hash_hex, _)| hash_hex.as_str())

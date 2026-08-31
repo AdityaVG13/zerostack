@@ -1,9 +1,6 @@
-//! Wave 16 token-savings measurement observations around the direct Zero path.
-//!
-//! Measurement-only: this module is never on the authority path. It records
-//! native baseline versus model-visible Zero usage with exact units, task
-//! identity, and machine fingerprint. It performs no engine work, admits no
-//! I/O, and never influences dispatch or transaction decisions.
+//! Token-savings measurement observations around the direct Zero path. Measurement-only: this
+//! module is never on the authority path. It records native baseline versus model-visible Zero
+//! usage with exact units, identity, and machine fingerprint.
 
 #![forbid(unsafe_code)]
 
@@ -38,9 +35,8 @@ pub enum CallUnit {
 const MAX_STRING_BYTES: usize = 256;
 
 /// Machine fingerprint bound to every observation. All fields are required and
-/// validated; an incomplete fingerprint yields `Unknown` in the report rather
-/// than an invented claim. This fingerprint is measurement metadata only and
-/// never gates authority.
+/// validated; an incomplete fingerprint yields `Unknown` in the report rather than an
+/// invented claim. This fingerprint is measurement metadata only and never gates authority.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct MachineFingerprint {

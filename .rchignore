@@ -1,0 +1,15 @@
+.git/
+target/
+bindings/node/prebuilds/
+.zerostack/
+.fszero/
+.graphzero/
+.tokenzero/
+.asgrep/
+.ee/
+.beads/
+.bv/
+.bench-history/
+.pi-subagents/
+docs/internal/
+docs/papers/

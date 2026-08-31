@@ -1,7 +1,5 @@
-//! Canonical ZeroRef content-addressed store.
-//!
-//! Derived from the GraphZero shared_cas implementation (the strictest of
-//! the three engines), generalized behind engine-neutral errors.
+//! Canonical ZeroRef content-addressed store. Derived from the GraphZero shared_cas
+//! implementation (the strictest of the three engines), generalized behind engine-neutral errors.
 
 use std::fs;
 use std::io::Write;
@@ -35,14 +33,7 @@ const TEMP_CREATE_ATTEMPTS: usize = 5;
 /// stays recoverable.
 pub const CAS_QUARANTINE_DIR: &str = "quarantine";
 
-/// Historical temp-file shapes from the three engines, all reaped by this
-/// crate's reaper.
-///
-/// Each engine used to reap only its own shape: the prefix form was cleaned by
-/// the hub and GraphZero, the suffix form by FSZero, and TokenZero had no
-/// reaper at all. On a shared store root that meant abandoned temps from a
-/// crashed publisher of one engine were never cleaned by another, so the leak
-/// was permanent.
+/// Accept both prefix and suffix temporary-file shapes emitted by store writers.
 fn is_temp_name(name: &str) -> bool {
     name.starts_with(TEMP_PREFIX) || name.ends_with(".tmp")
 }
@@ -150,11 +141,9 @@ impl std::fmt::Display for CasError {
 
 impl std::error::Error for CasError {}
 
-/// True only for a regular file at exactly this path.
-///
-/// `Path::is_file` follows symlinks, so a symlink pointing at a regular file
-/// reports present and then fails verification under [SharedCas::get_verified],
-/// which stats the link itself. Every presence check uses this instead.
+/// True only for a regular file at exactly this path. `Path::is_file` follows symlinks, so a
+/// symlink pointing at a regular file reports present and then fails verification under
+/// [SharedCas::get_verified], which stats the link itself. Every presence check uses this instead.
 fn is_regular_file(path: &Path) -> bool {
     fs::symlink_metadata(path)
         .map(|m| m.file_type().is_file())
@@ -235,11 +224,9 @@ impl SharedCas {
         &self.root
     }
 
-    /// Canonical object path for a full lowercase 64-hex identity.
-    ///
-    /// Deliberately non-panicking on short input, so a malformed identity
-    /// produces a path that simply does not exist and callers report
-    /// `missing` or `malformed` rather than aborting the process.
+    /// Canonical object path for a full lowercase 64-hex identity. Deliberately
+    /// non-panicking on short input, so a malformed identity produces a path that simply
+    /// does not exist and callers report `missing` or `malformed` rather than aborting the process.
     pub fn object_path(&self, sha256: &str) -> PathBuf {
         self.root
             .join("blobs")
@@ -254,9 +241,8 @@ impl SharedCas {
     }
 
     /// Publish complete bytes at their canonical path and return the full
-    /// identity. Identical preexisting content is success (dedup); a
-    /// preexisting object with different bytes is a loud corruption error and
-    /// is never overwritten.
+    /// identity. Identical preexisting content is success (dedup); a preexisting
+    /// object with different bytes is a loud corruption error and is never overwritten.
     pub fn put(&self, bytes: &[u8]) -> Result<String, CasError> {
         self.put_outcome(bytes, CAS_MAX_OBJECT_BYTES)
             .map(|o| o.hash)
@@ -268,11 +254,9 @@ impl SharedCas {
         self.put_outcome(bytes, limit).map(|o| o.hash)
     }
 
-    /// Publish and report whether the object was newly created.
-    ///
-    /// Runs under the shared store coordination lock, which is what makes a
-    /// publish safe against a concurrent sweep: the sweeper cannot be between
-    /// its liveness recheck and its unlink while this call is in flight.
+    /// Publish and report whether the object was newly created. Runs under the shared store
+    /// coordination lock, which is what makes a publish safe against a concurrent sweep: the
+    /// sweeper cannot be between its liveness recheck and its unlink while this call is in flight.
     pub fn put_outcome(&self, bytes: &[u8], limit: u64) -> Result<PutOutcome, CasError> {
         let guard = self.lock_for_publish()?;
         self.put_in_lock(bytes, limit, &guard)
@@ -296,26 +280,8 @@ impl SharedCas {
         self.put_outcome(bytes, CAS_MAX_OBJECT_BYTES)
     }
 
-    /// Publish while already holding this store's coordinator lock.
-    ///
-    /// Normal batches use a shared publish guard. Atomic object-plus-lease
-    /// transactions use an exclusive guard so the object and protection record
-    /// become visible as one collector boundary.
-    /// # Multi-object contract
-    ///
-    /// There is no cross-object barrier. Each call is individually atomic (a
-    /// reader sees an object either absent or complete and verifying), but a
-    /// batch is **not** all-or-nothing: if the third of five calls fails, or the
-    /// process dies mid-batch, the objects already published stay published.
-    ///
-    /// This is safe because CAS objects are content-addressed and immutable, so
-    /// a partial batch is a subset of the intended objects and never a corrupt
-    /// or half-written one. Callers that need set-level atomicity must get it
-    /// from the artifact that names the set: publish every member first, and
-    /// only then publish the manifest/root that references them, so a crash
-    /// leaves unreferenced garbage for the sweeper rather than a dangling
-    /// reference. Do not treat an error from this method as "nothing was
-    /// written".
+    /// Publish while already holding this store's coordinator lock. Normal batches use a shared publish
+    /// guard.
     pub fn put_in_lock(
         &self,
         bytes: &[u8],
@@ -419,7 +385,7 @@ impl SharedCas {
     }
 
     /// Unique sibling temp, write+fsync, atomic replace with race converge.
-    /// Only a temp we created ourselves is ever cleaned up.
+    /// Cleanup applies only to temporary files created by this process.
     fn publish_new_object_via_temp_with_sequence(
         &self,
         parent: &Path,
@@ -564,20 +530,8 @@ impl SharedCas {
         fs::remove_file(&path).map_err(|e| io_err("remove object", e))
     }
 
-    /// Move one object out of the live tree so a wrong collection verdict
-    /// (or a scrub of a digest-mismatched body) remains recoverable.
-    ///
-    /// Owner choice (licj): quarantine is an **identity proof**, not a
-    /// scrub-into-named-slot. `gc/quarantine/<hash>` is occupied only by a
-    /// body that `read_verified_at` confirms hashes to `hash`. A
-    /// digest-mismatched source is moved to
-    /// `gc/quarantine/<hash>.corrupt-<n>` so the `<hash>` slot never
-    /// presents unverified bytes as recoverable under that digest. Prior
-    /// dest at `<hash>` is versioned to `<hash>.N` only after it verifies;
-    /// an unverified dest is renamed `<hash>.unverified` (then
-    /// `<hash>.unverified-N`) first. A symlink dest is refused --
-    /// `exists()` follows links and would treat one as a regular
-    /// quarantined object.
+    /// Move one object out of the live tree so a wrong collection verdict (or a scrub of a
+    /// digest-mismatched body) remains recoverable.
     pub fn quarantine_object(&self, sha256: &str, guard: &StoreLock) -> Result<(), CasError> {
         let path = self.sweep_target(sha256, guard)?;
         let dir = self
@@ -674,7 +628,7 @@ impl SharedCas {
     }
 }
 
-/// Authorization gate for verified CAS reads (ZS-SEC-005). A capability
+/// Authorization gate for verified CAS reads. A capability
 /// gate names the exact content a reader is authorized to fetch; a refusal
 /// is fail-closed: no object lookup happens and no bytes are returned.
 pub trait CasReadGate {
@@ -692,10 +646,9 @@ impl SharedCas {
         self.get_verified_limited(sha256, CAS_MAX_OBJECT_BYTES)
     }
 
-    /// Verified read behind an authorization gate. The gate is consulted
-    /// BEFORE any object lookup, so a refused read returns no bytes and cannot
-    /// distinguish object existence; content still hashes to the requested
-    /// identity before bytes are returned.
+    /// Verified read behind an authorization gate. The gate is consulted BEFORE any
+    /// object lookup, so a refused read returns no bytes and cannot distinguish object
+    /// existence; content still hashes to the requested identity before bytes are returned.
     pub fn get_verified_gated(
         &self,
         sha256: &str,
@@ -791,10 +744,9 @@ fn touch_path(path: &Path) -> std::io::Result<()> {
     file.set_times(fs::FileTimes::new().set_modified(SystemTime::now()))
 }
 
-/// Bounded temp cleanup rule: only temp-shaped files inside the given fan-out
-/// directory, and only when older than max_age. Best-effort; never errors,
-/// never touches younger files, so it cannot race active writers. All three
-/// engines' historical temp shapes are recognized (see [is_temp_name]).
+/// Bounded temp cleanup rule: only temp-shaped files inside the given fan-out directory, and only
+/// when older than max_age. Best-effort; never errors, never touches younger files, so it cannot
+/// race active writers. All three engines' historical temp shapes are recognized (see [is_temp_name]).
 fn reap_stale_temps(dir: &Path, max_age: Duration) {
     let Ok(entries) = fs::read_dir(dir) else {
         return;

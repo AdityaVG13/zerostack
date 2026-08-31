@@ -1,4 +1,4 @@
-//! Trigram extraction and postings (FR-003).
+//! Trigram extraction and postings.
 
 use std::collections::BTreeMap;
 

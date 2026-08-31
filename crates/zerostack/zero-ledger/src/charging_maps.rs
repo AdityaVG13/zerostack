@@ -1,30 +1,5 @@
-//! ZS-METRIC-007: certified lower-bound ledger of disjoint charging maps.
-//!
-//! Six typed phases must carry every unavoidable cost claim: request
-//! information, decisions, reasoning, verification, output, and effects. Each
-//! phase has one [`ChargingMap`] whose entries are measured work units; the
-//! map total is derived from its entries (checked integer sum, honest
-//! exactness label), never caller-supplied.
-//!
-//! Invariants enforced here:
-//!
-//! - **Conservation within a map.** The map total is the checked sum of its
-//!   entries by construction; a wire map is re-validated on decode.
-//! - **Disjointness across maps.** [`ChargingMapSet::check_overlap`] rejects
-//!   any work unit charged in two phases: double counting is a typed error,
-//!   never silently merged.
-//! - **Closure Gamma <= 1.** [`ChargingMapSet::check_closure`] compares the
-//!   total attributed against a measured total. Attributed above measured is
-//!   a non-conservation refusal; attributed below measured leaves the
-//!   unclaimed residue *reported, not guessed* (nothing is split into a
-//!   phase without evidence). Gamma = attributed / measured never exceeds 1
-//!   under valid data, and the honest full-coverage endpoint is Gamma = 1.
-//! - **Deterministic solving from measured receipts.** [`ChargingMapSet::solve`]
-//!   groups [`CausalWorkReceipt`] charges into phases through an explicit
-//!   total [`PhasePolicy`]. A receipt that fails validation, an empty receipt
-//!   set, a work unit charged twice across receipts, or a policy that does
-//!   not cover every causal class is a loud refusal -- the solver never
-//!   guesses a split.
+//! Lower-bound ledger of disjoint charging maps.
+//! Six phases account for request, decisions, reasoning, verification, output, and effects.
 
 use std::collections::BTreeMap;
 use std::error::Error;
@@ -33,7 +8,7 @@ use std::fmt;
 use serde::{Deserialize, Serialize, de};
 
 use crate::causal_work::{
-    CausalWorkClass, CausalWorkError, CausalWorkReceipt, CAUSAL_WORK_MAX_ID_BYTES,
+    CAUSAL_WORK_MAX_ID_BYTES, CausalWorkClass, CausalWorkError, CausalWorkReceipt,
 };
 use crate::resource_classes::{MeasurementSource, ResourceTotal};
 
@@ -96,11 +71,9 @@ pub struct ChargingEntry {
     pub source: MeasurementSource,
 }
 
-/// One phase's charging map.
-///
-/// Entries are kept sorted by work-unit id (canonical, deterministic), the
-/// total is the checked entry sum, and the source label is derived. Wire
-/// decoding re-validates every invariant.
+/// One phase's charging map. Entries are kept sorted by work-unit id
+/// (canonical, deterministic), the total is the checked entry sum, and
+/// the source label is derived. Wire decoding re-validates every invariant.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct ChargingMap {
     phase: ChargingPhase,
@@ -110,12 +83,13 @@ pub struct ChargingMap {
 }
 
 impl ChargingMap {
-    /// Builds one phase map.
-    ///
-    /// Refusals: an empty work-unit id, an id longer than
-    /// [`CAUSAL_WORK_MAX_ID_BYTES`], a zero amount, a duplicate id within the
-    /// map, and checked-sum overflow.
-    pub fn build(phase: ChargingPhase, entries: Vec<ChargingEntry>) -> Result<Self, ChargingMapError> {
+    /// Builds one phase map. Refusals: an empty work-unit id, an id longer than
+    /// [`CAUSAL_WORK_MAX_ID_BYTES`], a zero amount, a duplicate id within the map, and checked-sum
+    /// overflow.
+    pub fn build(
+        phase: ChargingPhase,
+        entries: Vec<ChargingEntry>,
+    ) -> Result<Self, ChargingMapError> {
         let mut sorted = entries;
         for entry in &sorted {
             if entry.work_unit_id.is_empty() {
@@ -248,10 +222,8 @@ impl ChargingMapSet {
         ResourceTotal::derived(amount, MeasurementSource::derive(sources))
     }
 
-    /// Overlap checker: rejects any work unit charged in two phases.
-    ///
-    /// Double counting is a typed refusal; overlapping amounts are never
-    /// silently merged or split.
+    /// Overlap checker: rejects any work unit charged in two phases. Double counting
+    /// is a typed refusal; overlapping amounts are never silently merged or split.
     pub fn check_overlap(&self) -> Result<(), ChargingMapError> {
         let mut owner: BTreeMap<&str, ChargingPhase> = BTreeMap::new();
         for map in self.maps.values() {
@@ -268,14 +240,9 @@ impl ChargingMapSet {
         Ok(())
     }
 
-    /// Closure check against a measured total: Gamma = attributed / measured
-    /// never exceeds 1 under valid data.
-    ///
-    /// Conservation is enforced exactly: attributed above the measured total
-    /// is `NonConservation`. Attributed below the measured total is honest
-    /// partial coverage: the unclaimed residue is reported and never
-    /// attributed without evidence. A zero measured total with zero
-    /// attribution has no denominator and is refused.
+    /// Closure check against a measured total: Gamma = attributed / measured never exceeds 1 under
+    /// valid data. Conservation is enforced exactly: attributed above the measured total is
+    /// `NonConservation`.
     pub fn check_closure(&self, measured_total: u64) -> Result<ClosureReport, ChargingMapError> {
         let attributed = self.total_attributed().amount();
         if attributed > u128::from(measured_total) {
@@ -297,13 +264,8 @@ impl ChargingMapSet {
         })
     }
 
-    /// Deterministically solves the charging maps from measured receipts.
-    ///
-    /// Every receipt is validated, and every charge is attributed through the
-    /// total policy to exactly one phase. Refusals: an empty receipt set, a
-    /// receipt that fails validation, and a work unit charged in more than
-    /// one receipt (double classification across windows). The same inputs
-    /// always yield the same maps.
+    /// Deterministically solves the charging maps from measured receipts. Every receipt is validated,
+    /// and every charge is attributed through the total policy to exactly one phase.
     pub fn solve(
         policy: &PhasePolicy,
         receipts: &[CausalWorkReceipt],
@@ -313,17 +275,16 @@ impl ChargingMapSet {
         }
         let mut by_phase: BTreeMap<ChargingPhase, Vec<ChargingEntry>> = BTreeMap::new();
         for receipt in receipts {
-            receipt.validate().map_err(ChargingMapError::InvalidReceipt)?;
+            receipt
+                .validate()
+                .map_err(ChargingMapError::InvalidReceipt)?;
             for charge in &receipt.charges {
                 let phase = policy.phase_for(charge.class);
-                by_phase
-                    .entry(phase)
-                    .or_default()
-                    .push(ChargingEntry {
-                        work_unit_id: charge.work_unit_id.to_hex(),
-                        amount: charge.amount,
-                        source: MeasurementSource::Exact,
-                    });
+                by_phase.entry(phase).or_default().push(ChargingEntry {
+                    work_unit_id: charge.work_unit_id.to_hex(),
+                    amount: charge.amount,
+                    source: MeasurementSource::Exact,
+                });
             }
         }
         let mut maps = Vec::with_capacity(ChargingPhase::ALL.len());
@@ -363,10 +324,8 @@ pub struct ClosureReport {
     pub full: bool,
 }
 
-/// An explicit, total mapping from causal classes to charging phases.
-///
-/// The policy must cover every [`CausalWorkClass`] exactly once, so the
-/// solver never has to guess where an unmapped class belongs.
+/// An explicit, total mapping from causal classes to charging phases. The policy must cover every
+/// [`CausalWorkClass`] exactly once, so the solver never has to guess where an unmapped class belongs.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PhasePolicy {
     assignments: BTreeMap<CausalWorkClass, ChargingPhase>,
@@ -471,12 +430,14 @@ impl fmt::Display for ChargingMapError {
                 write!(f, "work unit {work_unit_id} is charged twice in one map")
             }
             Self::CounterOverflow => f.write_str("charging map total would overflow u64"),
-            Self::WireTotalsMismatch => {
-                f.write_str("wire map totals disagree with its entries")
-            }
+            Self::WireTotalsMismatch => f.write_str("wire map totals disagree with its entries"),
             Self::DuplicatePhase(phase) => write!(f, "phase {phase} has more than one map"),
             Self::MissingPhases(phases) => {
-                write!(f, "missing phases: {:?}", phases.iter().map(|p| p.as_str()).collect::<Vec<_>>())
+                write!(
+                    f,
+                    "missing phases: {:?}",
+                    phases.iter().map(|p| p.as_str()).collect::<Vec<_>>()
+                )
             }
             Self::OverlappingCharge {
                 work_unit_id,
@@ -520,4 +481,3 @@ fn reduce(num: u64, den: u64) -> (u64, u64) {
     }
     (num / a, den / a)
 }
-

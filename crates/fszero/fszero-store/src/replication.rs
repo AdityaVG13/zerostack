@@ -1,19 +1,6 @@
-//! Replication topology + repair-from-replica (ZS-STORE-007 FSZero part).
-//!
-//! Minimal honest replication for the physical CAS:
-//!
-//! - A `replication_targets` declaration at `<store_root>/gc/replication.json`
-//!   names replica store roots (each a ZeroStack store root holding
-//!   `blobs/sha256/...`).
-//! - GC consults the declaration **before evicting**: a blob slated for
-//!   removal is first published to every declared replica (replicate-before-
-//!   evict, via the hub `SharedCas` verified publish path). If any replica
-//!   copy fails, the local blob is NOT evicted (fail-loud, zero side
-//!   effects) and the refusal lands in the GC report.
-//! - `repair_from_replicas` pulls a missing blob from the first replica that
-//!   has it and re-publishes it locally through the CAS put path, which
-//!   restores L3 validity in the ledger with the same identity (no
-//!   rediscovery).
+//! Replication topology + repair-from-replica (FSZero part). Minimal honest
+//! replication for the physical CAS A `replication_targets` declaration at
+//! `<store_root>/gc/replication.json` names replica store roots (each a ZeroStack store root holding `blobs/sha256/...`).
 
 use std::fmt;
 use std::path::{Path, PathBuf};
@@ -118,10 +105,9 @@ impl ReplicationConfig {
     }
 }
 
-/// Publish `bytes` (already verified locally, digest matches `hash`) to every
-/// declared replica target. Idempotent: a target that already contains the
-/// hash is skipped. Returns the number of replicas that newly received the
-/// blob. Any failure fails loud; the caller must NOT evict the local copy.
+/// Publish `bytes` (already verified locally, digest matches `hash`) to every declared replica
+/// target. Idempotent: a target that already contains the hash is skipped. Returns the number of
+/// replicas that newly received the blob.
 pub fn replicate_before_evict(
     store_root: &Path,
     config: &ReplicationConfig,

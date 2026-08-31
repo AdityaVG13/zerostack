@@ -1,10 +1,5 @@
-//! Deterministic contract digest helpers.
-//!
-//! These hashes are Wire identity (canonical JSON + SHA-256). They are **not**
-//! a C-25 semantic-mutation checker: changing ProtocolLimits defaults,
-//! ApprovalGrant shape, or EngineIdentity aliases can leave the digest
-//! unchanged if the hashed field names / version string stay put. Do not
-//! Promote C-25 from the existing version/key-order pins.
+//! Deterministic contract digest helpers. These hashes are Wire identity (canonical JSON +
+//! SHA-256).
 
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -31,11 +26,6 @@ pub fn sha256_hex(bytes: &[u8]) -> String {
 }
 
 /// Digest of a contract manifest: canonical JSON encoding, then SHA-256 hex.
-///
-/// Engines build their manifest Value from their own registry (name, aliases,
-/// error kinds, normalized input/output schemas, semantics fields) and hash it
-/// through this single implementation so two engines can never disagree on
-/// encoding.
 pub fn contract_digest_hex(manifest: &Value) -> String {
     sha256_hex(canonical_json(manifest).as_bytes())
 }

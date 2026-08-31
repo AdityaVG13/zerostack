@@ -1,19 +1,11 @@
-//! Shared GraphZero primitive types.
-//!
-//! This crate breaks dependency cycles between graphzero-store and
-//! graphzero-extract: extraction can emit content-addressed facts without
-//! depending on the store implementation, while the store can consume those
-//! facts in its default index path.
+//! Shared GraphZero primitive types. This crate breaks dependency cycles between graphzero-store
+//! and graphzero-extract: extraction can emit content-addressed facts without depending on the
+//! store implementation, while the store can consume those facts in its default index path.
 
 pub mod schema_version;
 
-/// Logic-free compatibility re-export of the hub `zero-process` substrate.
-///
-/// GraphZero no longer forks process identity or verified child-tree lifecycle
-/// code (previously `src/child_identity.rs`, a byte-level duplicate of
-/// `zero-process`). The hub crate owns it; this module only re-exports the
-/// exact public API the daemon and extraction surfaces consumed, so call sites
-/// and persisted `stem.identity` records are unchanged.
+/// Re-export hub process types so GraphZero does not own process identity
+/// or child-tree lifecycle logic.
 pub mod child_identity {
     pub use zero_process::{
         ChildBinding, IDENTITY_FILE_NAME, IdentityError, ProcessIdentity, SignalOutcome,

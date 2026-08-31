@@ -1,12 +1,5 @@
-//! Root law tests for the Wave16 Task Lens internal engine contract.
-//!
-//! Lattice law under test: `Unsafe` dominates `Unknown` dominates `Safe`.
-//! A `Safe` verdict must satisfy every Safe law; anything missing, stale, or
-//! incomplete must degrade to `Unknown`; an explicit semantic choice or
-//! conflict must be `Unsafe` with reasons; and `reasons` is always the
-//! canonical sorted-and-deduplicated list. Coverage tiers A/B/C are
-//! independent: completeness is `tier_a_pct >= 99.0` with
-//! `freshness_verified`, while B/C may be anywhere in 0..100.
+//! Root law tests for the internal engine contract. Lattice law under test: `Unsafe` dominates
+//! `Unknown` dominates `Safe`.
 
 use sha2::{Digest, Sha256};
 use std::fmt::Write as _;

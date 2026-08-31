@@ -10,9 +10,9 @@
 
 </div>
 
-ZeroStack is a Rust workspace for a daemonless, in-process agent kernel. It composes exact filesystem authority, structural code intelligence, and output accounting behind one six-operation API.
+ZeroStack is the product in this repository. It includes a daemonless in-process kernel (ZeroKernel) that runs files, structure, and token accounting behind one six-operation API.
 
-ZeroKernel is the only model-facing execution surface. A reusable host creates one fresh, bounded JavaScript or TypeScript frame per cell. ZeroStack owns lifecycle, budgets, cancellation, transactions, child processes, session state, and the terminal response. FSZero, GraphZero, and TokenZero provide typed engine contracts and never import one another.
+ZeroKernel is that kernel: a reusable host creates one fresh, bounded JavaScript or TypeScript frame per cell. ZeroStack owns lifecycle, budgets, cancellation, transactions, child processes, session state, and the terminal response. File, graph, and token libraries are domain surfaces ZeroStack uses; they never import one another. They are not separate products. MCP exists only as a lossy adapter (`zero-mcp`) for harnesses that cannot embed the kernel.
 
 Large results are projected with **byte-aware recovery-aware context compression (RACC)**. The model sees a compact capsule. The original bytes stay recoverable behind content-addressed handles. Quality is guarded by exact recovery and fallback, not by summarization, reasoning-token cuts, or a weaker model.
 
@@ -41,11 +41,11 @@ An embedding application creates one `ZeroKernel` host for a workspace, session,
 flowchart TB
   App[Embedding application] --> Host[Reusable ZeroKernel host]
   Host --> Frame[Fresh bounded frame]
-  subgraph engines [Typed engines]
+  subgraph engines [Domain surfaces]
     direction LR
-    FS[FSZero]
-    GZ[GraphZero]
-    TZ[TokenZero]
+    FS[files]
+    GZ[structure]
+    TZ[tokens]
   end
   subgraph runtime [Host-owned runtime]
     direction LR
@@ -66,6 +66,8 @@ ZeroKernel opens no network listener and starts no machine-wide daemon. Rust hos
 | FSZero | Exact bytes, snapshots, guarded file effects, restoration | `z.read`, `z.edit`, `z.apply` |
 | GraphZero | Syntax, symbols, relationships, freshness, coverage | `z.find` |
 | TokenZero | Measurement, projection, compression, exact expansion | Automatic at operation and response boundaries |
+| ZeroGate | Proof-carrying exact scenario closure and read-only Snap-to-File decisions | `z.read({snapToFile: ...})` after trusted GraphZero evidence registration |
+| ZeroGauge | Comparable native/Zero observations and exact savings reports | Rust host API and `zero-kernel savings-report` |
 
 Authority is narrow by design. A graph result does not become file content. A compact projection does not become source bytes. A staged receipt does not commit the cell on its own. See `docs/architecture.md` and `docs/components.md` for the full boundary table and flow.
 
@@ -202,6 +204,16 @@ const page = await z.read(snapshot.source.exact, { offset: 4096, limit: 4096 });
 const dir = await z.read("src", { recursive: false });
 ```
 
+Snap-to-File keeps GraphZero evidence on the trusted side of the host boundary. Register a validated `GraphZeroCompletenessInput` with `ZeroKernel::register_snap_to_file_completeness` or the Node binding's `registerSnapToFileCompleteness`. Pass only the returned opaque handle into the cell:
+
+```javascript
+return await z.read({
+  snapToFile: { manifest, demand, scope, completeness, nativeBaseline },
+});
+```
+
+The request returns a snapped, escaped, or refused ZeroGate packet without adding another `z.*` operation. A guest-authored completeness envelope is not accepted.
+
 Guarded edits use a snapshot that carries the exact preimage.
 
 ```javascript
@@ -247,18 +259,22 @@ A structured handle returned inside a snapshot or projection is accepted by late
 
 **State.** `z.state` is a bounded session-scoped JSON map for small facts that must survive fresh frames, such as a selected path or workflow checkpoint. The host hydrates state from the committed CAS root before evaluation and commits a successor root with compare-and-set only on completed dirty cells. Interpreter variables, imports, and promises never persist across cells.
 
-**Terminal response.** Every accepted cell returns one structured response. Completed output is the exact TokenZero projection recorded by the terminal event. No extra model-visible envelope is added.
+**Terminal response.** Every accepted cell returns one structured response. Completed `value` is the exact JSON-text TokenZero projection recorded by the terminal event. No extra model-visible envelope is added.
 
 ```typescript
 interface ZeroKernelResponse {
   protocol: "ZeroKernel";
   outcome: "Completed" | "Cancelled" | "Failed";
-  value?: unknown;
-  error?: { kind: string; detail: string; retryable: boolean };
-  handles: string[];
+  value?: string;
+  error?: { kind: EngineErrorKind; detail: string; retryable: boolean };
+  operations?: ZeroOperationTrace[];
+  operationsTruncated?: boolean;
+  handles?: string[];
   event: string;
   state: { before?: string; after?: string; unchanged: boolean };
   ledger: ResourceLedger;
+  turn?: TurnRecord;
+  effects?: FileEffectReceipt[];
 }
 ```
 
@@ -280,9 +296,9 @@ cargo test -p zero-kernel --test direct_host
 cargo test -p zero-codemode --test syntax
 ```
 
-Use the narrowest relevant test target during development. Domain tests live under `tests/fszero`, `tests/graphzero`, `tests/tokenzero`, and `tests/support`. Name the package and exact `--lib`, `--bin`, or `--test` target.
+Use the narrowest relevant test target during development. All Rust tests live under repository-root `tests/`; domain tests use `tests/fszero`, `tests/graphzero`, and `tests/tokenzero`, while consolidated hub and workflow targets remain flat or use `tests/support`. Name the package and exact `--lib`, `--bin`, or `--test` target.
 
-The CLI binary is `zero-kernel` in `crates/zerostack/zero-kernel`. It exposes `doctor`, `health`, `exec`, `mcp` (when built with the `mcp-carrier` feature), and `migrate`. `exec` reads one cell from stdin and is intended for diagnostics, not as the production model path.
+The only product CLI binary is `zero-kernel` in `crates/zerostack/zero-kernel`. It exposes `doctor`, `health`, `exec`, `program-evidence`, `savings-report`, and `mcp` when built with the `mcp-carrier` feature. `exec` reads one cell from stdin and is intended for diagnostics, not as the production model path.
 
 ### Command reference
 
@@ -292,6 +308,8 @@ The CLI binary is `zero-kernel` in `crates/zerostack/zero-kernel`. It exposes `d
 | `zero-kernel doctor -C <workspace>` | Validate the workspace and durable ZeroStack store |
 | `zero-kernel exec -C <workspace>` | Read one JavaScript or TypeScript cell from stdin |
 | `zero-kernel mcp -C <workspace>` | Run the optional stdio carrier when `mcp-carrier` is enabled |
+| `zero-kernel program-evidence --manifest <manifest.json> --out <receipt.json>` | Assemble and immutably write a Program evidence receipt |
+| `zero-kernel savings-report --native <native.json> --zero <zero.json>` | Validate a comparable observation pair and emit a canonical ZeroGauge report |
 | `cargo test -p zero-kernel --test direct_host <test-name> -- --exact` | Run one focused host contract |
 | `cargo run --manifest-path xtask/Cargo.toml -- doctor --json` | Inspect repository layout and required files |
 | `node demo/run.js` | Exercise FSZero, GraphZero, and TokenZero through one cell |
@@ -325,6 +343,9 @@ const kernel = new ZeroKernel({ root: process.cwd(), sessionId: "example" });
 await kernel.initialize();
 
 const response = await kernel.executeCell("return await z.read('README.md');");
+if (response.outcome === "Completed" && response.value !== undefined) {
+  console.log(JSON.parse(response.value));
+}
 
 await kernel.shutdown();
 ```
@@ -438,7 +459,7 @@ The underlying bytes remain sensitive and should be protected with the same file
 
 No. Multi-engine agent workflows should use ZeroKernel so filesystem, graph, output, state, cancellation, and transactions share one lifecycle. Registering classic MCP beside ZeroKernel in the same session creates overlapping read and recovery paths and makes accounting harder to interpret.
 
-The optional `zero-kernel mcp` binary is a diagnostic stdio carrier when built with `mcp-carrier`. It is not a second model-facing catalog.
+The optional `zero-kernel mcp` command is a diagnostic stdio carrier when built with `mcp-carrier`. It is not a second binary or model-facing catalog.
 
 </details>
 

@@ -1,4 +1,4 @@
-//! NFR-004: branch switch budget (<100ms). Same blobs = same shards, so a
+//! Branch-switch latency benchmark. Identical blobs reuse identical shards, so a
 //! branch switch is re-opening the snapshot and answering a query.
 
 mod common;

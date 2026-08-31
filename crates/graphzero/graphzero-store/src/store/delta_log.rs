@@ -1,18 +1,5 @@
-//! Append-only delta log: 64MB segments, CRC32c per segment, fdatasync on
-//! commit (FR-013). Segment files live under `.graphzero/wal/seg_<id>.log`.
-//!
-//! Segment layout (little-endian):
-//! ```text
-//! 0x00 magic        [u8; 4] = "GZDL"
-//! 0x04 version      u8      = 0x01
-//! 0x05 reserved     [u8;11]
-//! 0x10 segment_id   u64
-//! 0x18 prev_crc     u32     (CRC32c of previous segment's entries; 0 for first)
-//! 0x1C entry_count  u32
-//! 0x20 segment_crc  u32     (CRC32c over all entry bytes)
-//! 0x24 entries...
-//! ```
-//! Entry: type u8, blob_hash [u8;32], payload_len u32, payload bytes.
+//! Append-only delta log: 64MB segments, CRC32c per segment, fdatasync on commit. Segment
+//! files live under `.graphzero/wal/seg_<id>.log`.
 
 use std::fs::{self, File, OpenOptions};
 use std::io::Read;
@@ -32,7 +19,7 @@ pub mod entry_type {
     pub const EDGE: u8 = 2;
     pub const TRIGRAM: u8 = 3;
     pub const COVERAGE: u8 = 4;
-    /// P5.2 intent reservation audit record
+    /// Intent reservation audit record.
     pub const RESERVATION: u8 = 5;
 }
 
@@ -64,11 +51,9 @@ struct OpenSegment {
     prev_crc: u32,
 }
 
-/// Append-only writer. `append` buffers; `commit` durability-seals the open
-/// segment (header + CRC + fdatasync) but **keeps** it open so later
-/// appends reuse the same file until [`SEGMENT_MAX_SIZE`] (graphzero-8jxvg).
-/// A new `seg_*.log` is only created when the open segment would overflow or
-/// after an explicit roll.
+/// Append-only writer. `append` buffers; `commit` durability-seals the open segment (header + CRC +
+/// fdatasync) but **keeps** it open so later appends reuse the same file until [`SEGMENT_MAX_SIZE`].
+/// A new `seg_*.log` is only created when the open segment would overflow or after an explicit roll.
 pub struct DeltaLog {
     dir: PathBuf,
     current: Option<OpenSegment>,
@@ -173,9 +158,8 @@ impl DeltaLog {
         Ok(())
     }
 
-    /// Durability-seal the open segment: rewrite header + entries, CRC32c,
-    /// fdatasync. Keeps the segment open so subsequent `append`s reuse the same
-    /// file under [`SEGMENT_MAX_SIZE`] (graphzero-8jxvg). Empty open segments
+    /// Durability-seal the open segment: rewrite header + entries, CRC32c, fdatasync. Keeps the segment
+    /// open so subsequent `append`s reuse the same file under [`SEGMENT_MAX_SIZE`]. Empty open segments
     /// (rolled, no entries) are removed so they never become WAL barriers.
     pub fn commit(&mut self) -> Result<()> {
         let Some(seg) = self.current.as_mut() else {
@@ -186,7 +170,7 @@ impl DeltaLog {
             // Drop empty rolled file; clear current so next append rolls cleanly.
             let id = seg.id;
             let empty = path.exists() && fs::metadata(&path)?.len() == 0;
-            // Take only when empty so we can delete without holding the FD.
+            // Take the path only when empty so deletion occurs after the file descriptor closes.
             if empty {
                 let seg = self.current.take().expect("current present");
                 drop(seg.file);

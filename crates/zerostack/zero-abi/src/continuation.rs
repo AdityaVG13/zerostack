@@ -1,24 +1,6 @@
-//! Continuation layer (ZS-SESSION-001..005, ZS-ADAPTER-004).
-//!
-//! An opaque [`ContinuationHandle`] binds the eight authority roots (task
-//! contract, project, evidence, candidate, verification, ledger, contracts,
-//! epoch) to one state of the D5 continuation machine
-//! ([`ContinuationState`]). A handle is a self-verifying
-//! root: any tamper, stale root set, cross-project scope, or forged identity
-//! changes the handle id, so the fail-closed checks in
-//! [`ContinuationHandle::validate_against`] reject it before any mutation.
-//!
-//! Fail-closed laws:
-//! - A handle can only advance along [`allowed_transition`]; the D5 forbidden
-//!   transitions (`Unknown -> Authorized`, `Executing -> Committed`,
-//!   `WaitingDecision -> Executing`) are unreachable through this API.
-//! - Branching spawns a child with a recorded parent; a child can never
-//!   mutate the parent's roots, and only one verified child may commit.
-//! - Compaction is permitted only after a sealed snapshot root exists and the
-//!   handle is in a terminal post-commit state; replay of the compacted
-//!   record yields the identical sealed head and audit roots.
-//! - `validate_against` fails closed on wrong ABI version, forged id, stale
-//!   roots, cross-project scope, and revoked epoch.
+//! Durable continuation handles bind eight authority roots to one
+//! [`ContinuationState`]. The roots cover contract, project, evidence, candidate,
+//! verification, ledger, contracts, and epoch identity.
 
 use std::{error::Error, fmt};
 
@@ -331,10 +313,9 @@ impl ContinuationHandle {
         Self::build(to, self.roots.clone(), self.parent_handle)
     }
 
-    /// Branch a child continuation from this handle. Branching is permitted
-    /// only from `Resolved` (the point where alternatives are explored) and
-    /// only before the parent has left the planning phase. A child shares the
-    /// parent's roots but records its parent id; the parent never mutates.
+    /// Branch a child continuation from this handle. Branching is permitted only from `Resolved`
+    /// (the point where alternatives are explored) and only before the parent has left the planning
+    /// phase. A child shares the parent's roots but records its parent id; the parent never mutates.
     pub fn spawn_child(&self, to: ContinuationState) -> Result<Self, ContinuationError> {
         self.verify_id()?;
         if !matches!(self.state, ContinuationState::Resolved) {
@@ -367,8 +348,7 @@ impl ContinuationHandle {
 
     /// Durable round trip: a serialized handle deserializes to the identical
     /// handle id (the wire form is self-verifying). ABI-incompatible or
-    /// tampered wire forms fail closed during deserialization or on
-    /// `verify_id`.
+    /// tampered wire forms fail closed during deserialization or on `verify_id`.
     pub fn canonical_bytes(&self) -> Result<Vec<u8>, ContinuationError> {
         let value = serde_json::to_value(self)
             .map_err(|error| ContinuationError::InvalidHandle(error.to_string()))?;

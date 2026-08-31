@@ -3,6 +3,7 @@ name = "graphzero-core"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+publish = false
 description = "GraphZero structural truth authority: truth classes, coverage, negative knowledge, certified incremental invalidation"
 autotests = false
 
@@ -16,15 +17,23 @@ proptest = { workspace = true }
 
 [[test]]
 name = "core_invalidation_proptest"
-path = "../../../tests/graphzero/core/invalidation_proptest.rs"
+path = "../../../tests/graphzero/core_invalidation_proptest.rs"
 
 [[test]]
 name = "cognitive_work"
-path = "../../../tests/graphzero/unit/graphzero-core/cognitive_work.rs"
+path = "../../../tests/graphzero/core_cognitive_work.rs"
 
 [[test]]
 name = "cognitive_work_lens"
-path = "../../../tests/graphzero/core/cognitive_work_lens.rs"
+path = "../../../tests/graphzero/core_cognitive_work_lens.rs"
+
+[[test]]
+name = "core_conformance"
+path = "../../../tests/graphzero/core_conformance.rs"
+
+[[test]]
+name = "core_grades"
+path = "../../../tests/graphzero/core_grades.rs"
 
 [lints]
 workspace = true

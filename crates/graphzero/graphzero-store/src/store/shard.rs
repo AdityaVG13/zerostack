@@ -1,4 +1,4 @@
-//! Shard writer and reader for the GZSH v1 container (FR-001, FR-011).
+//! Shard writer and reader for the GZSH container.
 
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Write};
@@ -13,10 +13,10 @@ use super::format::{HEADER_LEN, SECTION_COUNT, ShardHeader, SpanEntry, TrigramPo
 use super::hot_path::ShardView;
 use super::symbol_table::BuiltSymbolTable;
 
-/// Target shard payload size (ADR-001: hybrid partitioning, ~4MB).
+/// Target shard payload size (hybrid partitioning, ~4MB).
 pub const TARGET_SHARD_SIZE: usize = 4 * 1024 * 1024;
 
-/// In-memory shard content, serialized to a GZSH v1 file by `write_to`.
+/// In-memory shard content, serialized to a GZSH file by `write_to`.
 pub struct ShardBuilder {
     pub symbols: BuiltSymbolTable,
     pub spans: Vec<SpanEntry>,
@@ -33,7 +33,7 @@ fn pad_to8(buf: &mut Vec<u8>) {
 }
 
 impl ShardBuilder {
-    /// Serialize all six sections plus header into GZSH v1 bytes.
+    /// Serialize all six sections plus header into GZSH bytes.
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut offsets = [0u64; SECTION_COUNT];
         let mut body: Vec<u8> = Vec::new();
@@ -102,8 +102,7 @@ impl ShardBuilder {
         out
     }
 
-    /// Write the shard to `path`, fdatasync'd (durability before manifest
-    /// publish, FR-013/FR-014).
+    /// Write the shard to `path` and sync its data before manifest publication.
     pub fn write_to(&self, path: &Path) -> Result<u64> {
         self.write_to_with_sync(path, true)
     }
@@ -138,7 +137,7 @@ enum Backing {
 }
 
 /// Opened shard: mmap-backed by default, heap fallback when mmap is
-/// unavailable (FR-011). `view()` returns the zero-copy section reader.
+/// unavailable. `view()` returns the zero-copy section reader.
 pub struct ShardReader {
     backing: Backing,
     header: ShardHeader,
@@ -164,19 +163,9 @@ impl ShardReader {
         let backing = if mmap_disabled() {
             Self::read_fallback(&mut f)?
         } else {
-            // SAFETY: mmap is sound here because GraphZero treats shard files as
-            // immutable content-addressed artifacts after publication: writers
-            // write a complete new file, fdatasync it, then atomically publish a
-            // manifest that points at it. This reader opens the file read-only,
-            // rejects files shorter than the fixed header before mapping, and
-            // immediately validates the GZSH magic/version/section count/CRC and
-            // every section offset against the mapped length. If mmap is denied
-            // by the platform, the heap fallback uses the same validation path.
-            //
-            // madvise(WILLNEED) was tried here (graphzero perf): no measurable
-            // win — the sequential CSR scan already rides kernel readahead, and
-            // the op immediately consumes the mapped bytes so there is nothing
-            // to overlap with. Reverted per keep-gate (no MT8 attribution).
+            // SAFETY: mmap is sound here because GraphZero treats shard files as immutable content-addressed
+            // artifacts after publication: writers write a complete new file, fdatasync it, then atomically
+            // publish a manifest that points at it.
             match unsafe { Mmap::map(&f) } {
                 Ok(m) => Backing::Mmap(m),
                 Err(_) => Self::read_fallback(&mut f)?,

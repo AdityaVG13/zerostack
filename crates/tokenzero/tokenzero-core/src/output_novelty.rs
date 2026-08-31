@@ -1,9 +1,5 @@
-//! Exact, fieldwise coding receipts for caller-selected output effects.
-//!
-//! TokenZero does not select an effect or decide which bytes are semantically
-//! novel. The caller supplies ordered fields and their classes, plus digests of
-//! the selection authority, selected effect, and verification receipt. This
-//! module only validates, frames, tokenizes, and accounts those exact bytes.
+//! Exact, fieldwise coding receipts for caller-selected output effects. TokenZero does not select
+//! an effect or decide which bytes are semantically novel.
 
 use crate::model_artifacts::{ExactTokenMap, ExactTokenizerAdapter, ModelArtifactError};
 use serde::Serialize;
@@ -11,11 +7,11 @@ use std::collections::BTreeSet;
 use std::{error::Error, fmt};
 use zero_abi::{Sha256Digest, sha256};
 
-pub const OUTPUT_NOVELTY_SCHEMA: &str = "tokenzero.output-novelty/v1";
+pub const OUTPUT_NOVELTY_SCHEMA: &str = "tokenzero.output-novelty";
 pub const MAX_OUTPUT_NOVELTY_FIELDS: usize = 256;
 pub const MAX_OUTPUT_NOVELTY_FIELD_NAME_BYTES: usize = 128;
 pub const MAX_OUTPUT_NOVELTY_BYTES: usize = 16 * 1_048_576;
-const ENCODING_DOMAIN: &[u8] = b"TOKENZERO-OUTPUT-NOVELTY-V1\0";
+const ENCODING_DOMAIN: &[u8] = b"TOKENZERO-OUTPUT-NOVELTY\0";
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -462,4 +458,3 @@ fn put_bytes(out: &mut Vec<u8>, bytes: &[u8]) -> Result<(), OutputNoveltyError> 
 fn digest(bytes: &[u8]) -> Sha256Digest {
     Sha256Digest::from_bytes(sha256(bytes))
 }
-

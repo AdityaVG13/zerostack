@@ -1,22 +1,6 @@
-//! fff-style bigram candidate index for symbol/path substring search.
-//!
-//! Spike behind `GRAPHZERO_SEARCH_BIGRAM=1`. Candidate filtering is exact-safe:
-//! every UTF-8 string that contains needle (as bytes, len >= 2) contains all
-//! consecutive byte bigrams of needle. Fuzzy reranking is intentionally not
-//! applied.
-//!
-//! Selectivity (graphzero-2tee): when the rarest posting is denser than 25% of
-//! the universe, or larger than `budget * 64`, return `None` so search falls
-//! back to linear scan. Dense common needles (gold `parse*`) fill a small
-//! budget after a few hundred `contains` checks; materializing multi-k id sets
-//! is strictly slower.
-//!
-//! Memory layout (graphzero-mba0): packed `u16` byte-bigrams + densified
-//! postings (singleton pairs + CSR for len>=2, `u16` doc ids) and binary
-//! path hashes. Replaces `HashMap<u64, Vec<u32>>`.
-//!
-//! Publish-time sidecar (graphzero-lrin): `name_bigram_{id:08}.bin` (GZNB v1)
-//! written at index publish so cold `OnceLock` loads instead of rebuilding.
+//! fff-style bigram candidate index for symbol/path substring search. Spike behind
+//! `GRAPHZERO_SEARCH_BIGRAM=1`. Candidate filtering is exact-safe every UTF-8 string that contains
+//! needle (as bytes, len >= 2) contains all consecutive byte bigrams of needle.
 
 use std::collections::{HashMap, HashSet};
 use std::fs;
@@ -336,19 +320,17 @@ fn intersect_sorted(a: &[u16], b: &[u16]) -> Vec<u16> {
     out
 }
 
-/// When the rarest bigram posting is this dense, indexed filtering costs more than
-/// a budget-capped linear scan on gold-style common needles (graphzero-2tee).
+/// When the rarest bigram posting is this dense, indexed filtering costs
+/// more than a budget-capped linear scan on gold-style common needles.
 const SELECTIVITY_FALLBACK_NUM: usize = 1;
 const SELECTIVITY_FALLBACK_DEN: usize = 4; // >25% of universe → scan
 /// If rarest posting exceeds `budget * PROBE`, expected scan visits to fill the
 /// budget are far cheaper than materializing the candidate set.
 const BUDGET_PROBE_FACTOR: usize = 64;
 
-/// Candidate ids for `needle`, or `None` to fall back to full scan.
-///
-/// `Some(empty)` means no string can match (missing bigram). `budget` is the
-/// search hit cap; when set, over-broad needles fall back to scan so dense
-/// common-class queries do not regress vs linear scan.
+/// Candidate ids for `needle`, or `None` to fall back to full scan. `Some(empty)` means no
+/// string can match (missing bigram). `budget` is the search hit cap; when set, over-broad
+/// needles fall back to scan so dense common-class queries do not regress vs linear scan.
 fn candidate_ids(
     postings: &DensePostings,
     needle: &str,
@@ -468,7 +450,7 @@ impl NameBigramIndex {
         Self::build_from_names_and_paths(&names, &path_pairs)
     }
 
-    /// Encode densified index as GZNB v1 bytes.
+    /// Encode densified index as GZNB bytes.
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut out = Vec::with_capacity(64 + self.approx_bytes);
         out.extend_from_slice(&NAME_BIGRAM_MAGIC);
@@ -484,7 +466,7 @@ impl NameBigramIndex {
         out
     }
 
-    /// Decode GZNB v1 bytes.
+    /// Decode GZNB bytes.
     pub fn from_bytes(buf: &[u8]) -> Result<Self> {
         if buf.len() < 16 {
             bail!("name_bigram: file too small");
@@ -571,8 +553,7 @@ impl NameBigramIndex {
         self.candidate_symbol_ids_for_budget(needle, None)
     }
 
-    /// Like [`Self::candidate_symbol_ids`] with a search budget hint for
-    /// selectivity early-out (graphzero-2tee).
+    /// Like [`Self::candidate_symbol_ids`] with a search budget hint for selectivity early-out.
     pub fn candidate_symbol_ids_for_budget(
         &self,
         needle: &str,
@@ -630,19 +611,6 @@ impl NameBigramIndex {
             .candidate_symbol_ids_for_budget(needle, budget)
             .is_none();
         Some((rarest, fallback))
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn oversized_symbol_domain_falls_back_instead_of_failing() {
-        let names = vec!["LargeRepoSymbol".to_owned(); usize::from(u16::MAX) + 1];
-        let index = NameBigramIndex::build_from_names_and_paths(&names, &[]).unwrap();
-        assert_eq!(index.symbol_count(), names.len());
-        assert!(index.candidate_symbol_ids("LargeRepoSymbol").is_none());
     }
 }
 

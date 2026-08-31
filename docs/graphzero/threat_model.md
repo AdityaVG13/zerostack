@@ -46,25 +46,19 @@ security_scan.md.
 Git dependencies may not map cleanly to registry advisory data, and review can
 miss malicious or subtle behavior.
 
-## 4. Daemon Unix socket and PID/state files
 
-**Attacker capability.** A local principal able to reach or replace .graphzero/daemon/stem.sock, or modify its PID/state files, can submit daemon requests, spoof status, disrupt startup/shutdown, or try to make GraphZero signal an unrelated process.
-
-**Existing mitigations.** Socket, state, and PID paths are confined beneath the store's daemon directory ([daemon.rs:39-54](../../crates/graphzero/graphzero-store/src/store/daemon.rs#L39-L54)). State and PID updates use create-new temporary files, write and sync complete content, atomically replace the destination, and sync the directory ([daemon.rs:115-163](../../crates/graphzero/graphzero-store/src/store/daemon.rs#L115-L163), [daemon.rs:203-211](../../crates/graphzero/graphzero-store/src/store/daemon.rs#L203-L211)). Before and after binding, Unix permissions are restricted; the implementation sets the daemon directory to owner-only mode 0700 and the socket to owner read/write mode 0600 ([daemon.rs:231-242](../../crates/graphzero/graphzero-store/src/store/daemon.rs#L231-L242), [daemon.rs:518-533](../../crates/graphzero/graphzero-store/src/store/daemon.rs#L518-L533)). Status treats an absent, malformed, or non-live PID as cold ([daemon.rs:333-351](../../crates/graphzero/graphzero-store/src/store/daemon.rs#L333-L351)); shutdown refuses PID 0/1 and the current process before signaling ([daemon.rs:374-400](../../crates/graphzero/graphzero-store/src/store/daemon.rs#L374-L400)).
-
-**Residual risk.** Filesystem ownership is the socket's authorization boundary; there is no independent request authentication shown here, so same-UID compromise defeats it. The code explicitly acknowledges PID reuse between reading the PID file and kill(2) ([daemon.rs:402-407](../../crates/graphzero/graphzero-store/src/store/daemon.rs#L402-L407)). Atomic replacement prevents partial readers but does not make PID and enabled-state updates a single transaction, and stale socket removal/startup remains susceptible to interference by a principal that can modify the directory.
-
-## 5. Subprocess invocations
+## 4. Subprocess invocations
 
 **Attacker capability.** A caller or environment can influence PATH, GraphZero's analyzer override variables, executable contents, repository metadata, and subprocess output. Any selected executable runs native code with the invoking user's permissions.
 
-**Existing mitigations.** Live analyzer probes invoke an executable directly (not through a shell) with the fixed --version argument, capture output, and report nonzero/launch failures as unavailable: rust-analyzer at [rust_analyzer.rs:116-148](../../crates/graphzero/graphzero-extract/src/rust_analyzer.rs#L116-L148) and TypeScript language server/tsserver at [tsserver.rs:146-175](../../crates/graphzero/graphzero-extract/src/tsserver.rs#L146-L175). Their executable overrides are explicit environment variables, making CI selection visible rather than interpolating user text into a command line. The clean-room release harness invokes git directly with fixed argument arrays, resolves a concrete HEAD, performs a local no-hardlink/no-checkout clone into a temporary directory, and checks out that exact revision detached ([release_harness.rs:136-172](../../crates/graphzero/graphzero-test-support/src/gates/release_harness.rs#L136-L172)).
+**Existing mitigations.** Live analyzer probes invoke an executable directly, not through a shell, with the fixed `--version` argument. They capture output and report nonzero or launch failures as unavailable: [rust_analyzer.rs](../../crates/graphzero/graphzero-extract/src/rust_analyzer.rs) and [tsserver.rs](../../crates/graphzero/graphzero-extract/src/tsserver.rs). Their executable overrides are explicit environment variables, so CI selection is visible rather than interpolated into a command line.
 
-**Residual risk.** Direct argv avoids shell expansion but does not validate the executable: PATH and GRAPHZERO_RUST_ANALYZER_BIN/GRAPHZERO_TSSERVER_BIN are trust decisions. These probes show no timeout or output-size bound, so a malicious executable can hang, flood captured output, or perform arbitrary side effects before returning a version. Git remains trusted native code and parses attacker-influenced repository data; the release harness narrows revision selection but does not sandbox Git or analyzer processes.
+**Residual risk.** Direct argv avoids shell expansion but does not validate the executable. `PATH`, `GRAPHZERO_RUST_ANALYZER_BIN`, and `GRAPHZERO_TSSERVER_BIN` are trust decisions. These probes have no timeout or output-size bound, so a malicious executable can hang, flood captured output, or perform arbitrary side effects before returning a version.
 
 ## Review triggers
 
-Re-review this threat model when a new MCP/CodeMode tool is exposed, aggregate-host
-policy or worker composition changes, shared-store layout or negotiation changes,
-the zero-codemode pin changes, daemon transport/authentication changes, or a new
-subprocess is introduced. Run the checks and cadence in security_scan.md for dependency/secret evidence, and evaluate production panic-site changes against unwrap_budget.toml; neither control replaces boundary-specific tests or mitigations.
+Re-review this threat model when a typed domain operation or ZeroKernel adapter is added,
+worker composition changes, shared-store layout or negotiation changes, a pinned dependency
+changes, or a new subprocess is introduced. Run the checks in `security_scan.md` for
+dependency and secret evidence. Evaluate panic-site changes against `unwrap_budget.toml`;
+neither control replaces boundary-specific tests or mitigations.

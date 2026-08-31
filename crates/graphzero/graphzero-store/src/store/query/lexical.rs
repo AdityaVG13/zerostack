@@ -1,15 +1,6 @@
-//! Lexical semantic tier v1 (graphzero-nmf): BM25 over symbol-span chunks.
-//!
-//! Every document is one def span, so every hit maps to an existing
-//! `gz://blob/<sha256>#B<start>-<end>` evidence ref that round-trips through
-//! `expand` byte-for-byte. Documents carry identifier-split tokens from the
-//! symbol name, path segments, leading comment/doc lines, and a capped body
-//! prefix. No embedding model; scoring is BM25 plus a graph-proximity boost
-//! over call/import/ref edges shared between candidates.
-//!
-//! Publish-time sidecar `semantic_lexical_{id:08}.bin` (GZLX v1) is written
-//! during `graphzero index`; legacy snapshots build lazily on first semantic
-//! query and persist the same sidecar (zero-config, offline).
+//! Lexical semantic tier: BM25 over symbol-span chunks. Every document is one def span, so every
+//! hit maps to an existing `z://blob/<sha256>#B<start>-<end>` evidence ref that round-trips through
+//! `expand` byte-for-byte.
 
 use std::collections::HashMap;
 use std::fs;
@@ -282,7 +273,7 @@ pub struct LexicalHit {
     pub matched_terms: u32,
 }
 
-/// BM25 inverted index over symbol-span chunks (GZLX v1).
+/// BM25 inverted index over symbol-span chunks (GZLX).
 #[derive(Debug, Default)]
 pub struct LexicalSemanticIndex {
     docs: Vec<LexicalDoc>,
@@ -409,7 +400,7 @@ impl LexicalSemanticIndex {
         Ok(builder.finish(table.len()))
     }
 
-    /// Encode as GZLX v1 bytes.
+    /// Encode as GZLX bytes.
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut out = Vec::with_capacity(64 + self.docs.len() * 48);
         out.extend_from_slice(&LEXICAL_SEMANTIC_MAGIC);
@@ -441,7 +432,7 @@ impl LexicalSemanticIndex {
         out
     }
 
-    /// Decode GZLX v1 bytes.
+    /// Decode GZLX bytes.
     pub fn from_bytes(buf: &[u8]) -> Result<Self> {
         let header = parse_header(buf)?;
         let mut i = HEADER_LEN;

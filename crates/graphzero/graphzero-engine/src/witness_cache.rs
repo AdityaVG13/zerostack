@@ -1,17 +1,4 @@
-//! Witness cache with minimum-dependency-set keys and anti-dependency scope
-//! roots (bead zerostack-racc-caching-output-vz89.7, extends 86qk.8).
-//!
-//! Wire shape follows the shared cache-entry contract
-//! (ZeroStack docs/contracts/cache-entry-v1.md): a key carries the operator
-//! identity, canonical parameters, the *minimum exact* dependency roots read by
-//! the operation, environment/toolchain roots, a completeness witness, and — for
-//! a certified no-matches answer — the anti-dependency scope roots that were
-//! searched. A repository-root snapshot hash is deliberately never used as a
-//! key: it over-invalidates every unrelated edit.
-//!
-//! Reuse is decided by re-resolving every recorded root against current content.
-//! A root that cannot be resolved, or a witness that does not recompute, fails
-//! closed (re-run the operator) rather than returning a possibly stale answer.
+//! Witness cache keyed by minimum dependency sets and anti-dependency scope roots.
 
 use std::cell::RefCell;
 use std::collections::BTreeMap;
@@ -29,13 +16,13 @@ use graphzero_store::store::format::FORMAT_VERSION;
 
 use graphzero_core::invalidation::CutoffReport;
 
-use crate::operation_abi::contract_digest_hex;
-
 /// Wire discriminator of the shared cache-entry contract.
 pub const CACHE_ENTRY_SCHEMA: &str = "cache-entry";
 
 /// Operator id for the snapshot symbol query cached here.
 pub const SYMBOL_QUERY_OPERATOR: &str = "graphzero.symbol_query";
+
+const QUERY_CACHE_CONTRACT_VERSION: &str = "1";
 
 /// Validation failures, stable enough to classify in conformance checks.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -84,7 +71,7 @@ impl CacheRoot {
         if rel_path.is_empty() || content_hash.is_empty() {
             return Err(WitnessCacheError::EmptyField("file root"));
         }
-        Self::new(format!("gz://file/{rel_path}@{content_hash}"))
+        Self::new(format!("file/{rel_path}@{content_hash}"))
     }
 
     /// Anti-dependency root for a searched scope: prefix plus a digest over the
@@ -93,7 +80,7 @@ impl CacheRoot {
         if listing_digest.is_empty() {
             return Err(WitnessCacheError::EmptyField("scope root"));
         }
-        Self::new(format!("gz://scope/{prefix}@{listing_digest}"))
+        Self::new(format!("scope/{prefix}@{listing_digest}"))
     }
 
     pub fn as_str(&self) -> &str {
@@ -149,7 +136,7 @@ impl CompletenessWitness {
         if checked_roots.is_empty() {
             return Err(WitnessCacheError::EmptyField("checked roots"));
         }
-        let proof_root = CacheRoot::new(format!("gz://witness/{}", proof_digest(&checked_roots)))?;
+        let proof_root = CacheRoot::new(format!("witness/{}", proof_digest(&checked_roots)))?;
         Ok(Self {
             proof_root,
             checked_roots,
@@ -166,7 +153,7 @@ impl CompletenessWitness {
 
     /// Recompute the proof root from the checked roots.
     pub fn recomputes(&self) -> bool {
-        let expected = format!("gz://witness/{}", proof_digest(&self.checked_roots));
+        let expected = format!("witness/{}", proof_digest(&self.checked_roots));
         self.proof_root.as_str() == expected
     }
 
@@ -213,11 +200,11 @@ pub struct CacheKey {
     completeness_witness: CompletenessWitness,
     #[serde(default)]
     scope_roots: Vec<CacheRoot>,
-    /// Declared network-fixture roots (GRAPH-002): absent = no fixtures
+    /// Declared network-fixture roots: absent = no fixtures
     /// declared. Only present roots take part in the key digest.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     network_fixture_roots: Option<Vec<CacheRoot>>,
-    /// Declared clock/randomness policy root (GRAPH-002): absent = no policy
+    /// Declared clock/randomness policy root: absent = no policy
     /// declared. Only a present root takes part in the key digest.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     clock_randomness_policy_root: Option<CacheRoot>,
@@ -310,10 +297,8 @@ impl CacheKey {
         )
     }
 
-    /// Key with declared causal roots (GRAPH-002): network fixtures and the
-    /// clock/randomness policy, when declared. Both are optional; passing
-    /// `None` (or an empty fixture list) yields the exact legacy key, so
-    /// warm-entry reuse and incremental==full digests are preserved.
+    /// Key with declared network-fixture and clock/randomness roots.
+    /// Empty declarations omit those roots and preserve the same digest.
     #[allow(clippy::too_many_arguments)]
     pub fn with_declared_causal_roots(
         operator: OperatorIdentity,
@@ -364,7 +349,7 @@ impl CacheKey {
         if let Some(fixtures) = network_fixture_roots.as_mut() {
             normalize_roots(fixtures);
             if fixtures.is_empty() {
-                // An empty declaration is not a declaration: keep the legacy key.
+                // Empty fixture sets contribute no causal root to the digest.
                 network_fixture_roots = None;
             }
         }
@@ -427,12 +412,12 @@ impl CacheKey {
         &self.scope_roots
     }
 
-    /// Declared network-fixture roots, when declared (GRAPH-002).
+    /// Declared network-fixture roots, when declared.
     pub fn network_fixture_roots(&self) -> Option<&[CacheRoot]> {
         self.network_fixture_roots.as_deref()
     }
 
-    /// Declared clock/randomness policy root, when declared (GRAPH-002).
+    /// Declared clock/randomness policy root, when declared.
     pub fn clock_randomness_policy_root(&self) -> Option<&CacheRoot> {
         self.clock_randomness_policy_root.as_ref()
     }
@@ -601,12 +586,7 @@ pub enum EntryStatus {
     Unverifiable,
 }
 
-/// Measured verification/reuse telemetry (GRAPH-009 / CACHE-015). Every field
-/// counts an event that actually happened in the verify/store paths -- never
-/// an estimate. `cutoff_*` fields are fed by explicit
-/// [`WitnessCache::record_cutoff_savings`] calls carrying a real
-/// [`CutoffReport`], so they stay zero until an engine-level join point
-/// actually hands savings over.
+/// Measured verification/reuse telemetry.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub struct CacheReuseReport {
@@ -648,10 +628,9 @@ pub fn verify_entry(entry: &CacheEntry, resolver: &dyn RootResolver) -> EntrySta
     verify_entry_counted(entry, resolver, &mut stats)
 }
 
-/// [`verify_entry`] with measured verification work. Every entry whose
-/// witness recomputes is counted once, and every root actually resolved is
-/// counted, so reuse telemetry reflects real verification effort (fail-closed
-/// early exits still count the work performed up to the exit).
+/// [`verify_entry`] with measured verification work. Every entry whose witness recomputes is
+/// counted once, and every root actually resolved is counted, so reuse telemetry reflects real
+/// verification effort (fail-closed early exits still count the work performed up to the exit).
 pub fn verify_entry_counted(
     entry: &CacheEntry,
     resolver: &dyn RootResolver,
@@ -740,11 +719,9 @@ impl SnapshotRoots {
         CacheRoot::new(self.toolchain.clone())
     }
 
-    /// Digest of the sorted (path, hash) listing under `prefix`.
-    ///
-    /// Streams the same bytes as `canonical_json` of
-    /// `[{"path":...,"root":...}, ...]` into Sha256 — no intermediate JSON
-    /// `Value` array tree. Memoized per prefix on this listing.
+    /// Digest of the sorted (path, hash) listing under `prefix`. Streams the same
+    /// bytes as `canonical_json` of `[{"path":...,"root":...},...]` into Sha256 —
+    /// no intermediate JSON `Value` array tree. Memoized per prefix on this listing.
     fn scope_digest(&self, prefix: &str) -> String {
         if let Some(hit) = self.scope_digest_memo.borrow().get(prefix) {
             return hit.clone();
@@ -796,7 +773,10 @@ fn scope_digest_streaming(files: &BTreeMap<String, String>, prefix: &str) -> Str
 impl RootResolver for SnapshotRoots {
     fn resolve(&self, root: &CacheRoot) -> RootResolution {
         let raw = root.as_str();
-        if let Some(rest) = raw.strip_prefix("gz://file/") {
+        // Root identities are unprefixed: `file/`, `scope/`, or `toolchain/`.
+        let rest = raw;
+        let toolchain = self.toolchain.as_str();
+        if let Some(rest) = rest.strip_prefix("file/") {
             let Some((path, recorded)) = rest.rsplit_once('@') else {
                 return RootResolution::Unresolvable;
             };
@@ -806,7 +786,7 @@ impl RootResolver for SnapshotRoots {
                 _ => RootResolution::Changed,
             };
         }
-        if let Some(rest) = raw.strip_prefix("gz://scope/") {
+        if let Some(rest) = rest.strip_prefix("scope/") {
             let Some((prefix, recorded)) = rest.rsplit_once('@') else {
                 return RootResolution::Unresolvable;
             };
@@ -816,8 +796,8 @@ impl RootResolver for SnapshotRoots {
                 RootResolution::Changed
             };
         }
-        if raw.starts_with("gz://toolchain/") {
-            return if raw == self.toolchain {
+        if rest.starts_with("toolchain/") {
+            return if rest == toolchain {
                 RootResolution::Unchanged
             } else {
                 RootResolution::Changed
@@ -827,23 +807,17 @@ impl RootResolver for SnapshotRoots {
     }
 }
 
-/// Locked parser/index identity: index format version joined with the ABI
-/// contract digest, so semantics changes cannot reuse certificates.
+/// Locked parser/index identity. Query semantic changes must bump the query
+/// contract version so old certificates cannot be reused.
 pub fn toolchain_root_string() -> String {
-    format!(
-        "gz://toolchain/index-format-{FORMAT_VERSION}+abi-{}",
-        contract_digest_hex()
-    )
+    format!("toolchain/index-format-{FORMAT_VERSION}+query-contract-{QUERY_CACHE_CONTRACT_VERSION}")
 }
 
 /// Operator identity for the cached snapshot symbol query.
 pub fn symbol_query_operator() -> OperatorIdentity {
     OperatorIdentity::new(
         SYMBOL_QUERY_OPERATOR,
-        format!(
-            "index-format-{FORMAT_VERSION}+abi-{}",
-            contract_digest_hex()
-        ),
+        format!("index-format-{FORMAT_VERSION}+query-contract-{QUERY_CACHE_CONTRACT_VERSION}"),
     )
     .expect("operator identity fields are non-empty")
 }
@@ -933,12 +907,12 @@ impl WitnessCache {
     }
 
     /// Inserts that collapsed onto an existing row with an identical causal
-    /// key digest (GRAPH-009 causal-key dedup, measured at insert time).
+    /// key digest (causal-key dedup, measured at insert time).
     pub fn deduplicated_inserts(&self) -> u64 {
         self.deduplicated_inserts
     }
 
-    /// Measured verification/reuse telemetry (GRAPH-009 / CACHE-015): every
+    /// Measured verification/reuse telemetry: every
     /// counter reflects events that actually happened.
     pub fn reuse_report(&self) -> CacheReuseReport {
         CacheReuseReport {
@@ -954,14 +928,8 @@ impl WitnessCache {
         }
     }
 
-    /// Record the measured savings of an equality-boundary cutoff pass
-    /// (GRAPH-007) into this cache's telemetry. The join is explicit: the
-    /// caller runs `RecomputeEngine::incremental_recompute_with_report` and
-    /// hands the resulting [`CutoffReport`] over, so `cutoff_saved` reflects
-    /// passes that actually happened, never an estimate. No engine-level
-    /// production join exists yet (witness_cache has no production call
-    /// sites); until one lands, the cutoff counters stay at zero unless a
-    /// caller feeds a real report.
+    /// Record the measured savings of an equality-boundary cutoff pass into this cache's
+    /// telemetry.
     pub fn record_cutoff_savings(&mut self, report: &CutoffReport) {
         self.cutoff_passes += 1;
         self.cutoff_recomputed += report.recomputed.len() as u64;
@@ -977,10 +945,8 @@ impl WitnessCache {
         self.buckets.values().flatten()
     }
 
-    /// Look up a reusable entry for (operator, parameters) under current content.
-    ///
-    /// Invalidated / unverifiable candidates are **dropped** so buckets do not
-    /// re-verify dead entries forever (graphzero-wp2mi).
+    /// Look up a reusable entry for (operator, parameters) under current content. Invalidated /
+    /// unverifiable candidates are **dropped** so buckets do not re-verify dead entries forever.
     pub fn lookup(
         &mut self,
         operator: &OperatorIdentity,
@@ -1079,10 +1045,8 @@ impl WitnessCache {
         let payload = zero_abi::canonical_json(
             &serde_json::to_value(answer).expect("answer is JSON-serializable"),
         );
-        let output_root = CacheRoot::new(format!(
-            "gz://out/{}",
-            zero_abi::sha256_hex(payload.as_bytes())
-        ))?;
+        let output_root =
+            CacheRoot::new(format!("out/{}", zero_abi::sha256_hex(payload.as_bytes())))?;
         self.outputs
             .insert(output_root.as_str().to_owned(), payload);
         let entry = CacheEntry::positive(key, output_root)?;
@@ -1100,12 +1064,9 @@ impl WitnessCache {
         let bucket = entry.key.operation_bucket();
         let slot = self.buckets.entry(bucket).or_default();
         if let Some(existing) = slot.iter_mut().find(|e| e.key_hash_hex() == key_hash) {
-            // Causal-key dedup (GRAPH-009): an identical CacheKey digest reuses
-            // ONE stored row -- no duplicate rows for the same causal key.
-            // Measured, not claimed: the collapse increments
-            // `deduplicated_inserts`. If the replaced entry pointed at a
-            // different output root, that payload becomes an orphan and is
-            // dropped unless another row still references it.
+            // Causal-key dedup: an identical CacheKey digest reuses ONE stored row -- no duplicate
+            // rows for the same causal key. Measured, not claimed: the collapse increments
+            // `deduplicated_inserts`.
             let replaced = std::mem::replace(existing, entry);
             self.deduplicated_inserts += 1;
             if let CacheValue::Hit { output_root } = replaced.value() {
@@ -1129,18 +1090,15 @@ fn canonical_parameters(symbol: &str, scope: &str, budget: usize) -> Value {
 }
 
 fn blob_hash_of_ref(evidence_ref: &str) -> Option<&str> {
-    let rest = evidence_ref.strip_prefix("gz://blob/")?;
+    let rest = evidence_ref.strip_prefix("z://blob/")?;
     Some(match rest.split_once('#') {
         Some((hash, _)) => hash,
         None => rest,
     })
 }
 
-/// Cached snapshot symbol query restricted to `scope` (a relative path prefix).
-///
-/// A positive answer is keyed by the exact files that supplied its evidence. A
-/// no-matches answer is keyed by the anti-dependency root of the searched scope,
-/// so absence invalidates exactly when that scope's content changes.
+/// Cached snapshot symbol query restricted to `scope` (a relative path prefix). A positive answer
+/// is keyed by the exact files that supplied its evidence.
 pub fn cached_symbol_query(
     snapshot: &Snapshot,
     cache: &mut WitnessCache,

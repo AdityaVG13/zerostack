@@ -46,7 +46,7 @@ pub fn coverage_ratios(
 
 pub struct QueryRepairParts<'a> {
     pub table: SymbolTable<'a>,
-    /// v2: borrowed mmap; v1: owned upgrade (see `ShardView::spans`).
+    /// Borrowed mmap rows from `ShardView::spans`.
     pub spans: std::borrow::Cow<'a, [SpanEntry]>,
     pub csr: CsrAdjacency<'a>,
     pub evidence: std::borrow::Cow<'a, [SpanEntry]>,
@@ -175,8 +175,7 @@ pub fn load_path_records(
     let txt = std::fs::read_to_string(&path)
         .with_context(|| format!("read snapshot paths {}", path.display()))?;
     let line_count = txt.bytes().filter(|&b| b == b'\n').count().max(1);
-    // Keys are ContentHash (32 bytes), not 64-hex Strings — open footprint was
-    // ~2 owned Strings per blob (graphzero-a4t6p).
+    // Keys are ContentHash (32 bytes), not 64-hex Strings — open footprint was ~2 owned Strings per blob.
     let mut paths = HashMap::with_capacity(line_count);
     for (line_index, line) in txt.lines().enumerate() {
         let mut parts = line.splitn(5, ' ');

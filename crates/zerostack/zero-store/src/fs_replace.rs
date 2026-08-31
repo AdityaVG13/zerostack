@@ -1,14 +1,5 @@
-//! Durable cross-platform file replacement.
-//!
-//! replace_file publishes a fully written temp file over a destination.
-//! On Unix rename(2) replaces atomically. On Windows MoveFileExW with
-//! MOVEFILE_REPLACE_EXISTING (what std::fs::rename issues) can fail
-//! transiently while a reader, antivirus scanner, or indexer holds the
-//! destination open; those classified sharing errors are retried with
-//! bounded backoff. Every other error is returned immediately.
-//!
-//! The destination is never truncated in place: until the rename lands, the
-//! old file remains complete and valid.
+//! Durable cross-platform file replacement. replace_file publishes a fully written temp file over a
+//! destination. On Unix rename(2) replaces atomically.
 
 use std::ffi::{OsStr, OsString};
 use std::fs::{self, File, OpenOptions};
@@ -22,11 +13,9 @@ const REPLACE_BACKOFF_MS: u64 = 10;
 
 static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
-/// How a durable write treats `sync_all` failures.
-///
-/// Network mounts (smbfs/nfs) often return ENOTSUP/EPERM from `sync_all`.
-/// Engines must keep serving on those mounts; they cannot take
-/// [`DurableJournal`](crate::DurableJournal)'s fatal-sync path.
+/// How a durable write treats `sync_all` failures. Network mounts often
+/// return ENOTSUP/EPERM from `sync_all`. Engines must keep serving on those mounts;
+/// they cannot take [`DurableJournal`](crate::DurableJournal)'s fatal-sync path.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum SyncPolicy {
     /// `sync_all` errors are fatal, including ENOTSUP/EPERM.
@@ -123,13 +112,8 @@ fn open_unique_temp(parent: &Path, file_name: &OsStr) -> io::Result<(File, PathB
     }
 }
 
-/// Write all bytes, optionally fsync the temp, then replace onto dest.
-/// Order is load-bearing: never replace before the chosen sync policy runs.
-///
-/// The parent directory fsync deliberately lives in [atomic_write_file], after
-/// this function has reported that dest is published: once the rename lands the
-/// bytes are visible to every reader, so a later directory-sync failure means
-/// "present but not proven durable", never "not written".
+/// Write all bytes, optionally fsync the temp, then replace onto dest. Order is load-bearing: never
+/// replace before the chosen sync policy runs.
 fn write_sync_replace(
     mut file: File,
     temp: &Path,
@@ -143,9 +127,8 @@ fn write_sync_replace(
     replace_file(temp, dest)
 }
 
-/// Fsync a directory so a rename inside it survives a crash.
-///
-/// Returns the error instead of discarding it; callers decide whether the
+/// Fsync a directory so a rename inside it survives a crash. Returns
+/// the error instead of discarding it; callers decide whether the
 /// failure is fatal, which depends on whether the rename already published.
 pub fn sync_dir(dir: &Path) -> io::Result<()> {
     #[cfg(unix)]
@@ -158,7 +141,6 @@ pub fn sync_dir(dir: &Path) -> io::Result<()> {
 }
 
 /// Atomically publish bytes at dest without ever exposing a truncated file.
-///
 /// Uses [`SyncPolicy::Required`]: the temp is synced before replacement.
 pub fn atomic_write_file(dest: &Path, bytes: &[u8]) -> io::Result<()> {
     atomic_write_file_with_sync(dest, bytes, SyncPolicy::Required)

@@ -1,5 +1,4 @@
-//! Apply store frecency to search/blast display order (graphzero-tyyi).
-//!
+//! Apply store frecency to search/blast display order.
 //! Scores are heuristic. Blast `confidence` stays path-min; this only reorders.
 
 use std::collections::HashMap;

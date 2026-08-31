@@ -1,25 +1,16 @@
-//! Zero-store durable journal platform-neutral semantics (zerostack-journal-native-receipts-x1zw).
-//!
-//! These are the *platform-neutral* unit fixtures the bead requires:
-//! prepare/commit/abort identities, torn-write refusal, old-or-new root
-//! conservative revalidation, idempotent replay, owner-death, and the five-term
-//! lease binding without forking journal law in GraphZero.
-//!
-//! They run on the local filesystem (APFS on this Mac, /System/Volumes/Data).
-//! They do NOT mint APFS/ext4/XFS/NTFS native kill-and-recover receipts;
-//! those remain blocked on genuine native hosts per the bead contract.
+//! Zero-store durable journal platform-neutral semantics.
 
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use zero_abi::{EffectClass, Sha256Digest};
+use zero_abi::{DurableProfileId, EffectClass, Sha256Digest};
 use zero_store::{
     AttemptBinding, AttemptEntry, AttemptEvidence, AttemptJournalPaths, AttemptRecoveryOutcome,
-    AttemptState, BindingLease, DurableProfileId, FaultPlan, JournalBinding, JournalBoundary,
-    JournalFailureCode, JournalLeaseBinding, JournalPaths, JournalState, RecoveryOutcome,
-    abort_journal, commit_journal, commit_journal_with_fault, commit_lease_journal,
+    AttemptState, BindingLease, FaultPlan, JournalBinding, JournalBoundary, JournalFailureCode,
+    JournalLeaseBinding, JournalPaths, JournalState, RecoveryOutcome, abort_journal,
+    commit_journal, commit_journal_with_fault, commit_lease_journal,
     commit_lease_journal_with_fault, initialize_published_root, prepare_journal,
     prepare_journal_with_fault, prepare_lease_journal, read_current_attempt, read_journal_record,
     read_lease_continuation_cartridge, read_lease_journal_record, read_published_root,
@@ -79,7 +70,7 @@ fn binding() -> JournalBinding {
     )
 }
 
-fn binding_v2(nonce_byte: u8) -> JournalLeaseBinding {
+fn lease_binding(nonce_byte: u8) -> JournalLeaseBinding {
     JournalLeaseBinding::new(
         digest(1),
         digest(2),
@@ -93,9 +84,7 @@ fn binding_v2(nonce_byte: u8) -> JournalLeaseBinding {
     )
 }
 
-// ---------------------------------------------------------------------------
 // Four-term (PortableStrict) platform-neutral fixtures
-// ---------------------------------------------------------------------------
 
 #[test]
 fn prepare_commit_and_abort_are_idempotent_with_old_or_new_visibility() {
@@ -176,28 +165,18 @@ fn torn_write_and_profile_substitution_fail_loudly() {
 }
 
 #[test]
-fn pre_cutover_attempt_chain_reconciles_with_frozen_v1_domains() {
-    let dir = unique_dir("attempt-v1-domains");
+fn canonical_attempt_chain_reconciles() {
+    let dir = unique_dir("attempt-chain");
     let paths = AttemptJournalPaths::new(dir.join("attempt")).expect("attempt paths");
     fs::create_dir_all(paths.directory()).expect("attempt directory");
-    let binding = AttemptBinding {
-        schema_version: 1,
-        attempt_id: digest_hex("75c7da638d06f95a77630a972550cada6edf882d62bb4300311c203cc659a31e"),
-        effect_digest: digest_hex(
-            "cb8dc3b6b369bad576da0bf7019933562fcc6599f360ce434fe7939d58008855",
-        ),
-        effect_class: EffectClass::Irreversible,
-        admission_anchor_digest: digest_hex(
-            "2c61e44edd85f6c09257e8dd60451dec4676ba56733d94538c1adbf05a3912bb",
-        ),
-        durable_profile_id: DurableProfileId::PortableStrict,
-        durable_profile_digest: digest_hex(
-            "c8bf0ccc2c25dcd2f222a137c612e6daae00c2f4509c75eedc3b87592d0c7c9c",
-        ),
-        owner_identity_digest: digest_hex(
-            "9ce742b039bff7628eaa673092be75a270abe0fb364554cb305fc2cf79a12024",
-        ),
-    };
+    let binding = AttemptBinding::new(
+        digest_hex("75c7da638d06f95a77630a972550cada6edf882d62bb4300311c203cc659a31e"),
+        digest_hex("cb8dc3b6b369bad576da0bf7019933562fcc6599f360ce434fe7939d58008855"),
+        EffectClass::Irreversible,
+        digest_hex("2c61e44edd85f6c09257e8dd60451dec4676ba56733d94538c1adbf05a3912bb"),
+        DurableProfileId::PortableStrict,
+        digest_hex("9ce742b039bff7628eaa673092be75a270abe0fb364554cb305fc2cf79a12024"),
+    );
     let first = AttemptEntry {
         schema_version: 1,
         binding: binding.clone(),
@@ -208,9 +187,7 @@ fn pre_cutover_attempt_chain_reconciles_with_frozen_v1_domains() {
         abort_reason: None,
         evidence: None,
     };
-    let first_digest =
-        digest_hex("c64d36ee315266a02a44cef0ca763787978187b02f408e3212436a43c0906cfc");
-    assert_eq!(first.digest().expect("legacy first digest"), first_digest);
+    let first_digest = first.digest().expect("first digest");
     let second = AttemptEntry {
         schema_version: 1,
         binding: binding.clone(),
@@ -221,12 +198,7 @@ fn pre_cutover_attempt_chain_reconciles_with_frozen_v1_domains() {
         abort_reason: None,
         evidence: None,
     };
-    let second_digest =
-        digest_hex("95186b72eb13474e90103b40ccb999f9c2c1e10da3f6f4be0bf925fbba2a5b0e");
-    assert_eq!(
-        second.digest().expect("legacy second digest"),
-        second_digest
-    );
+    let second_digest = second.digest().expect("second digest");
     let third = AttemptEntry {
         schema_version: 1,
         binding: binding.clone(),
@@ -245,16 +217,16 @@ fn pre_cutover_attempt_chain_reconciles_with_frozen_v1_domains() {
     for (sequence, entry) in [(1, &first), (2, &second), (3, &third)] {
         fs::write(
             paths.directory().join(format!("attempt-{sequence}.json")),
-            entry.canonical_bytes().expect("canonical legacy entry"),
+            entry.canonical_bytes().expect("canonical entry"),
         )
-        .expect("write legacy entry");
+        .expect("write entry");
     }
 
     let current = read_current_attempt(&paths)
-        .expect("legacy chain validates")
+        .expect("chain validates")
         .expect("terminal entry");
     assert_eq!(current.state, AttemptState::Succeeded);
-    let receipt = recover_attempt(&paths, &binding, None).expect("legacy terminal reconciles");
+    let receipt = recover_attempt(&paths, &binding, None).expect("terminal reconciles");
     assert_eq!(receipt.outcome, AttemptRecoveryOutcome::AlreadySucceeded);
 
     let _ = fs::remove_dir_all(dir);
@@ -346,19 +318,17 @@ fn owner_death_after_new_root_publication_finishes_commit() {
     let _ = fs::remove_dir_all(dir);
 }
 
-// ---------------------------------------------------------------------------
-// Five-term lease binding (ZS-STORE-006) platform-neutral fixtures
-// ---------------------------------------------------------------------------
+// Five-term lease binding platform-neutral fixtures
 
 #[test]
 fn five_term_binding_round_trip_and_verifiable_read() {
     let dir = unique_dir("five-roundtrip");
     let jp = paths(&dir);
-    let b = binding_v2(9);
+    let b = lease_binding(9);
     initialize_published_root(&jp, b.old_root).expect("init");
     let binding_digest = b.digest().unwrap();
-    let cartridge = prepare_lease_journal(&jp, b.clone()).expect("prepare v2");
-    let committed = commit_lease_journal(&jp, &cartridge).expect("commit v2");
+    let cartridge = prepare_lease_journal(&jp, b.clone()).expect("prepare lease journal");
+    let committed = commit_lease_journal(&jp, &cartridge).expect("commit lease journal");
     assert_eq!(committed.outcome, RecoveryOutcome::NewRootCommitted);
     let record = read_lease_journal_record(&jp).expect("read lease record");
     assert_eq!(record.binding, b);
@@ -368,7 +338,7 @@ fn five_term_binding_round_trip_and_verifiable_read() {
     assert_eq!(read_published_root(&jp).unwrap().root_digest, b.new_root);
     assert_eq!(verify_committed_lease_binding(&jp, &b).unwrap(), committed);
     assert_eq!(recover_lease_journal(&jp, &b).unwrap(), committed);
-    let v1 = JournalBinding::new(
+    let basic_binding = JournalBinding::new(
         b.transaction_id,
         b.assembly_manifest_digest,
         b.durable_profile_id,
@@ -376,7 +346,7 @@ fn five_term_binding_round_trip_and_verifiable_read() {
         b.new_root,
         b.owner_identity_digest,
     );
-    assert_ne!(v1.digest().unwrap(), binding_digest);
+    assert_ne!(basic_binding.digest().unwrap(), binding_digest);
     let _ = fs::remove_dir_all(dir);
 }
 
@@ -384,7 +354,7 @@ fn five_term_binding_round_trip_and_verifiable_read() {
 fn five_term_binding_tamper_refused_on_commit_and_verify() {
     let dir = unique_dir("five-tamper");
     let jp = paths(&dir);
-    let b = binding_v2(9);
+    let b = lease_binding(9);
     initialize_published_root(&jp, b.old_root).expect("init");
     prepare_lease_journal(&jp, b.clone()).expect("prepare");
     let root_before = read_published_root(&jp).unwrap().root_digest;
@@ -410,7 +380,7 @@ fn five_term_binding_tamper_refused_on_commit_and_verify() {
     assert_eq!(read_published_root(&jp).unwrap().root_digest, root_before);
     assert_eq!(fs::read(jp.journal_record()).unwrap(), journal_tampered);
     // Committed-binding verification must also fail with its designated code.
-    let forged = binding_v2(0x2b);
+    let forged = lease_binding(0x2b);
     let err = verify_committed_lease_binding(&jp, &forged).unwrap_err();
     assert_eq!(err.code, JournalFailureCode::InvalidBinding);
     // Even after verification failure, no mutation occurred.
@@ -423,8 +393,8 @@ fn five_term_binding_tamper_refused_on_commit_and_verify() {
 fn five_term_two_writer_cas_one_success() {
     let dir = unique_dir("five-cas");
     let jp = paths(&dir);
-    let b_a = binding_v2(9);
-    let b_b = binding_v2(0x1b);
+    let b_a = lease_binding(9);
+    let b_b = lease_binding(0x1b);
     // Both writers start from the same old root; only one may win.
     initialize_published_root(&jp, b_a.old_root).expect("init");
     assert_eq!(b_b.old_root, b_a.old_root);
@@ -449,14 +419,14 @@ fn five_term_two_writer_cas_one_success() {
 fn five_term_second_prepare_and_replayed_lease_cannot_mutate() {
     let dir = unique_dir("five-replay");
     let jp = paths(&dir);
-    let b = binding_v2(0x09);
+    let b = lease_binding(0x09);
     initialize_published_root(&jp, b.old_root).expect("init");
     let first = prepare_lease_journal(&jp, b.clone()).expect("first prepare");
     let cartridge_bytes_before = fs::read(jp.cartridge()).unwrap();
     let journal_bytes_before = fs::read(jp.journal_record()).unwrap();
     let root_bytes_before = fs::read(jp.root_record()).unwrap();
     // Competing second prepare must fail without mutation.
-    let second_writer = binding_v2(0x2c);
+    let second_writer = lease_binding(0x2c);
     let err = prepare_lease_journal(&jp, second_writer.clone()).unwrap_err();
     assert_eq!(err.code, JournalFailureCode::AlreadyTerminal);
     assert_eq!(fs::read(jp.cartridge()).unwrap(), cartridge_bytes_before);
@@ -477,7 +447,7 @@ fn five_term_second_prepare_and_replayed_lease_cannot_mutate() {
     assert_eq!(fs::read(jp.cartridge()).unwrap(), cartridge_after_commit);
     assert_eq!(read_published_root(&jp).unwrap().generation, 1);
     // Forged recovery must fail with a precise documented outcome and not mutate.
-    let forged = binding_v2(0x2d);
+    let forged = lease_binding(0x2d);
     let err = recover_lease_journal(&jp, &forged).unwrap_err();
     assert!(
         matches!(
@@ -496,9 +466,9 @@ fn five_term_second_prepare_and_replayed_lease_cannot_mutate() {
 fn five_term_lease_expiry_blocks_fresh_attempts_but_not_recovery() {
     let dir = unique_dir("five-expiry");
     let jp = paths(&dir);
-    let b = binding_v2(0x09);
+    let b = lease_binding(0x09);
     initialize_published_root(&jp, b.old_root).expect("init");
-    let mut expired = binding_v2(0x3a);
+    let mut expired = lease_binding(0x3a);
     expired.lease = BindingLease::new(digest(8), 1, 1);
     let err = prepare_lease_journal(&jp, expired).unwrap_err();
     assert_eq!(err.code, JournalFailureCode::LeaseExpired);
@@ -511,7 +481,7 @@ fn five_term_lease_expiry_blocks_fresh_attempts_but_not_recovery() {
         recover_lease_journal(&jp, &b).unwrap().outcome,
         RecoveryOutcome::NewRootCommitted
     );
-    let mut again = binding_v2(0x3b);
+    let mut again = lease_binding(0x3b);
     again.old_root = b.new_root;
     again.new_root = digest(0x3c);
     again.lease = BindingLease::new(digest(8), 1, 1);

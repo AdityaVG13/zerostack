@@ -1,9 +1,4 @@
-//! Incremental dirty closure from a bookmark + journal change feed.
-//!
-//! GraphZero never imports FSZero. The journal delta is supplied as an owned
-//! structural input (hub-mediated or test fixture). `dirty_since` returns the
-//! red-green MIGHT-be-stale set by intersecting journal changes with recorded
-//! dependency closures and taking the influence upward closure.
+//! Incremental dirty closure from a bookmark and journal change feed.
 
 use std::collections::BTreeSet;
 
@@ -17,7 +12,7 @@ use crate::invalidation::{
     dirty_from_closure,
 };
 
-/// Journal event kinds GraphZero understands (FSZero feed mapped at the hub).
+/// Journal event kinds accepted from the hub change feed.
 #[derive(
     Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, serde::Serialize, serde::Deserialize,
 )]

@@ -1,53 +1,7 @@
 #![forbid(unsafe_code)]
 
-//! K0 Snap-to-File gate (`zerostack-xbg3`).
-//!
-//! Integrates the one-family W9-E exact-scenario-closure route
-//! (`zerostack-rybb` + `zerostack-qg2a`) as the read-only
-//! structured `z.read` Snap-to-File gate for K0:
-//!
-//! - **One target-ref grammar.** The request is the W9-E [`DemandRequest`]
-//!   (scenario id plus projection atom roots). There is no second grammar.
-//! - **S0 exact object/file root.** Every projection atom resolves to an
-//!   exact image object and is returned root-exact with its exact byte
-//!   length. A single-atom projection is *primary-file orientation only*:
-//!   the packet never sells it as the complete multi-file demand -- the
-//!   completeness claim stays bound to the certified scenario envelope
-//!   (S3).
-//! - **Proved family levels.** The chosen family (exact scenario closure)
-//!   proves S0 (exact object/file roots) and S3 (task -> complete
-//!   file/span closure). S1/S2/S4 are declared unproved in every packet
-//!   with the honest reason.
-//! - **Safe one-expansion path.** A `Safe` fold issues the read-only
-//!   [`SafeExpandHandle`] and performs exactly one first expansion with no
-//!   model-visible discovery (every lookup is ledged `backend_work`; no
-//!   `ls`/grep/probe row exists in the ledger).
-//! - **Unknown native escape.** `Unknown` escapes to the frozen native
-//!   baseline with the strategy preserved (`baseline_escape`, request and
-//!   binding roots carried in the packet) -- never a guessed subset labeled
-//!   complete.
-//! - **Unsafe refusal.** `Unsafe` refuses with typed reasons; no handle, no
-//!   atoms, no expansion.
-//! - **Zero false-complete by construction.** A completeness claim exists
-//!   only on the `Snapped` outcome, and only for the certified envelope
-//!   ([`SnapPacket::validate`] enforces the outcome/claim consistency).
-//! - **Read-only authority.** The packet carries no edit/transaction/commit
-//!   field, and the only credential is the read-only [`SafeExpandHandle`]
-//!   / [`zero_abi::ExpandPermit`] ABI.
-//! - **Adapter-stable packet.** [`SnapPacket`] serializes to deterministic
-//!   sorted-key JSON and round-trips byte-identically through any wire
-//!   adapter; [`SnapPacket::packet_root`] binds the canonical rendering.
-//!
-//! The decision view is built with the existing ZS-VIEW-010
-//! [`DecisionView`] ABI and certified with its honesty law
-//! ([`DecisionView::certificate`]): a `Proved` claim requires every
-//! evidence class the route claims to hold; any missing needed class
-//! degrades to `Unknown`. The route never fabricates a root: every view
-//! root is a route-proven binding (plan/request root, project root, index
-//! lens root, certificate root).
-//!
-//! This module owns hub authority only; it edits no engine source and adds
-//! no write/transaction/commit capability.
+//! Read-only Snap-to-File gate for exact scenario closure.
+//! Accepts one demand request and returns a structured `z.read` target snapshot.
 
 use std::{collections::BTreeSet, error::Error, fmt};
 
@@ -58,18 +12,16 @@ use zero_abi::{
 };
 
 use crate::demand_expand::{
-    DemandError, DemandRequest, FirstExpansion, GraphZeroCompletenessInput, IncrementalDelta,
-    IncrementalDeltaRequest, IncrementalSession, NativeBaseline, ProtectedScope, RouteOutcome,
-    W9E_FAMILY_NAME, W9eRoute,
+    DemandError, DemandRequest, EXACT_SCENARIO_CLOSURE_FAMILY, ExactScenarioClosureRoute,
+    FirstExpansion, GraphZeroCompletenessInput, IncrementalDelta, IncrementalDeltaRequest,
+    IncrementalSession, NativeBaseline, ProtectedScope, RouteOutcome,
 };
 use crate::project_image::ProjectImageManifest;
 
-// ---------------------------------------------------------------------------
 // Constants
-// ---------------------------------------------------------------------------
 
 /// Wire schema of the Snap-to-File gate artifacts.
-pub const SNAP_TO_FILE_SCHEMA_VERSION: &str = "zerostack.w9e.snap_to_file.v1";
+pub const SNAP_TO_FILE_SCHEMA_VERSION: &str = "zerostack.snap_to_file";
 /// Wire packet version.
 pub const SNAP_PACKET_VERSION: u16 = 1;
 
@@ -194,15 +146,13 @@ fn packet_string(field: &'static str, value: &str) -> Result<(), SnapError> {
     Ok(())
 }
 
-// ---------------------------------------------------------------------------
 // Errors
-// ---------------------------------------------------------------------------
 
 /// Fail-closed error for the whole Snap-to-File gate.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum SnapError {
-    /// The underlying W9-E route refused the operation.
-    W9E(DemandError),
+    /// The underlying route refused the operation.
+    DemandExpansion(DemandError),
     /// The decision view failed to construct or certify.
     View(DecisionViewError),
     /// The adapter-stable packet violated a consistency law.
@@ -216,7 +166,9 @@ pub enum SnapError {
 impl fmt::Display for SnapError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::W9E(error) => write!(formatter, "snap w9e failure: {error}"),
+            Self::DemandExpansion(error) => {
+                write!(formatter, "snap demand expansion failure: {error}")
+            }
             Self::View(error) => write!(formatter, "snap decision view failure: {error}"),
             Self::Packet(detail) => write!(formatter, "snap packet violation: {detail}"),
             Self::InvalidInput(detail) => write!(formatter, "snap invalid input: {detail}"),
@@ -229,9 +181,7 @@ impl fmt::Display for SnapError {
 
 impl Error for SnapError {}
 
-// ---------------------------------------------------------------------------
 // Adapter-stable packet
-// ---------------------------------------------------------------------------
 
 /// The outcome of one snap, as the adapter-stable packet spells it.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -278,12 +228,9 @@ pub struct PacketAtom {
     pub byte_len: u64,
 }
 
-/// Ledged metrics of one snap, including the adjudicated native-comparison
-/// fields. `visible_bytes`, `backend_work`, `retry_count`,
-/// `first_try_sufficiency`, and `false_complete` are exact (mirroring the
-/// expand ledger); `native_baseline_bytes`/`native_baseline_probes` and the
-/// derived `native_savings_bytes` are the declared native-discovery
-/// counterfactual -- estimates by declaration, never presented as exact.
+/// Metrics for one snap and its native comparison. `visible_bytes`, `backend_work`,
+/// `retry_count`, `first_try_sufficiency`, and `false_complete` are exact.
+/// `native_baseline_bytes` and `native_baseline_probes` record the baseline.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct SnapMetrics {
@@ -300,24 +247,8 @@ pub struct SnapMetrics {
     pub native_savings_bytes: u64,
 }
 
-/// The adapter-stable snap packet: one closed wire shape
-/// (`deny_unknown_fields`) that renders to deterministic sorted-key JSON
-/// and round-trips byte-identically through any harness adapter.
-///
-/// Honesty laws (enforced by [`SnapPacket::validate`]):
-/// - `Snapped` is the only outcome with a completeness claim: it carries
-///   the certificate root, the certified plan/projection roots, the
-///   read-only handle id, exactly the returned atoms, the proved levels
-///   `["s0", "s3"]`, no `baseline_escape`, and no reasons.
-/// - `Escaped` carries no claim at all: no handle, no certificate, no plan,
-///   no atoms, no metrics; `baseline_escape` is `true` and the reasons
-///   record why coverage is unknown. The request/binding roots stay in the
-///   packet so the native strategy is not lost.
-/// - `Refused` is `Escaped` without the escape: `baseline_escape` is
-///   `false` and the reasons record why the demand is invalid.
-/// - A single-atom projection is flagged `primary_file_orientation` and
-///   always carries the `primary_file_orientation_only` obligation: a
-///   primary file is never sold as the complete multi-file demand.
+/// The consumer-stable snap packet is a closed wire shape that renders deterministic sorted-key
+/// JSON and round-trips byte-identically across conforming transports.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct SnapPacket {
@@ -337,7 +268,7 @@ pub struct SnapPacket {
     pub plan_root: Option<String>,
     /// Root of the exact projection (Snapped only).
     pub projection_root: Option<String>,
-    /// V7 completeness certificate root (Snapped only).
+    /// Completeness certificate root for snapped results.
     pub certificate_root: Option<String>,
     pub checker_identity: Option<String>,
     pub checker_version: Option<String>,
@@ -383,7 +314,7 @@ impl SnapPacket {
                 self.packet_version
             )));
         }
-        if self.family != W9E_FAMILY_NAME {
+        if self.family != EXACT_SCENARIO_CLOSURE_FAMILY {
             return Err(SnapError::Packet(format!(
                 "unexpected family {:?}",
                 self.family
@@ -575,8 +506,7 @@ impl SnapPacket {
         Ok(())
     }
 
-    /// The canonical rendering: deterministic sorted-key JSON. Two harness
-    /// adapters can never disagree on these bytes.
+    /// The canonical rendering is deterministic sorted-key JSON, identical for every consumer.
     pub fn canonical_render_json(&self) -> String {
         let value = serde_json::to_value(self)
             .expect("SnapPacket canonical render serializes by construction");
@@ -599,17 +529,14 @@ impl SnapPacket {
     }
 }
 
-// ---------------------------------------------------------------------------
 // Snap outcome
-// ---------------------------------------------------------------------------
 
 /// Outcome of one read-only snap.
 #[derive(Clone, Debug, PartialEq)]
 pub enum SnapOutcome {
-    /// Safe: the certified closure was snapped. `expansion` is the exactly
-    /// one first expansion (root/projection exact), `handle` is the
-    /// read-only continuation credential, `view` is the decision view
-    /// (Proved), and `packet` is the adapter-stable wire form.
+    /// Safe: the certified closure was snapped. `expansion` is the exactly one first
+    /// expansion (root/projection exact), `handle` is the read-only continuation
+    /// credential, `view` is the decision view (Proved), and `packet` is the adapter-stable wire form.
     Snapped {
         packet: SnapPacket,
         view: DecisionView,
@@ -657,22 +584,17 @@ impl SnapOutcome {
     }
 }
 
-// ---------------------------------------------------------------------------
 // The trusted Snap-to-File route
-// ---------------------------------------------------------------------------
 
-/// The trusted hub-owned Snap-to-File gate. Owns the W9-E route (issuance
-/// secret, live bindings, exactly-once sessions) and the whole
-/// request -> decision-view + packet mapping. Read-only: the only
-/// credential ever produced is the read-only [`SafeExpandHandle`]; there is
-/// no edit, transaction, or commit surface anywhere.
+/// The trusted hub-owned Snap-to-File gate. Owns the route (issuance secret, live bindings,
+/// exactly-once sessions) and the whole request -> decision-view + packet mapping.
 #[derive(Clone, Debug)]
 pub struct SnapToFileRoute {
-    w9e: W9eRoute,
+    demand_route: ExactScenarioClosureRoute,
 }
 
 impl SnapToFileRoute {
-    /// Construct the gate over the W9-E route's trusted bindings.
+    /// Construct the gate over the route's trusted bindings.
     pub fn new(
         secret: [u8; 32],
         tenant: String,
@@ -680,9 +602,10 @@ impl SnapToFileRoute {
         index_root: Sha256Digest,
         index_version: String,
     ) -> Result<Self, SnapError> {
-        let w9e = W9eRoute::new(secret, tenant, epoch, index_root, index_version)
-            .map_err(SnapError::W9E)?;
-        Ok(Self { w9e })
+        let demand_route =
+            ExactScenarioClosureRoute::new(secret, tenant, epoch, index_root, index_version)
+                .map_err(SnapError::DemandExpansion)?;
+        Ok(Self { demand_route })
     }
 
     fn build_snapped_view(
@@ -765,12 +688,9 @@ impl SnapToFileRoute {
         }
     }
 
-    /// Run one read-only snap: compile the demand, run the total
-    /// completeness check through the published GraphZero inputs, and on a
-    /// `Safe` fold issue the read-only handle and perform exactly one first
-    /// expansion -- no model-visible discovery, no hidden retry, no second
-    /// target-ref grammar. `Unknown` escapes to the native baseline with
-    /// the strategy preserved; `Unsafe` refuses with typed reasons.
+    /// Run one read-only snap: compile the demand, run the total completeness check through the
+    /// published GraphZero inputs, and on a `Safe` fold read-only handle and perform exactly one first
+    /// expansion -- no model-visible discovery, no hidden retry, no second target-ref grammar..
     pub fn snap(
         &mut self,
         manifest: &ProjectImageManifest,
@@ -801,9 +721,9 @@ impl SnapToFileRoute {
         let index_version = input.index_version.clone();
 
         match self
-            .w9e
+            .demand_route
             .compile_and_check(manifest, request, scope, input)
-            .map_err(SnapError::W9E)?
+            .map_err(SnapError::DemandExpansion)?
         {
             RouteOutcome::Issued {
                 handle,
@@ -814,13 +734,13 @@ impl SnapToFileRoute {
             } => {
                 // Exactly one first expansion, live-revalidated.
                 let live = self
-                    .w9e
+                    .demand_route
                     .current_live_state(&handle, SafetyVerdict::Safe, false)
-                    .map_err(SnapError::W9E)?;
+                    .map_err(SnapError::DemandExpansion)?;
                 let expansion = self
-                    .w9e
+                    .demand_route
                     .expand_first(&handle, &live, native)
-                    .map_err(SnapError::W9E)?;
+                    .map_err(SnapError::DemandExpansion)?;
 
                 // The decision view: Proved, bound to the certificate and
                 // the read-only handle. Every root is route-proven.
@@ -865,7 +785,7 @@ impl SnapToFileRoute {
                     schema_version: SNAP_TO_FILE_SCHEMA_VERSION.to_owned(),
                     packet_version: SNAP_PACKET_VERSION,
                     outcome: SnapOutcomeKind::Snapped,
-                    family: W9E_FAMILY_NAME.to_owned(),
+                    family: EXACT_SCENARIO_CLOSURE_FAMILY.to_owned(),
                     request_root,
                     project_root,
                     scope_root,
@@ -934,7 +854,7 @@ impl SnapToFileRoute {
                     schema_version: SNAP_TO_FILE_SCHEMA_VERSION.to_owned(),
                     packet_version: SNAP_PACKET_VERSION,
                     outcome: kind,
-                    family: W9E_FAMILY_NAME.to_owned(),
+                    family: EXACT_SCENARIO_CLOSURE_FAMILY.to_owned(),
                     request_root,
                     project_root,
                     scope_root,
@@ -968,23 +888,23 @@ impl SnapToFileRoute {
         }
     }
 
-    /// Live revalidation of one read-only handle (passthrough to the W9-E
+    /// Live revalidation of one read-only handle (passthrough to the
     /// route; typed outcome).
     pub fn revalidate(&self, handle: &SafeExpandHandle, live: &LiveExpandState) -> ExpandOutcome {
-        self.w9e.revalidate(handle, live)
+        self.demand_route.revalidate(handle, live)
     }
 
     /// Exactly one first expansion of a trusted, live-revalidated handle
-    /// (passthrough to the W9-E route behind canonical `z.read`).
+    /// (passthrough to the route behind canonical `z.read`).
     pub fn expand_first(
         &mut self,
         handle: &SafeExpandHandle,
         live: &LiveExpandState,
         native: &NativeBaseline,
     ) -> Result<FirstExpansion, SnapError> {
-        self.w9e
+        self.demand_route
             .expand_first(handle, live, native)
-            .map_err(SnapError::W9E)
+            .map_err(SnapError::DemandExpansion)
     }
 
     /// Build the live hub state that mirrors this gate's bindings for one
@@ -996,21 +916,21 @@ impl SnapToFileRoute {
         verdict: SafetyVerdict,
         hidden_retry_after_issue: bool,
     ) -> Result<LiveExpandState, SnapError> {
-        self.w9e
+        self.demand_route
             .current_live_state(handle, verdict, hidden_retry_after_issue)
-            .map_err(SnapError::W9E)
+            .map_err(SnapError::DemandExpansion)
     }
 
     /// Append one continuation-bound incremental delta (passthrough to the
-    /// W9-E route: new atoms only, live revalidation first).
+    /// route: new atoms only, live revalidation first).
     pub fn expand_delta(
         &mut self,
         session: &IncrementalSession,
         request: &IncrementalDeltaRequest,
         live: &LiveExpandState,
     ) -> Result<IncrementalDelta, SnapError> {
-        self.w9e
+        self.demand_route
             .expand_delta(session, request, live)
-            .map_err(SnapError::W9E)
+            .map_err(SnapError::DemandExpansion)
     }
 }

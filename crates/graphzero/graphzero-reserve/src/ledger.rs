@@ -24,10 +24,8 @@ impl ReservationLedger {
         Self::open_with_writer(store_root, None)
     }
 
-    /// Open after acquiring the store-wide WAL writer domain.
-    ///
-    /// ReserveService uses this before replaying records so its conflict check
-    /// and append are one cross-process read-modify-write transaction.
+    /// Open after acquiring the store-wide WAL writer domain. ReserveService uses this before replaying
+    /// records so its conflict check and append are one cross-process read-modify-write transaction.
     pub fn open_for_write(store_root: &Path) -> Result<Self> {
         let writer_lock = WriterLock::acquire(store_root)?;
         Self::open_with_writer(store_root, Some(writer_lock))
@@ -117,7 +115,7 @@ impl ReservationLedger {
             .collect()
     }
 
-    /// Declared + active reservations that should block other agents (P5.2).
+    /// Declared and active reservations that block other callers.
     pub fn blocking_for_conflict(&self, repo_id: &str, now: u64) -> Vec<IntentReservation> {
         self.materialized(now)
             .into_iter()

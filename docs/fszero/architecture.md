@@ -1,15 +1,13 @@
 # FSZero architecture
 
-FSZero owns exact bytes and filesystem effects. It supplies typed engine methods to ZeroKernel and a standalone operator CLI for diagnostics and maintenance.
+FSZero owns exact bytes and filesystem effects. It supplies typed engine methods to ZeroKernel. It is not an installable product and has no product CLI.
 
 ## Layers
 
 ```text
-fszero-cli          operator commands and diagnostics
-fszero-kernel       typed adapter consumed by ZeroKernel
-fszero-engine       operation dispatch and domain policy
+zero-fs            typed file adapter and guarded effect execution
 fszero-store        content-addressed recovery, journals, durable publication
-fszero-core         paths, refs, errors, budgets, and shared domain types
+fszero-core         paths, refs, edit specifications, and shared domain types
 ```
 
 There is no engine-local model planner. ZeroStack owns JavaScript evaluation, orchestration, transaction timing, cancellation, and the terminal response.
@@ -40,8 +38,8 @@ flowchart LR
 
 ## Recovery and separation
 
-Exact payloads are content-addressed and recovered through `fz://` handles. A handle proves identity, not global availability. Durable publication fails closed. GraphZero owns structural relationships and TokenZero owns model-visible projection.
+Exact payloads are content-addressed and recovered through `z://blob/` handles. A handle proves identity, not global availability. Durable publication fails closed. GraphZero owns structural relationships and TokenZero owns model-visible projection.
 
 ## Release model
 
-FSZero, GraphZero, and TokenZero are the released products. Once coordinated releases begin, all three will publish the same version. ZeroStack remains source-only.
+FSZero, GraphZero, and TokenZero are domain libraries in the ZeroStack workspace, not separately released products. ZeroStack currently ships from source only.

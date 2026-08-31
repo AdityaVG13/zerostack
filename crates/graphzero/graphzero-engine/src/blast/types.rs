@@ -29,7 +29,7 @@ pub struct BreakSite {
     pub hop: u32,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub provenance: Vec<EdgeProvenance>,
-    /// Canonical snap-to-file target `<path>#L<start>-#L<end>` (bead 5htnw).
+    /// Canonical snap-to-file target `<path>#L<start>-#L<end>`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub target: Option<String>,
     /// Intent metadata: hit kind, always `blast` here.
@@ -77,7 +77,7 @@ pub struct SpeculativeBlastRequest {
     pub world_ref: String,
     pub focus_symbols: Vec<String>,
     pub planned_edits: Vec<PlannedEdit>,
-    /// Optional FSZero world-ref v1 enumeration envelope (JSON text). When
+    /// Optional FSZero world-ref enumeration envelope (JSON text). When
     /// present it is strictly validated before any graph work; its
     /// `world_ref` must match `world_ref` (or supplies it when empty).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -152,7 +152,7 @@ pub struct BlastRadiusCapsule {
     pub coverage: BlastCoverageFooter,
     pub certificate: Value,
     pub accounting: PreventedReadAccounting,
-    /// Durable next page (`gz://query/<id>`) when break_sites were capped.
+    /// Durable next page (`query/<id>`) when break sites were capped.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub next_cursor: Option<String>,
 }
@@ -167,7 +167,7 @@ pub enum BlastError {
         blob_hash_count: usize,
     },
     Serialization(String),
-    /// FSZero world-ref v1 enumeration envelope validation failure.
+    /// FSZero world-ref enumeration envelope validation failure.
     WorldEnvelope(String),
 }
 

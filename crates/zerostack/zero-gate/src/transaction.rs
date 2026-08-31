@@ -1,28 +1,23 @@
-//! Effect-closed transaction admission over the durable zero-store journal.
-//!
-//! This module owns no project bytes. FSZero remains the authority for exact
-//! workspace snapshots, candidate clones, and candidate cleanup. ZeroStack
-//! admits speculation only after every preregistered resource has a supported
-//! isolation and restoration mode. The resulting journal receipt claims only
-//! the declared effect-closed scope; it never upgrades filesystem rollback to
-//! universal external-state restoration or native durability.
+//! Effect-closed transaction admission over the durable zero-store journal. This module owns no
+//! project bytes. FSZero remains the authority for exact workspace snapshots, candidate clones, and
+//! candidate cleanup.
 
 #![allow(clippy::result_large_err)]
 
 use std::fmt;
 
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use sha2::{Digest as _, Sha256};
 use zero_abi::{
-    canonical_json, ArtifactOwner, Sha256Digest, EffectClass, EffectProgram, EffectRollback,
-    TypedEffectOperation,
+    ArtifactOwner, DurableProfileId, EffectClass, EffectProgram, EffectRollback, Sha256Digest,
+    TypedEffectOperation, canonical_json,
 };
 use zero_cert::EffectAccepted;
 use zero_store::{
-    abort_journal, commit_journal, prepare_journal, recover_journal,
-    ContinuationCartridge, DurableProfileId, JournalBinding, JournalError,
-    JournalFailureCode, JournalPaths, RecoveryOutcome, RecoveryReceipt,
+    ContinuationCartridge, JournalBinding, JournalError, JournalFailureCode, JournalPaths,
+    RecoveryOutcome, RecoveryReceipt, abort_journal, commit_journal, prepare_journal,
+    recover_journal,
 };
 
 pub const TRANSACTION_CONTRACT_VERSION: u16 = 1;
@@ -139,10 +134,9 @@ impl TransactionResourceRequirement {
     }
 }
 
-/// Exact resource inventory required by the trusted controller for one effect.
-///
-/// Fields are private and this type is not deserializable. Callers must derive
-/// it from a validated `EffectProgram` through `new`.
+/// Exact resource inventory required by the trusted controller for one
+/// effect. Fields are private and this type is not deserializable.
+/// Callers must derive it from a validated `EffectProgram` through `new`.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct EffectClosureRequest {
@@ -244,8 +238,7 @@ impl EffectResourceClosure {
             }
             TransactionAccess::Write | TransactionAccess::ReadWrite => !matches!(
                 self.isolation,
-                ResourceIsolationMode::ImmutableSnapshot
-                    | ResourceIsolationMode::RecordedReplay
+                ResourceIsolationMode::ImmutableSnapshot | ResourceIsolationMode::RecordedReplay
             ),
         };
         if !access_ok {
@@ -261,9 +254,7 @@ impl EffectResourceClosure {
             | ResourceIsolationMode::DelayedUntilCommit => ResourceRestorationMode::NotNeeded,
             ResourceIsolationMode::RecordedReplay => ResourceRestorationMode::RecordedReplay,
             ResourceIsolationMode::Journaled => ResourceRestorationMode::JournalRollback,
-            ResourceIsolationMode::Transactional => {
-                ResourceRestorationMode::TransactionRollback
-            }
+            ResourceIsolationMode::Transactional => ResourceRestorationMode::TransactionRollback,
             ResourceIsolationMode::Unsupported => {
                 return Err(TransactionError::new(
                     TransactionFailureCode::UnsupportedIsolation,
@@ -522,10 +513,7 @@ pub fn validate_effect_closure(
         baseline_state: request.baseline_state,
         rollback: request.rollback,
         external_inventory_digest: domain_digest(EXTERNAL_INVENTORY_DOMAIN, &external_bytes),
-        external_restoration_debt_digest: domain_digest(
-            EXTERNAL_DEBT_DOMAIN,
-            &external_debt_bytes,
-        ),
+        external_restoration_debt_digest: domain_digest(EXTERNAL_DEBT_DOMAIN, &external_debt_bytes),
         resource_count: request.resources.len() as u16,
         external_resource_count: external.len() as u16,
         external_restoration_debt_count: external_debt.len() as u16,
@@ -879,8 +867,7 @@ impl TransactionReceipt {
                 binding.old_root,
             ),
         };
-        if disposition == TransactionDisposition::CandidateCommitted
-            && acceptance_digest.is_none()
+        if disposition == TransactionDisposition::CandidateCommitted && acceptance_digest.is_none()
         {
             return Err(TransactionError::new(
                 TransactionFailureCode::MissingEffectAcceptance,
@@ -1349,4 +1336,3 @@ pub fn transaction_contract_digest() -> Sha256Digest {
         canonical_json(&transaction_contract()).as_bytes(),
     )
 }
-

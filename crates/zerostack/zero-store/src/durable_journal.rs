@@ -1,18 +1,6 @@
-//! Durable single-root journal and recovery protocol.
-//!
-//! The caller supplies every path. This module does not introduce a store
-//! layout. A transaction first persists a continuation cartridge, then a
-//! prepared journal record. Commit publishes a synced root record and only
-//! then persists a committed journal record. Recovery accepts only the old
-//! root or the new root; every other journal/root pairing fails loudly.
-//!
-//! Two binding formats share one state machine (generic over
-//! [`JournalBindingLike`]): the v1 four-term binding (old/new root +
-//! transaction + owner) kept for compatibility, and the v2 five-term binding
-//! (ZS-STORE-006) that adds nonce, protected scope, and a lease to the same
-//! atomic record. The v2 commit surface (`prepare_lease_journal`,
-//! `commit_lease_journal`, ...) is exercised by the two-writer commit-surface
-//! integration test.
+//! Durable single-root journal and recovery protocol. The caller supplies every path. This module
+//! does not introduce a store layout. A transaction first persists a continuation cartridge, then a
+//! prepared journal record.
 
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Write};
@@ -23,10 +11,9 @@ use std::time::SystemTime;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use zero_abi::{Sha256Digest, canonical_json, sha256};
+use zero_abi::{DurableProfile, DurableProfileId, Sha256Digest, canonical_json, sha256};
 
 use crate::fs_replace::{replace_file, sync_dir};
-use crate::{DurableProfile, DurableProfileId};
 
 pub const DURABLE_JOURNAL_SCHEMA_VERSION: u16 = 2;
 pub const DURABLE_LEASE_JOURNAL_SCHEMA_VERSION: u16 = 3;
@@ -55,11 +42,8 @@ pub enum JournalState {
 }
 
 impl JournalState {
-    /// Explicit authority matrix: every terminal state has exactly one
-    /// producer. Prepared may move to Committed (commit) or Aborted (abort
-    /// or recovery); terminal states never leave. Idempotent replay of the
-    /// same terminal is allowed only when the authority's receipt is already
-    /// persisted and verified (handled at call sites), not via state transition.
+    /// Explicit authority matrix: every terminal state has exactly one producer. Prepared may move to
+    /// Committed (commit) or Aborted (abort or recovery); terminal states never leave.
     pub fn can_transition_to(self, next: JournalState) -> bool {
         matches!(
             (self, next),
@@ -357,7 +341,7 @@ impl JournalBinding {
 }
 
 /// The contract the durable journal state machine requires of a commit
-/// binding. Both the v1 four-term and the v2 five-term binding satisfy it, so
+/// binding. Both the basic and lease-bound bindings satisfy it, so
 /// one crash-safe state machine serves both formats.
 pub trait JournalBindingLike:
     Clone + std::fmt::Debug + PartialEq + Serialize + DeserializeOwned
@@ -411,10 +395,9 @@ impl JournalBindingLike for JournalBinding {
     }
 }
 
-/// Lease term carried inside a five-term commit binding. The lease names the
-/// protection under which the commit is authorized; expiry gates fresh
-/// attempts (prepare), and the journal's immutable-record law refuses any
-/// replay of a consumed lease instead of silently re-executing.
+/// Lease term carried inside a five-term commit binding. The lease names the protection under
+/// which the commit is authorized; expiry gates fresh attempts (prepare), and the journal's
+/// immutable-record law refuses any replay of a consumed lease instead of silently re-executing.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct BindingLease {
@@ -461,12 +444,9 @@ impl BindingLease {
     }
 }
 
-/// Five-term commit binding (ZS-STORE-006): parent root/epoch (`old_root`),
-/// authorized delta root (`new_root`), protected scope, nonce, and lease are
-/// all captured in one atomic record, together with the session/ledger
-/// identity (`owner_identity_digest`) that produced the commit. A committed
-/// record therefore carries full provenance, and reads can verify the binding
-/// (see [`verify_committed_lease_binding`]).
+/// Five-term commit binding: parent root/epoch (`old_root`), authorized delta root
+/// (`new_root`), protected scope, nonce, and lease are all captured in one atomic record, together
+/// with the session/ledger identity (`owner_identity_digest`) that produced the commit.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct JournalLeaseBinding {
@@ -601,11 +581,9 @@ pub struct DurableJournalRecord<B> {
     pub predecessor_record_digest: Option<Sha256Digest>,
     pub abort_reason: Option<AbortReason>,
 }
-/// Durable journal record carrying the v1 four-term binding. Byte-compatible
-/// with the pre-R9 record format.
+/// Durable journal record carrying the basic four-term binding.
 pub type DurableJournal = DurableJournalRecord<JournalBinding>;
-/// Durable journal record carrying the v2 five-term binding (nonce +
-/// protected scope + lease added to the v1 terms).
+/// Durable journal record carrying the lease-bound five-term binding.
 pub type DurableLeaseJournal = DurableJournalRecord<JournalLeaseBinding>;
 
 impl<B: JournalBindingLike> DurableJournalRecord<B> {
@@ -756,17 +734,13 @@ pub struct ContinuationCartridgeRecord<B> {
     pub new_root: Sha256Digest,
     pub durable_profile_digest: Sha256Digest,
     pub owner_identity_digest: Sha256Digest,
-    // The phantom keeps a v1 cartridge and a v2 cartridge distinct types so
+    // The phantom keeps basic and lease-bound cartridges distinct types so
     // the state machine cannot mix binding formats. Serde skips it.
     _binding: std::marker::PhantomData<B>,
 }
-/// Compatibility alias for callers written against the carrier draft.
-pub type JournalRecord = DurableJournal;
-/// Compatibility alias for callers written against the carrier draft.
-pub type PublishedRoot = RootPublicationReceipt;
-/// Cartridge for the v1 four-term binding (pre-R9 shape).
+/// Cartridge for the basic four-term binding.
 pub type ContinuationCartridge = ContinuationCartridgeRecord<JournalBinding>;
-/// Cartridge for the v2 five-term binding.
+/// Cartridge for the lease-bound five-term binding.
 pub type ContinuationLeaseCartridge = ContinuationCartridgeRecord<JournalLeaseBinding>;
 
 impl<B: JournalBindingLike> ContinuationCartridgeRecord<B> {
@@ -1044,10 +1018,9 @@ fn prepare_bound_journal<B: JournalBindingLike>(
             "binding lease has expired before prepare",
         ));
     }
-    // The commit surface is a compare-and-swap on the parent root: the
-    // preregistered old root must still be current before anything else is
-    // consulted, so a second writer observes RootMismatch (never a terminal
-    // journal confusion) when the first writer moved the root.
+    // The commit surface is a compare-and-swap on the parent root: the preregistered old root
+    // must still be current before anything else is consulted, so a second writer observes
+    // RootMismatch (never a terminal journal confusion) when the first writer moved the root.
     let root = read_root(paths)?;
     if root.root_digest != binding.old_root() {
         return Err(JournalError::new(
@@ -1624,10 +1597,9 @@ pub fn read_lease_continuation_cartridge(
 ) -> Result<ContinuationLeaseCartridge, JournalError> {
     read_cartridge::<JournalLeaseBinding>(paths)
 }
-/// Read-side verification of a committed five-term binding: the persisted
-/// record and its recovery receipt must correspond to the expected session /
-/// ledger identity and carry the same binding digest, or the read fails
-/// loudly. This is how reads verify the provenance binding of a commit.
+/// Read-side verification of a committed five-term binding: the persisted record and its recovery
+/// receipt must correspond to the expected session / ledger identity and carry the same binding
+/// digest, or the read fails loudly. This is how reads verify the provenance binding of a commit.
 pub fn verify_committed_lease_binding(
     paths: &JournalPaths,
     expected: &JournalLeaseBinding,
@@ -1704,9 +1676,8 @@ fn persist_recovery(
     receipt: RecoveryReceipt,
     fault: &mut FaultPlan,
 ) -> Result<RecoveryReceipt, JournalError> {
-    // Recovery receipt is immutable and typed: same path for v1 and v2, but
-    // the binding digest is the authority. Generic check ensures we do not
-    // silently alias a v1 receipt for a v2 binding.
+    // Recovery receipts share one path, but the binding digest is authoritative.
+    // The generic check prevents aliasing between binding forms.
     if let Some(existing) = read_optional::<RecoveryReceipt>(
         paths.recovery_receipt(),
         JournalFailureCode::JournalMissing,
@@ -2014,7 +1985,7 @@ fn open_unique_temp(parent: &Path, file_name: &std::ffi::OsStr) -> io::Result<(F
 fn now_unix_ns() -> u64 {
     SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
-        .map(|duration| duration.as_nanos() as u64)
+        .map(|duration| u64::try_from(duration.as_nanos()).unwrap_or(u64::MAX))
         .unwrap_or(0)
 }
 fn io_before(boundary: JournalBoundary, error: io::Error) -> JournalError {

@@ -1,6 +1,0 @@
-{
-  "session_id": "omp-session-fixture-001",
-  "rationale": "Refactor alpha to use beta; sk-fake-secret-for-test must not persist",
-  "touched_paths": ["src/a.rs"],
-  "node_ref": "gz://node/sym:alpha"
-}

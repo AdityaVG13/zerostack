@@ -38,7 +38,7 @@ fn empty_facts(hash: crate::ContentHash, lang: Language) -> BlobFacts {
     }
 }
 
-/// Extract Tier-A facts from a single blob (FR-001).
+/// Extract Tier-A facts from a single blob.
 pub fn extract_tier_a(input: &BlobInput, queries: &QuerySet) -> BlobFacts {
     let lang = input
         .path_hint
@@ -70,7 +70,7 @@ pub fn extract_tier_a(input: &BlobInput, queries: &QuerySet) -> BlobFacts {
     }
 }
 
-/// Batch extraction using Rayon (FR-012, G-006).
+/// Batch extraction using Rayon.
 pub fn extract_batch(inputs: &[BlobInput], queries: &QuerySet) -> Vec<BlobFacts> {
     use rayon::prelude::*;
     inputs

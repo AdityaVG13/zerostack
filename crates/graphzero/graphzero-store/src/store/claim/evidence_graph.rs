@@ -74,12 +74,7 @@ pub fn append_verify_evidence_graph(
 
     let _lock = WriterLock::acquire(store_root)?;
     let mut log = DeltaLog::open(store_root)?;
-    // Synthetic blob identity: never reuse the evidence content hash. Pending
-    // WAL merge treats any blob keyed in pending as dirty-replacement and
-    // drops all base defs/edges for that blob on compaction — annotating the
-    // real evidence blob wiped symbols like `alpha` and made later verify
-    // adapters report target_not_found (graphzero-dispatcher-verify-adapter-
-    // divergence-zk92b).
+    // Synthetic blob identity: never reuse the evidence content hash.
     let synthetic = ContentHash::of(format!("graphzero.verify\0{node}").as_bytes());
     log.append(DeltaEntry {
         entry_type: entry_type::SYMBOL,
@@ -99,10 +94,9 @@ pub fn append_verify_evidence_graph(
             Some(edge_source),
         )?,
     })?;
-    // Do not append COVERAGE for the source evidence blob. Verify nodes are
-    // synthetic annotations; rewriting coverage to tier-C-only poisons reopen
-    // (partial_coverage) and makes later adapters diverge after the first
-    // successful verify on a shared store.
+    // Do not append COVERAGE for the source evidence blob. Verify nodes are synthetic
+    // annotations; rewriting coverage to tier-C-only poisons reopen (partial_coverage)
+    // and makes later adapters diverge after the first successful verify on a shared store.
     log.commit()?;
 
     Ok(Some(json!({

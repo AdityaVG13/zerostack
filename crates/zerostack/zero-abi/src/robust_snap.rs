@@ -1,8 +1,6 @@
-//! Frozen finite Robust Snap contract.
-//!
-//! This module checks abstract S0/S1 witnesses only. It does not compile, execute,
-//! rank away, or authorize effects. Operational correspondence remains a separate
-//! release gate.
+//! Frozen finite Robust Snap contract. This module checks abstract S0/S1
+//! witnesses only. It does not compile, execute, rank away, or authorize
+//! effects. Operational correspondence remains a separate release gate.
 
 use std::{collections::BTreeSet, error::Error, fmt};
 

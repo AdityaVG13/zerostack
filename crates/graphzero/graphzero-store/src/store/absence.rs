@@ -1,6 +1,5 @@
-//! P1.2 certified absence: three-class answers over snapshot coverage + freshness.
-//!
-//! Negative answers carry coverage scope; stale index never classifies as ABSENT (T6).
+//! Three-state absence answers derived from snapshot coverage and freshness.
+//! Negative answers carry coverage scope; a stale index never proves absence.
 
 use anyhow::Result;
 
@@ -8,7 +7,7 @@ use crate::Tier;
 
 use super::query::Snapshot;
 
-/// Mutually exclusive answer classes (FR-001).
+/// Mutually exclusive answer classes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AnswerClass {
     Present,
@@ -26,7 +25,7 @@ impl AnswerClass {
     }
 }
 
-/// Machine-parseable coverage certificate attached to every answer (FR-002).
+/// Machine-parseable coverage certificate attached to every answer.
 #[derive(Clone, Debug, PartialEq)]
 pub struct AbsenceCertificate {
     pub tier_a_pct: f64,
@@ -38,7 +37,7 @@ pub struct AbsenceCertificate {
     pub gap_blob_count: usize,
 }
 
-/// Structured absence query result for CLI / library JSON (G-001).
+/// Structured absence query result for CLI / library JSON.
 #[derive(Clone, Debug, PartialEq)]
 pub struct AbsenceAnswer {
     pub class: AnswerClass,
@@ -49,7 +48,7 @@ pub struct AbsenceAnswer {
     pub summary: String,
 }
 
-/// Tier-A coverage fraction required before ABSENT (FR-015 default 0.99).
+/// Tier-A coverage fraction required before ABSENT (default 0.99).
 #[derive(Clone, Copy, Debug)]
 pub struct AbsenceConfig {
     pub tier_a_threshold: f64,
@@ -65,7 +64,7 @@ impl Default for AbsenceConfig {
     }
 }
 
-/// Classify symbol presence with coverage-bound certificates (walking skeleton).
+/// Classify symbol presence with coverage-bound certificates.
 pub fn absence(snapshot: &Snapshot, symbol: &str, config: AbsenceConfig) -> Result<AbsenceAnswer> {
     let query = symbol.trim().to_string();
     let capsule = snapshot.query(&query, 256, config.check_freshness)?;
@@ -74,10 +73,9 @@ pub fn absence(snapshot: &Snapshot, symbol: &str, config: AbsenceConfig) -> Resu
     let tier_c = capsule.tier_c;
     let snapshot_id = capsule.snapshot_id;
 
-    // Reuse the staleness verdict the query already computed (graphzero perf):
-    // `query_with_repair` runs the full per-file scan when check_freshness is
-    // set and records any fault in `freshness.events`. Re-running the scan here
-    // doubled the cost of every verify/absence call for the identical answer.
+    // Reuse the staleness verdict the query already computed (graphzero perf) `query_with_repair` runs
+    // the full per-file scan when check_freshness is set and records any fault in `freshness.events`.
+    // Re-running the scan here doubled the cost of every verify/absence call for the identical answer.
     let stale_reason = if config.check_freshness {
         capsule.freshness.events.first().cloned()
     } else {
@@ -166,7 +164,7 @@ pub fn absence(snapshot: &Snapshot, symbol: &str, config: AbsenceConfig) -> Resu
 }
 
 impl AbsenceAnswer {
-    /// JSON shape aligned with P1.4 prep (FR-002, FR-013).
+    /// Serialize an absence result as stable JSON.
     pub fn to_json(&self) -> String {
         let class = self.class.as_str();
         let evidence = self
@@ -201,7 +199,7 @@ impl AbsenceAnswer {
         )
     }
 
-    /// Reject uncertified bare negatives without coverage (FR-013).
+    /// Reject uncertified bare negatives without coverage.
     pub fn validate_certified_negative(&self) -> Result<(), String> {
         match self.class {
             AnswerClass::Present => {

@@ -1,15 +1,8 @@
-# Install TokenZero
+# Tokens domain (used by ZeroStack)
 
-TokenZero currently builds from source in this workspace. There is no tagged TokenZero or ZeroStack release, and no GitHub Release archive or checksum to verify.
+The token library is a ZeroStack domain surface, not an installable product.
 
-## Build from source
-
-```bash
-git clone https://github.com/AdityaVG13/zerostack
-cd zerostack
-cargo build --release -p tokenzero-cli --bin tokenzero
-./target/release/tokenzero --help
-```
+The public execution surface is ZeroKernel. Measurement and recovery run through ZeroKernel (`z.read` handles). The only installable program is ZeroStack (`zero-kernel`).
 
 ## Use through ZeroKernel
 
@@ -18,8 +11,6 @@ git clone https://github.com/AdityaVG13/zerostack
 cd zerostack
 cargo build -p zero-kernel
 ```
-
-Do not register classic TokenZero MCP beside ZeroKernel in the same agent session unless a client has a specific compatibility requirement.
 
 ## Coordinated releases
 

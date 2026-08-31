@@ -1,4 +1,4 @@
-//! CoverageIndex trait — integration surface with P0.1 snapshot store.
+//! Coverage index integration with snapshot storage.
 
 use crate::bitmap::Bitmap;
 use graphzero_store::{BlobId, ContentHash};
@@ -32,7 +32,7 @@ impl fmt::Display for CoverageError {
 
 impl std::error::Error for CoverageError {}
 
-/// Trait implemented by P0.1 `ShardReader` / `ShardWriter`.
+/// Coverage storage implemented by shard readers and writers.
 pub trait CoverageIndex {
     /// Read the coverage bitmap for a blob.
     fn read_coverage(&self, blob_id: &BlobId) -> Option<Bitmap>;

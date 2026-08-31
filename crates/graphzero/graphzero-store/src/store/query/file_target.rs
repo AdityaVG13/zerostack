@@ -1,14 +1,5 @@
-//! Snap-to-file target grammar (bead graphzero-snap-to-file-targets-5htnw).
-//!
-//! ONE grammar, defined by FSZero in `docs/design/target-ref-grammar.md` and
-//! `src/core/target_ref.rs`; adopted here verbatim. Do not invent a second one.
-//!
-//! Canonical target ref: `<path>#L<start>-L<end>` (1-based, inclusive).
-//! Canonical hit record:
-//! ```text
-//! HIT <path>#L<start>-L<end> kind=<def|ref|blast> sym=<enclosing symbol>
-//! | <line-no>: <line text>
-//! ```
+//! Snap-to-file targets use FSZero's canonical `<path>#L<start>-L<end>` grammar.
+//! Line numbers are one-based and inclusive.
 
 use super::snapshot::Snapshot;
 
@@ -37,7 +28,7 @@ pub struct FileTargetHit {
 }
 
 impl FileTargetHit {
-    /// The `HIT ...` header alone.
+    /// The `HIT...` header alone.
     pub fn header(&self) -> String {
         format!("HIT {} kind={} sym={}", self.target, self.kind, self.symbol)
     }
@@ -53,7 +44,7 @@ impl FileTargetHit {
 }
 
 fn parse_blob_span(evidence_ref: &str) -> Option<(&str, usize, usize)> {
-    let raw = evidence_ref.strip_prefix("gz://blob/")?;
+    let raw = evidence_ref.strip_prefix("z://blob/")?;
     let (hash, span) = raw.split_once("#B")?;
     let (start, end) = span.split_once('-')?;
     Some((hash, start.parse().ok()?, end.parse().ok()?))
@@ -96,11 +87,9 @@ fn enclosing_symbol(lines: &[&str], line_no: usize) -> Option<String> {
     None
 }
 
-/// Resolve a `gz://blob/<hash>#B<start>-<end>` evidence ref into a canonical
-/// file target with intent metadata and an inlined content window.
-///
-/// Returns `None` when the ref is not a blob span, the blob is absent, or the
-/// snapshot has no repo-relative path for it.
+/// Resolve a `z://blob/<hash>#B<start>-<end>` evidence ref into a canonical file target
+/// with intent metadata and an inlined content window. Returns `None` when the ref is
+/// not a blob span, the blob is absent, or the snapshot has no repo-relative path for it.
 pub fn file_target_for_evidence(
     snapshot: &Snapshot,
     evidence_ref: &str,

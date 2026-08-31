@@ -1,15 +1,10 @@
 #![forbid(unsafe_code)]
 
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
-use std::borrow::Cow;
 use std::fmt;
 use std::path::Path;
 
-pub const CLI_SCHEMA_VERSION: &str = "tokenzero.cli.v1";
-pub const MCP_SCHEMA_VERSION: &str = "tokenzero.mcp.v1";
-pub const INSTALL_SCHEMA_VERSION: &str = "tokenzero.install_plan.v1";
-pub const PULSE_SCHEMA_VERSION: &str = "tokenzero.pulse.v1";
+pub const PULSE_SCHEMA_VERSION: &str = "tokenzero.pulse";
 
 macro_rules! string_enum {
     ($(#[$meta:meta])* $vis:vis enum $name:ident, $as_vis:vis as_str {
@@ -43,10 +38,6 @@ string_enum! {
         Dedupe => "dedupe",
         DiffAware => "diff-aware",
         Exact => "exact",
-        Lossy => "lossy",
-        Hybrid => "hybrid",
-        Critical => "critical",
-        Fidelity => "fidelity",
     }
 }
 
@@ -54,61 +45,18 @@ impl std::str::FromStr for Mode {
     type Err = String;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         const MAP: &[(&[&str], Mode)] = &[
-            (&["auto", "hybrid"], Mode::Auto),
+            (&["auto"], Mode::Auto),
             (&["passthrough"], Mode::Passthrough),
-            (&["diagnostic", "critical"], Mode::Diagnostic),
-            (&["structured", "fidelity"], Mode::Structured),
+            (&["diagnostic"], Mode::Diagnostic),
+            (&["structured"], Mode::Structured),
             (&["dedupe"], Mode::Dedupe),
             (&["diff-aware", "diff_aware", "diffaware"], Mode::DiffAware),
             (&["exact"], Mode::Exact),
-            (&["lossy"], Mode::Lossy),
         ];
         MAP.iter()
             .find(|(aliases, _)| aliases.contains(&s))
             .map(|(_, m)| *m)
             .ok_or_else(|| format!("unsupported mode: {s}"))
-    }
-}
-
-impl Mode {
-    pub fn effective_policy(self) -> Self {
-        match self {
-            Self::Hybrid => Self::Auto,
-            Self::Critical => Self::Diagnostic,
-            Self::Fidelity | Self::Lossy => Self::Structured,
-            other => other,
-        }
-    }
-}
-
-string_enum! {
-    #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-    #[serde(rename_all = "lowercase")]
-    pub enum McpToolSurface, pub as_str {
-        #[default] Classic => "mcp",
-        CodeMode => "codemode",
-    }
-}
-
-impl McpToolSurface {
-    pub const ENV: &'static str = "TOKENZERO_MCP_TOOL_SURFACE";
-}
-
-impl std::str::FromStr for McpToolSurface {
-    type Err = String;
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s
-            .trim()
-            .to_ascii_lowercase()
-            .replace(['_', ' '], "-")
-            .as_str()
-        {
-            "" | "mcp" | "classic" | "aliases" | "full" => Ok(Self::Classic),
-            "codemode" | "code-mode" => Ok(Self::CodeMode),
-            other => Err(format!(
-                "unsupported MCP launch mode '{other}'; use mcp or codemode"
-            )),
-        }
     }
 }
 
@@ -133,11 +81,6 @@ pub(crate) fn starts_with_any(h: &str, p: &str) -> bool {
     p.split('|').any(|n| h.starts_with(n))
 }
 
-/// Returns true if `haystack` ends with any pipe-delimited suffix.
-pub(crate) fn ends_with_any(h: &str, p: &str) -> bool {
-    p.split('|').any(|n| h.ends_with(n))
-}
-
 /// Returns true if `haystack` contains any pipe-delimited needle.
 pub(crate) fn contains_any(h: &str, p: &str) -> bool {
     p.split('|').any(|n| h.contains(n))
@@ -148,345 +91,22 @@ pub(crate) fn contains_any_ws(h: &str, n: &str) -> bool {
     n.split_whitespace().any(|w| h.contains(w))
 }
 
-pub(crate) fn is_one_of(value: &str, choices: &str) -> bool {
-    choices.split_whitespace().any(|choice| value == choice)
+const DIAGNOSTIC_KEYWORDS: &str = "error|warning|failed|failure|panic|traceback|exception|assertion|expected|actual|not ok|prompt|enter ";
+const DIFF_LINE_PREFIXES: &str = "diff --git|index |--- |+++ |@@|rename |deleted file|new file|+|-";
+const SECRET_TOKEN_PREFIXES: &str = "sk-|sk-proj-|ghp_|github_pat_|AKIA|glpat-|xoxb-|xoxp-";
+
+fn looks_critical_line(line: &str) -> bool {
+    contains_any(&line.to_ascii_lowercase(), DIAGNOSTIC_KEYWORDS)
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Visible {
-    pub kind: String,
-    pub text: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct RefRecord {
-    pub kind: String,
-    #[serde(rename = "ref")]
-    pub ref_id: String,
-    pub bytes: usize,
-    pub live: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-pub struct Accounting {
-    pub raw_tokens: usize,
-    pub visible_tokens: usize,
-    pub recovery_tokens: usize,
-    /// Output tokens billed at the tool boundary. Defaults preserve older records.
-    #[serde(default)]
-    pub billed_tokens: usize,
-    /// Billed output tokens satisfied by the measured cache source.
-    #[serde(default)]
-    pub cached_tokens: usize,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub exact_ref_tokens: Option<usize>,
-    /// Kernel measure label for these counts: `estimator:` or `tiktoken:`.
-    /// Never unlabeled, never an invented ExactTokenizerIdentity.
-    #[serde(default = "tokens::count_tokens_tokenizer_id")]
-    pub tokenizer_id: String,
-    /// True only for a single `provider/model@hex` identity. Estimator and
-    /// tiktoken MCP totals never certify as exact.
-    #[serde(default)]
-    pub certified: bool,
-}
-
-impl Default for Accounting {
-    fn default() -> Self {
-        Self::measured(0, 0, 0, 0, 0, None)
-    }
-}
-
-impl Accounting {
-    /// MCP/engine accounting block stamped with the kernel measure estimator.
-    pub fn measured(
-        raw_tokens: usize,
-        visible_tokens: usize,
-        recovery_tokens: usize,
-        billed_tokens: usize,
-        cached_tokens: usize,
-        exact_ref_tokens: Option<usize>,
-    ) -> Self {
-        let mut accounting = Self {
-            raw_tokens,
-            visible_tokens,
-            recovery_tokens,
-            billed_tokens,
-            cached_tokens,
-            exact_ref_tokens,
-            tokenizer_id: tokens::count_tokens_tokenizer_id(),
-            certified: false,
-        };
-        accounting.stamp_tokenizer();
-        accounting
-    }
-
-    /// spent = visible + recovery. Expand charges belong here.
-    pub fn spent_tokens(&self) -> usize {
-        self.visible_tokens.saturating_add(self.recovery_tokens)
-    }
-
-    /// Recovered mass on this response (recovery_tokens).
-    pub fn recovered_tokens(&self) -> usize {
-        self.recovery_tokens
-    }
-
-    /// Stamp `tokenizer_id` from the kernel measure estimator. Refuses
-    /// unlabeled `estimate:` / empty / Q99 by replacing them. Never invents
-    /// ExactTokenizerIdentity; estimator and tiktoken stay uncertified.
-    pub fn stamp_tokenizer(&mut self) {
-        let id = self.tokenizer_id.trim();
-        // MCP registry labels are identity collisions, not unlabeled estimates.
-        // Keep them so Pulse/preflight refuse instead of relabeling to the kernel
-        // estimator (which would look like honest accounting).
-        if tokens::is_forbidden_mcp_tokenizer_identity(id) {
-            self.certified = false;
-            return;
-        }
-        let labeled = id.starts_with("estimator:")
-            || id.starts_with("tiktoken:")
-            || (id.contains('/') && id.contains('@'));
-        if id.is_empty() || !labeled || tokens::preflight_tokenizer_id(id).is_err() {
-            self.tokenizer_id = tokens::count_tokens_tokenizer_id();
-        }
-        if self.tokenizer_id.starts_with("estimator:") || self.tokenizer_id.starts_with("tiktoken:")
-        {
-            self.certified = false;
-        }
-    }
-
-    pub fn visible_savings_ratio(&self) -> f64 {
-        savings_ratio(self.raw_tokens, self.visible_tokens)
-    }
-    /// M_rec used-tokens are `visible + recovery` (saturating).
-    ///
-    /// Exact-expand payloads that also appear in `visible_tokens` are counted
-    /// in both on purpose: the hub zero-ledger receipt treats that overlap as
-    /// conservative (understates savings). `used` is "shown or recovered",
-    /// not a partition of disjoint masses (tokenzero-73yc). Signed: spent>raw
-    /// is a negative ratio, not a clamped 0% save.
-    pub fn recovery_adjusted_savings_ratio(&self) -> f64 {
-        savings_ratio(self.raw_tokens, self.spent_tokens())
-    }
-}
-
-impl Serialize for Accounting {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        use serde::ser::SerializeStruct;
-        let mut fields = 9;
-        if self.exact_ref_tokens.is_some() {
-            fields += 1;
-        }
-        let mut state = serializer.serialize_struct("Accounting", fields)?;
-        state.serialize_field("raw_tokens", &self.raw_tokens)?;
-        state.serialize_field("visible_tokens", &self.visible_tokens)?;
-        state.serialize_field("recovery_tokens", &self.recovery_tokens)?;
-        state.serialize_field("billed_tokens", &self.billed_tokens)?;
-        state.serialize_field("cached_tokens", &self.cached_tokens)?;
-        if let Some(exact) = self.exact_ref_tokens {
-            state.serialize_field("exact_ref_tokens", &exact)?;
-        }
-        state.serialize_field("tokenizer_id", &self.tokenizer_id)?;
-        state.serialize_field("certified", &self.certified)?;
-        state.serialize_field("spent_tokens", &self.spent_tokens())?;
-        state.serialize_field("recovered_tokens", &self.recovered_tokens())?;
-        state.end()
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Diagnostic {
-    pub code: String,
-    pub message: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub repair: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct CliError {
-    pub code: String,
-    pub message: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub repair: Option<String>,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-pub struct ToolResponse {
-    pub schema_version: String,
-    pub status: String,
-    pub tool: String,
-    /// ACK/2 one-token class atom. Pure mutation success is silent (None).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub ack: Option<String>,
-    /// Expandable detail ref for the response body when one is available.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub detail_ref: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub mode: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub visible: Option<Visible>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub refs: Vec<RefRecord>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub accounting: Option<Accounting>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub diagnostic: Option<Diagnostic>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub error: Option<CliError>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub content_type: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub telemetry: Option<serde_json::Value>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub safety: Option<serde_json::Value>,
-    /// vz89.11 output channel separation: present only when the harness opted
-    /// in (TOKENZERO_CHANNEL_SEPARATION). Absent means byte-identical default.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub channels: Option<ChannelSeparation>,
-    /// Recovery receipt marking terminal (do-not-recompact) exact-byte
-    /// recovery. Present only on expand-family responses that return stored
-    /// bytes verbatim; adapters must not re-compact or re-summarize the
-    /// visible body of a response carrying this receipt.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub recovery: Option<RecoveryReceipt>,
-    /// CacheZero would-be outcome. Never implies the body was served from cache.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub cache_status: Option<String>,
-    /// Tokens that a hit would have avoided showing. Zero on forced-miss.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub saved_tokens_estimate: Option<u64>,
-    /// Leftover visible-token budget after this result. Distinct from
-    /// accounting so agents can adapt near exhaustion without parsing notes.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub remaining_budget_tokens: Option<u64>,
-    /// True when a scan or render stopped on a budget. A zero-hit with this
-    /// set is not a proven miss -- retry with a larger budget.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub budget_exhausted: Option<bool>,
-}
-
-/// Terminal-recovery marker for adapter compaction pipelines (yevj).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub struct RecoveryReceipt {
-    /// True when this response IS the recovered content: re-running it
-    /// through compaction would destroy the bytes the agent paid to recover.
-    pub terminal: bool,
-    /// Adapter contract: never re-compact the visible body.
-    pub do_not_recompact: bool,
-    /// True when the visible body is byte-exact recovered content.
-    pub exact_bytes: bool,
-}
-
-/// Machine-action channel separated from user-facing prose (hub vz89.11).
-/// The harness renders `status_line` deterministically at zero model-output
-/// cost; `user_message` stays null between tool calls and may carry one brief
-/// final explanation at completion.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-pub struct ChannelSeparation {
-    /// Machine-readable action atom (canonical op name, e.g. "read").
-    pub action: String,
-    /// Deterministic status line derivable from the operation + receipt.
-    pub status_line: String,
-    /// Nullable by contract: None serializes as an explicit null.
-    pub user_message: Option<String>,
-}
-
-/// Env var opting a harness into channel-separated responses.
-pub const CHANNEL_SEPARATION_ENV: &str = "TOKENZERO_CHANNEL_SEPARATION";
-
-/// How much of the channel contract the harness opted into (vz89.11).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ChannelMode {
-    /// No channel block; responses stay byte-identical to the pre-gate contract.
-    Off,
-    /// Machine action + deterministic status line, `user_message` always null.
-    /// The between-tool-calls mode: no model narration is paid for.
-    Action,
-    /// Action mode plus one brief receipt-derived `user_message` on a terminal
-    /// envelope. Still zero model-output cost: the text comes from receipts.
-    Terminal,
-}
-
-impl ChannelMode {
-    pub fn from_env_value(raw: &str) -> Self {
-        match raw.trim().to_ascii_lowercase().as_str() {
-            "1" | "on" | "true" | "yes" | "action" => Self::Action,
-            "terminal" | "final" => Self::Terminal,
-            _ => Self::Off,
-        }
-    }
-
-    pub fn enabled(self) -> bool {
-        !matches!(self, Self::Off)
-    }
-
-    /// Whether a terminal envelope may carry a receipt-derived user message.
-    pub fn emits_user_message(self) -> bool {
-        matches!(self, Self::Terminal)
-    }
-}
-
-/// The channel mode the harness opted into. Default `Off`.
-pub fn channel_mode() -> ChannelMode {
-    std::env::var(CHANNEL_SEPARATION_ENV)
-        .map(|raw| ChannelMode::from_env_value(&raw))
-        .unwrap_or(ChannelMode::Off)
-}
-
-/// Whether the harness opted into channel separation (vz89.11). Default off:
-/// responses are byte-identical to the pre-gate contract.
-pub fn channel_separation_enabled() -> bool {
-    channel_mode().enabled()
-}
-
-impl ToolResponse {
-    fn base(status: &str, tool: impl Into<String>) -> Self {
-        Self {
-            schema_version: CLI_SCHEMA_VERSION.to_string(),
-            status: status.to_string(),
-            tool: tool.into(),
-            ..Self::default()
-        }
-    }
-
-    pub fn ok(
-        tool: impl Into<String>,
-        mode: Mode,
-        visible: String,
-        refs: Vec<RefRecord>,
-        mut accounting: Accounting,
-    ) -> Self {
-        accounting.stamp_tokenizer();
-        Self {
-            ack: Some(AckClass::Success.atom().to_string()),
-            detail_ref: refs.first().map(|record| record.ref_id.clone()),
-            mode: Some(mode.to_string()),
-            visible: Some(Visible {
-                kind: "capsule".to_string(),
-                text: visible,
-            }),
-            refs,
-            accounting: Some(accounting),
-            ..Self::base("ok", tool)
-        }
-    }
-
-    pub fn error(
-        tool: impl Into<String>,
-        code: impl Into<String>,
-        message: impl Into<String>,
-        repair: Option<String>,
-    ) -> Self {
-        let code = code.into();
-        let ack = AckClass::from_error_kind(&code, false).atom().to_string();
-        Self {
-            ack: Some(ack),
-            error: Some(CliError {
-                code,
-                message: message.into(),
-                repair,
-            }),
-            ..Self::base("error", tool)
-        }
+fn json_kind(value: &serde_json::Value) -> &'static str {
+    match value {
+        serde_json::Value::Null => "null",
+        serde_json::Value::Bool(_) => "bool",
+        serde_json::Value::Number(_) => "number",
+        serde_json::Value::String(_) => "string",
+        serde_json::Value::Array(_) => "array",
+        serde_json::Value::Object(_) => "object",
     }
 }
 
@@ -536,11 +156,10 @@ impl Capsule {
         {
             return Ok(());
         }
-        let lossy_declared = self.mode == Mode::Lossy
-            && self
-                .lossy_policy_id
-                .as_ref()
-                .is_some_and(|id| !id.is_empty())
+        let lossy_declared = self
+            .lossy_policy_id
+            .as_ref()
+            .is_some_and(|id| !id.is_empty())
             && !self.lossy_spans.is_empty()
             && self.lossy_spans.iter().all(|span| {
                 !span.description.is_empty()
@@ -550,7 +169,7 @@ impl Capsule {
             && self.text.contains("mode=lossy")
             && self.text.contains("lossy_policy_id=");
         lossy_declared.then_some(()).ok_or_else(|| {
-            "capsule omitted bytes without a protected anchor, exact tz:// selector, or explicit lossy declaration".to_string()
+            "capsule omitted bytes without a protected anchor, exact z://blob selector, or explicit lossy declaration".to_string()
         })
     }
 }
@@ -559,11 +178,7 @@ fn exact_recovery_scheme(reference: &str) -> bool {
     let base = reference
         .split_once('#')
         .map_or(reference, |(base, _)| base);
-    // Recovery expand treats fz://blob and gz://blob as same-store aliases of tz://.
     base.starts_with("z://blob/")
-        || base.starts_with("tz://")
-        || base.starts_with("fz://blob/")
-        || base.starts_with("gz://blob/")
 }
 
 fn exact_ref_has_selector(reference: &str) -> bool {
@@ -622,12 +237,9 @@ fn finalize_capsule_omission(
     let omitted = !original_trimmed.is_empty() && !capsule.text.contains(original_trimmed);
     if omitted {
         if let Some(reference) = exact_ref.filter(|value| exact_ref_has_selector(value)) {
-            // validate_omission_rule requires the selector to be present in the
-            // VISIBLE TEXT, not merely recorded in exact_refs: a ref an agent
-            // cannot see is a ref it cannot expand, so recording it alone would
-            // satisfy the struct while still stranding the omitted bytes.
-            // Without this the branch panicked on any budgeted read whose
-            // enforce_token_budget_with_ref marker had already been trimmed.
+            // validate_omission_rule requires the selector to be present in the VISIBLE TEXT, not merely
+            // recorded in exact_refs: a ref a caller cannot see is a ref it cannot expand, so recording it
+            // alone would satisfy the struct while still stranding the omitted bytes.
             if !capsule.text.contains(&reference) {
                 capsule.text.push('\n');
                 capsule.text.push_str(&format!(
@@ -645,16 +257,14 @@ fn finalize_capsule_omission(
             let declared_tokens = count_tokens(&declared);
             let raw_full_tokens = count_tokens(original_trimmed);
             if declared_tokens >= raw_full_tokens {
-                // Inflation guard: a lossy declaration plus summary that costs
-                // more than the raw payload is not a compression. Exact mode is
-                // not exempt — hiding one token behind a 10-token stub is still
-                // worse than the raw payload.
+                // Inflation guard: a lossy declaration plus summary that costs more than
+                // the raw payload is not a compression. Exact mode is not exempt — hiding
+                // one token behind a 10-token stub is still worse than the raw payload.
                 capsule.text = original_trimmed.to_string();
                 capsule.visible_tokens = raw_full_tokens;
                 capsule.omitted_lines = 0;
             } else {
-                capsule.mode = Mode::Lossy;
-                capsule.lossy_policy_id = Some("tokenzero.visible-compression.v1".to_string());
+                capsule.lossy_policy_id = Some("tokenzero.visible-compression".to_string());
                 capsule.lossy_spans.push(LossySpan {
                     description: "bytes omitted from the visible capsule".to_string(),
                     reason: "visible token budget or selected compression policy".to_string(),
@@ -716,7 +326,7 @@ pub fn make_capsule_with_recovery_ref(
 ) -> Result<Capsule, String> {
     let prefix = capsule_prefix(label, max_tokens, raw_tokens);
     let exact_ref = recovery_ref.and_then(|reference| exact_recovery_ref(reference, text.len()));
-    let policy = mode.effective_policy();
+    let policy = mode;
     let mut visible = match policy {
         Mode::Exact => format!("{prefix}[exact payload stored; use expand for raw bytes]"),
         Mode::Passthrough => format!("{prefix}{}", text.trim_end()),
@@ -731,7 +341,6 @@ pub fn make_capsule_with_recovery_ref(
             format!("{prefix}{}", text.trim_end())
         }
         Mode::Auto => summarize_lines(text, 18, 12, &prefix),
-        _ => unreachable!(),
     };
     if policy != Mode::Passthrough {
         visible = enforce_token_budget_with_ref(&visible, max_tokens, exact_ref.as_deref());
@@ -990,463 +599,6 @@ fn compact_label(label: &str) -> String {
         .map_or_else(|| label.to_string(), |_| format!("{head}..."))
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct CommandStatus {
-    pub transport_status: String,
-    pub command_success: bool,
-    pub exit_code: Option<i32>,
-    pub failed_segment: Option<String>,
-    pub pipeline_masking_warning: Option<String>,
-    pub pipeline_rerun_command: Option<String>,
-    pub shell_syntax_summary: String,
-    pub status_label: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct PolicyDecision {
-    pub policy: String,
-    pub reason: String,
-    pub family: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ShellRender {
-    pub visible: String,
-    pub policy: PolicyDecision,
-    pub command_status: CommandStatus,
-    pub diagnostics: Vec<Diagnostic>,
-    pub omitted_lines: usize,
-    pub output_strategy: String,
-}
-
-#[derive(Debug, Clone)]
-pub struct ShellRenderInput<'a> {
-    pub command: &'a str,
-    pub stdout: &'a str,
-    pub stderr: &'a str,
-    pub exit_code: Option<i32>,
-    pub timed_out: bool,
-    pub mode: Mode,
-    pub max_visible_tokens: usize,
-    pub stdout_ref: Option<&'a str>,
-    pub stderr_ref: Option<&'a str>,
-    pub combined_ref: Option<&'a str>,
-}
-
-fn shell_input_status(input: &ShellRenderInput<'_>) -> CommandStatus {
-    classify_command_status(
-        input.command,
-        input.stdout,
-        input.stderr,
-        input.exit_code,
-        input.timed_out,
-    )
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ShellViewCase {
-    CompactTiny,
-    CompactDiagnostic,
-    CompactInventory,
-    PolicyBased,
-}
-
-struct ShellRenderContext<'a> {
-    policy: &'a PolicyDecision,
-    status: &'a CommandStatus,
-    combined: &'a str,
-    combined_tokens: usize,
-    max_tokens: usize,
-}
-
-/// Token count of the full shell input against which a rendered diagnostic is
-/// measured. Stream recovery bytes remain unchanged and separately referenced.
-pub fn shell_raw_tokens(
-    command: &str,
-    exit_code: Option<i32>,
-    stdout: &str,
-    stderr: &str,
-) -> usize {
-    count_tokens(&shell_policy::shell_raw_accounting_output(
-        command, exit_code, stdout, stderr,
-    ))
-}
-
-fn shell_raw_tokens_with_combined(command: &str, combined: &str) -> usize {
-    count_tokens(&shell_policy::shell_raw_accounting_output_with_payload(
-        command, combined,
-    ))
-}
-
-pub fn render_shell(input: ShellRenderInput<'_>) -> ShellRender {
-    let combined = shell_policy::shell_stream_output(input.exit_code, input.stdout, input.stderr);
-    let status = shell_input_status(&input);
-    let policy = shell_policy::decide_shell_policy_with_combined(
-        input.command,
-        input.stdout,
-        input.stderr,
-        input.exit_code,
-        input.mode,
-        &combined,
-    );
-    let combined_line_count = combined.lines().count();
-    let combined_tokens = shell_raw_tokens_with_combined(input.command, &combined);
-    let (mut minimal_envelope, mut success_compacted) = (false, false);
-    let max_t = input.max_visible_tokens;
-    let cp = should_compact_tiny_shell(&input, &policy, &status);
-    let (case, cd, ci) = if cp {
-        (ShellViewCase::CompactTiny, false, false)
-    } else if should_compact_short_failure_shell(&input, &policy, &status, &combined) {
-        (ShellViewCase::CompactDiagnostic, true, false)
-    } else if should_compact_repo_inventory_shell(&input, &policy, &status) {
-        (ShellViewCase::CompactInventory, false, true)
-    } else {
-        (ShellViewCase::PolicyBased, false, false)
-    };
-    let context = ShellRenderContext {
-        policy: &policy,
-        status: &status,
-        combined: &combined,
-        combined_tokens,
-        max_tokens: max_t,
-    };
-    let body = build_shell_body(case, &input, &context, &mut success_compacted);
-    let visible = finalize_shell_visible(
-        case,
-        &input,
-        &context,
-        body.as_ref(),
-        success_compacted,
-        &mut minimal_envelope,
-    );
-    ShellRender {
-        omitted_lines: combined_line_count.saturating_sub(visible.lines().count()),
-        visible,
-        policy,
-        command_status: status,
-        diagnostics: Vec::new(),
-        output_strategy: shell_output_strategy(cp, cd, ci, success_compacted, minimal_envelope)
-            .to_string(),
-    }
-}
-
-fn build_shell_body<'a>(
-    case: ShellViewCase,
-    input: &ShellRenderInput<'_>,
-    context: &'a ShellRenderContext<'a>,
-    success_compacted: &mut bool,
-) -> Cow<'a, str> {
-    let ShellRenderContext {
-        policy,
-        status,
-        combined,
-        combined_tokens,
-        max_tokens,
-    } = context;
-    let (combined_tokens, max_tokens) = (*combined_tokens, *max_tokens);
-    match case {
-        ShellViewCase::CompactTiny => Cow::Owned(compact_shell_view(input.stdout)),
-        ShellViewCase::CompactDiagnostic => {
-            Cow::Owned(compact_diagnostic_shell_view(input.stdout, input.stderr))
-        }
-        ShellViewCase::CompactInventory => {
-            Cow::Owned(compact_repo_inventory_view(input.command, input.stdout))
-        }
-        ShellViewCase::PolicyBased => {
-            let mut body = if matches!(policy.policy.as_str(), "exact" | "passthrough") {
-                Cow::Borrowed(*combined)
-            } else {
-                Cow::Owned(match policy.policy.as_str() {
-                    "diagnostic"
-                        if input.exit_code == Some(0)
-                            && status.pipeline_masking_warning.is_some() =>
-                    {
-                        diagnostic_shell_view_with_tail(input.stdout, input.stderr, max_tokens)
-                    }
-                    "diagnostic" => diagnostic_shell_view(input.stdout, input.stderr, max_tokens),
-                    "structured" => {
-                        structured_shell_view(input.command, input.stdout, input.stderr)
-                    }
-                    "dedupe" => dedupe_lines_impl(combined, 6, true),
-                    "diff-aware" => diff_summary(combined, 160),
-                    _ => summarize_lines(combined, 18, 12, ""),
-                })
-            };
-            if should_compact_success_noise(input, status) && policy.policy != "exact" {
-                let mut best_tokens = count_tokens(body.as_ref());
-                if let Some(view) = success_noise_view(input.command, input.stdout, input.stderr) {
-                    let view_tokens = count_tokens(&view);
-                    if view_tokens < best_tokens
-                        || (policy.policy == "diagnostic" && view_tokens * 2 <= combined_tokens)
-                    {
-                        body = Cow::Owned(view);
-                        best_tokens = view_tokens;
-                        *success_compacted = true;
-                    }
-                }
-                if matches!(
-                    policy.policy.as_str(),
-                    "dedupe" | "passthrough" | "diagnostic"
-                ) && best_tokens > shell_success_summary_budget(max_tokens)
-                {
-                    let squeezed = summarize_tokens(
-                        body.as_ref(),
-                        shell_success_summary_budget(max_tokens),
-                        "",
-                    );
-                    if count_tokens(&squeezed) < best_tokens {
-                        body = Cow::Owned(squeezed);
-                        *success_compacted = true;
-                    }
-                }
-            }
-            if policy.policy != "exact" && policy.policy != "passthrough" {
-                body = Cow::Owned(mask_visible_secrets(body.as_ref()));
-            }
-            body
-        }
-    }
-}
-
-fn finalize_shell_visible(
-    case: ShellViewCase,
-    input: &ShellRenderInput<'_>,
-    context: &ShellRenderContext<'_>,
-    body: &str,
-    success_compacted: bool,
-    minimal_envelope: &mut bool,
-) -> String {
-    let ShellRenderContext {
-        policy,
-        status,
-        combined_tokens,
-        max_tokens,
-        ..
-    } = context;
-    let (combined_tokens, max_tokens) = (*combined_tokens, *max_tokens);
-    match case {
-        ShellViewCase::CompactTiny => body.to_string(),
-        ShellViewCase::CompactDiagnostic => enforce_token_budget(
-            &compact_diagnostic_shell_capsule(input, status, body),
-            max_tokens,
-        ),
-        ShellViewCase::CompactInventory => enforce_token_budget(
-            &compact_repo_inventory_shell_capsule(input, body),
-            max_tokens,
-        ),
-        ShellViewCase::PolicyBased => {
-            let mut vis = format_shell_status_header(input, policy, status, body);
-            if (count_tokens(&vis) > combined_tokens || success_compacted)
-                && safe_auto_success(input, status)
-            {
-                let minimal = format_minimal_shell_ok(input.combined_ref, body);
-                if count_tokens(&minimal) < count_tokens(&vis) {
-                    *minimal_envelope = true;
-                    vis = minimal;
-                }
-            }
-            enforce_token_budget(&vis, max_tokens)
-        }
-    }
-}
-fn shell_output_strategy(cp: bool, cd: bool, ci: bool, sc: bool, me: bool) -> &'static str {
-    [
-        (cp, "compact_adaptive_shell"),
-        (cd, "compact_diagnostic_shell"),
-        (ci, "compact_inventory_shell"),
-        (sc, "compact_success_shell"),
-        (me, "minimal_envelope_shell"),
-    ]
-    .into_iter()
-    .find_map(|(active, strategy)| active.then_some(strategy))
-    .unwrap_or("exact_first_adaptive_shell")
-}
-
-fn push_shell_kv(out: &mut String, k: &str, v: &str) {
-    out.push_str(k);
-    out.push_str(": ");
-    out.push_str(v);
-    out.push('\n');
-}
-
-fn push_optional_shell_kv(out: &mut String, k: &str, v: Option<&str>) {
-    if let Some(val) = v {
-        push_shell_kv(out, k, val);
-    }
-}
-
-fn push_shell_status(out: &mut String, status: &CommandStatus, compact: bool) {
-    push_shell_kv(
-        out,
-        "exit_code",
-        &status
-            .exit_code
-            .map_or("null".to_string(), |v| v.to_string()),
-    );
-    for (key, value, always_mask) in [
-        ("failed_segment", status.failed_segment.as_deref(), false),
-        (
-            "pipeline_masking_warning",
-            status.pipeline_masking_warning.as_deref(),
-            false,
-        ),
-        (
-            "pipeline_rerun_command",
-            status.pipeline_rerun_command.as_deref(),
-            true,
-        ),
-    ] {
-        let Some(value) = value else { continue };
-        let value = if compact && key == "pipeline_masking_warning" && value.contains("mask") {
-            "inspect combined_ref".to_string()
-        } else if compact || always_mask {
-            mask_visible_secrets(value)
-        } else {
-            value.to_string()
-        };
-        push_shell_kv(out, key, &value);
-    }
-}
-
-fn format_shell_status_header(
-    input: &ShellRenderInput<'_>,
-    policy: &PolicyDecision,
-    status: &CommandStatus,
-    body: &str,
-) -> String {
-    let cmd = if matches!(policy.policy.as_str(), "exact" | "passthrough") {
-        input.command.to_string()
-    } else {
-        mask_visible_secrets(input.command)
-    };
-    let mut vis = "# shell\n".to_string();
-    push_shell_kv(&mut vis, "command", &cmd);
-    vis.push_str(&format!("policy: {} ({})\n", policy.policy, policy.reason));
-    push_shell_kv(&mut vis, "status", &status.status_label);
-    vis.push_str(&format!("command_success: {}\n", status.command_success));
-    push_shell_status(&mut vis, status, false);
-    // The combined payload is the single primary recovery anchor. Stream and
-    // capture refs remain machine-visible in ToolResponse::refs, but repeating
-    // them in the capsule made one shell action mint up to four visible refs.
-    push_optional_shell_kv(&mut vis, "combined_ref", input.combined_ref);
-    vis + "\n" + body.trim_end()
-}
-
-fn format_minimal_shell_ok(combined_ref: Option<&str>, body: &str) -> String {
-    let mut min = "# shell ok".to_string();
-    if let Some(r) = combined_ref {
-        min += &format!("\ncombined_ref: {r}");
-    }
-    let trimmed = body.trim_end();
-    if !trimmed.is_empty() {
-        min = min + "\n" + trimmed;
-    }
-    min
-}
-
-/// Compacts verified byte-identical successful repeats; all other runs render normally.
-pub fn render_shell_repeat(input: ShellRenderInput<'_>, repeat_seen: u32) -> ShellRender {
-    let status = shell_input_status(&input);
-    if repeat_seen >= 2 && safe_auto_success(&input, &status) && input.combined_ref.is_some() {
-        let combined =
-            shell_policy::shell_stream_output(input.exit_code, input.stdout, input.stderr);
-        let raw_tokens =
-            shell_raw_tokens(input.command, input.exit_code, input.stdout, input.stderr);
-        let mut visible = format!("# shell ok (unchanged; run {repeat_seen})");
-        if let Some(r) = input.combined_ref {
-            visible += &format!("\ncombined_ref: {r}");
-        }
-        if count_tokens(&visible) < raw_tokens {
-            let visible = enforce_token_budget(&visible, input.max_visible_tokens);
-            return ShellRender {
-                omitted_lines: combined
-                    .lines()
-                    .count()
-                    .saturating_sub(visible.lines().count()),
-                visible,
-                policy: PolicyDecision {
-                    policy: "passthrough".to_string(),
-                    reason: "verified unchanged repeat".to_string(),
-                    family: shell_family(input.command, input.stdout, input.stderr),
-                },
-                command_status: status,
-                diagnostics: Vec::new(),
-                output_strategy: "repeat_unchanged_shell".to_string(),
-            };
-        }
-    }
-    render_shell(input)
-}
-
-/// Recognizes compiler/test diagnostic continuation lines.
-fn is_critical_continuation_line(line: &str) -> bool {
-    if line.starts_with([' ', '\t']) {
-        return true;
-    }
-    let t = line.trim_start();
-    let is_num = |n: &str| !n.is_empty() && n.chars().all(|c| c.is_ascii_digit());
-    starts_with_any(t, "-->|^|=|note:|help:")
-        || t.split_once(' ')
-            .is_some_and(|(n, r)| is_num(n) && r.trim_start().starts_with('|'))
-}
-
-const CARGO_TEST_OK_SUFFIXES: &str = "... ok|... ignored";
-
-fn is_cargo_test_ok_line(trimmed: &str) -> bool {
-    trimmed.starts_with("test ")
-        && ends_with_any(trimmed, CARGO_TEST_OK_SUFFIXES)
-        && !trimmed.contains("FAILED")
-}
-
-fn is_pytest_pass_marker(trimmed: &str) -> bool {
-    trimmed.contains("::")
-        && ends_with_any(trimmed, "PASSED|XPASS|SKIPPED")
-        && !contains_any(trimmed, "FAILED|ERROR")
-}
-
-fn is_pytest_summary_line(trimmed: &str) -> bool {
-    trimmed.starts_with("==")
-        && trimmed.ends_with("==")
-        && contains_any(trimmed, " passed| skipped")
-        && !contains_any(trimmed, " failed| error")
-}
-
-const PYTEST_NOISE_PREFIXES: &str =
-    "platform |rootdir:|configfile:|cachedir:|plugins:|collected |collecting ";
-
-fn is_pytest_noise_line(t: &str) -> bool {
-    starts_with_any(t, PYTEST_NOISE_PREFIXES)
-        || (!t.is_empty() && t.chars().all(|c| matches!(c, '.' | 's' | 'x' | 'X')))
-        || (t.starts_with("==") && t.ends_with("==") && t.contains("session starts"))
-        || (t.contains("::") && (ends_with_any(t, "PASSED|SKIPPED") || t.contains(" PASSED ")))
-        || ends_with_any(t, "XPASS|SKIPPED")
-        || t.strip_suffix(']')
-            .map(|s| s.trim_end_matches(|c: char| c.is_ascii_digit() || matches!(c, '%' | '[')))
-            .is_some_and(|b| {
-                !b.is_empty() && b.trim().chars().all(|c| matches!(c, '.' | 's' | 'x' | 'X'))
-            })
-}
-
-const NPM_SUMMARY_PREFIXES: &str =
-    "added |removed |changed |audited |found 0 vulnerabilities|up to date";
-
-fn is_npm_summary_line(t: &str) -> bool {
-    starts_with_any(t, NPM_SUMMARY_PREFIXES)
-}
-
-const NPM_NOISE_PREFIXES: &str =
-    "npm http|npm timing|npm verb|npm sill|npm info|run `npm fund`|run \"npm fund\"";
-
-fn is_npm_noise_line(t: &str) -> bool {
-    starts_with_any(t, NPM_NOISE_PREFIXES) || t.contains("packages are looking for funding")
-}
-
-const GIT_PROGRESS_PREFIXES: &str = "remote: Enumerating objects|remote: Counting objects|remote: Compressing objects|remote: Total|Receiving objects|Resolving deltas|Counting objects|Compressing objects|Writing objects|Unpacking objects";
-
-fn git_progress_prefix(t: &str) -> Option<&'static str> {
-    GIT_PROGRESS_PREFIXES.split('|').find(|p| t.starts_with(p))
-}
-
 /// Selects information-dense lines within a soft budget while always retaining criticals.
 pub fn summarize_tokens(text: &str, max_tokens: usize, prefix: &str) -> String {
     if max_tokens == 0 {
@@ -1621,102 +773,6 @@ fn normalize_digit_runs(line: &str) -> String {
     out
 }
 
-fn should_compact_short_failure_shell(
-    input: &ShellRenderInput<'_>,
-    policy: &PolicyDecision,
-    status: &CommandStatus,
-    combined: &str,
-) -> bool {
-    // Exit 0 && !timeout is already command_success (tokenzero-3ry6).
-    input.mode.effective_policy() == Mode::Auto
-        && policy.policy == "diagnostic"
-        && !status.command_success
-        && input.exit_code.is_some()
-        && !input.timed_out
-        && input.combined_ref.is_some()
-        && (!input.stdout.trim().is_empty() || !input.stderr.trim().is_empty())
-        && !has_visible_secret_marker(combined)
-        && !has_protected_failure_context(combined)
-        && count_tokens(combined) <= 160
-        && combined.lines().count() <= 20
-        && (looks_diagnostic(combined) || status.failed_segment.is_some())
-}
-
-fn compact_diagnostic_shell_view(stdout: &str, stderr: &str) -> String {
-    let (mut critical, mut fallback) = (None, None);
-    for line in stdout.lines().chain(stderr.lines()) {
-        let line = line.trim();
-        if line.is_empty() || is_shell_diagnostic_boilerplate(line) {
-            continue;
-        }
-        if looks_failure_anchor_line(line) {
-            return line.to_string();
-        }
-        let slot = if looks_critical_line(line) {
-            &mut critical
-        } else {
-            &mut fallback
-        };
-        slot.get_or_insert_with(|| line.to_string());
-    }
-    critical
-        .or(fallback)
-        .unwrap_or_else(|| "diagnostic output omitted; see combined_ref".to_string())
-}
-
-fn compact_diagnostic_shell_capsule(
-    input: &ShellRenderInput<'_>,
-    status: &CommandStatus,
-    body: &str,
-) -> String {
-    let mut visible = "# shell\n".to_string();
-    push_shell_kv(&mut visible, "status", &status.status_label);
-    push_shell_status(&mut visible, status, true);
-    if input.stderr.is_empty() {
-        if let Some(stdout_ref) = input.stdout_ref.filter(|_| !input.stdout.is_empty()) {
-            push_shell_kv(&mut visible, "stdout_ref", stdout_ref);
-        }
-    } else if let Some(stderr_ref) = input.stderr_ref.filter(|_| !input.stderr.is_empty()) {
-        push_shell_kv(&mut visible, "stderr_ref", stderr_ref);
-    }
-    push_optional_shell_kv(&mut visible, "combined_ref", input.combined_ref);
-    visible + "\n" + body.trim_end()
-}
-
-const SHELL_DIAG_BOILERPLATE_PREFIXES: &str =
-    "+ CategoryInfo|+ FullyQualifiedErrorId|At line:|+ ~|~~~~";
-const FAILURE_ANCHOR_NEEDLES: &str =
-    "error|failure|failed|panic|traceback|exception|assertion|not ok";
-const SECRET_MARKERS: &str = "aws_secret_access_key=|aws_access_key_id=|token=|password=|secret=|api_key=|apikey=|x-api-key:|api-key:|authorization:|bearer ";
-const SECRET_TOKEN_PREFIXES: &str = "sk-|sk-proj-|ghp_|github_pat_|AKIA|glpat-|xoxb-|xoxp-";
-
-fn is_shell_diagnostic_boilerplate(line: &str) -> bool {
-    starts_with_any(line.trim_start(), SHELL_DIAG_BOILERPLATE_PREFIXES)
-}
-
-fn looks_failure_anchor_line(line: &str) -> bool {
-    let lower = line.to_ascii_lowercase();
-    FAILURE_ANCHOR_NEEDLES
-        .split('|')
-        .any(|needle| lower.contains(needle))
-}
-
-fn has_visible_secret_marker(text: &str) -> bool {
-    contains_any(&text.to_ascii_lowercase(), SECRET_MARKERS)
-        || text
-            .split_whitespace()
-            .any(|word| starts_with_any(word, SECRET_TOKEN_PREFIXES))
-}
-
-fn has_protected_failure_context(text: &str) -> bool {
-    let lower = text.to_ascii_lowercase();
-    contains_any(&lower, "assertion failed|traceback")
-        || (lower.contains("left:") && lower.contains("right:"))
-        || (lower.contains("test ") && lower.contains("failed") && lower.contains(".rs:"))
-}
-
-const DIFF_LINE_PREFIXES: &str = "diff --git|index |--- |+++ |@@|rename |deleted file|new file|+|-";
-
 pub fn diff_summary(text: &str, max_lines: usize) -> String {
     let out: Vec<_> = text
         .lines()
@@ -1743,10 +799,9 @@ pub fn mask_visible_secrets(text: &str) -> String {
 
 fn mask_secret_line(line: &str) -> String {
     let low = line.to_ascii_lowercase();
-    // Longer keys first so aws_secret_access_key= is not missed because
-    // secret= does not match secret_access. Keep trailing space on "bearer "
-    // so the marker matches SECRET_MARKERS and the mask lands after the
-    // separator (not glued as "bearer[masked]").
+    // Longer keys first so aws_secret_access_key= is not missed because secret= does not
+    // match secret_access. Keep trailing space on "bearer " so the marker matches
+    // SECRET_MARKERS and the mask lands after the separator (not glued as "bearer[masked]").
     if let Some((key, pos)) = [
         "aws_secret_access_key=",
         "aws_access_key_id=",
@@ -1868,17 +923,6 @@ fn leading_ws(line: &str) -> usize {
     line.chars().take_while(|c| *c == ' ' || *c == '\t').count()
 }
 
-/// Generates a legacy short ref: `<prefix>` plus the first eight SHA-256 bytes.
-pub fn id_for(prefix: char, text: &str) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(text.as_bytes());
-    let mut out = format!("{prefix}");
-    for byte in &hasher.finalize()[..8] {
-        push_hex_byte(&mut out, *byte);
-    }
-    out
-}
-
 const CODE_EXTENSIONS: &[&str] = &[
     "rs", "py", "js", "jsx", "ts", "tsx", "go", "java", "c", "cc", "cpp", "h", "hpp",
 ];
@@ -1918,140 +962,27 @@ pub fn detect_content_type(text: &str, path: Option<&Path>) -> ContentType {
     }
 }
 
-pub fn ref_record(kind: &str, ref_id: String, bytes: usize) -> RefRecord {
-    RefRecord {
-        kind: kind.to_string(),
-        ref_id,
-        bytes,
-        live: true,
-    }
-}
-
 pub mod decision_view;
 pub mod live_pareto;
 pub mod model_artifacts;
-pub mod operation_abi;
 pub mod output_novelty;
-mod protocol_atoms;
 pub mod provider_cache;
 pub mod reasoning_state;
-mod render;
 pub use live_pareto::{
     EvidenceFreshness, LiveCandidate, LiveEntry, LiveParetoDecision, MetricOrder, ProtectedOutcome,
     VerifierIdentity, decide_live_pareto,
 };
 pub mod representation_economics;
-mod shell_display;
-mod shell_family;
-mod shell_parse;
-mod shell_policy;
-mod shell_quote;
 pub mod token_classes;
 mod tokens;
 
-use render::domain::*;
-use render::noise::*;
-use shell_display::*;
-use shell_parse::*;
-use tokens::*;
-
-pub use protocol_atoms::{
-    AckClass, PORTABLE_ONE_TOKEN_ATOMS, ProtocolTokenizer, is_verified_one_token_atom,
-    portable_one_token_atoms, render_ack,
-};
-pub use render::domain::{
-    diagnostic_shell_view, diagnostic_shell_view_with_tail, is_repo_inventory_command,
-    is_search_shell_command, repo_inventory_view, structured_shell_view,
-};
-pub use shell_display::{
-    shell_display_command_from_argv, shell_display_command_from_argv_for_platform,
-};
-pub use shell_family::shell_family;
-pub use shell_policy::{
-    classify_command_status, decide_shell_policy, shell_combined_output,
-    shell_raw_accounting_output,
-};
-pub use shell_quote::{
-    argv_has_shell_operator_tokens, contains_platform_shell_syntax, contains_shell_syntax,
-    host_shell_platform, is_shell_operator_token, is_windows_shell_builtin, is_windows_shell_host,
-    looks_like_powershell_syntax, quote_for, quote_posix, quote_powershell, quote_windows_cmd,
-    split_command_string, split_command_string_for_platform,
-};
 pub use tokens::{
-    BYTES_ESTIMATOR_ID, FORBIDDEN_MCP_ENGINE_IDENTITY, FORBIDDEN_MCP_REGISTRY_ENGINE,
-    LEXICAL_ESTIMATOR_ID, TokenizerFamily, TokenizerIdPreflightError, TokenizerMetadata,
-    UNLABELED_ESTIMATE_TOKENIZER_PREFIX, VISIBLE_BUDGET_LOSSY_DECLARATION, active_model_id,
-    active_tokenizer_metadata, count_tokens, count_tokens_for_model, count_tokens_tokenizer_id,
-    enforce_token_budget, enforce_token_budget_with_ref, is_forbidden_mcp_tokenizer_identity,
+    BYTES_ESTIMATOR_ID, LEXICAL_ESTIMATOR_ID, TokenizerFamily, TokenizerIdPreflightError,
+    TokenizerMetadata, UNLABELED_ESTIMATE_TOKENIZER_PREFIX, VISIBLE_BUDGET_LOSSY_DECLARATION,
+    active_model_id, active_tokenizer_metadata, count_tokens, count_tokens_for_model,
+    count_tokens_tokenizer_id, enforce_token_budget, enforce_token_budget_with_ref,
     pack_to_token_boundary, pack_to_token_boundary_for_model,
     pack_to_token_boundary_for_model_with_char_limit, pack_to_token_boundary_with_char_limit,
     prefix_end_for_kept_lines, preflight_tokenizer_id, savings_ratio, savings_ratio_u64,
     sha256_hex, tokenizer_metadata,
 };
-
-#[cfg(test)]
-mod never_worse_capsule_tests {
-    use super::{Mode, count_tokens, make_capsule, make_capsule_with_recovery_ref, savings_ratio};
-
-    #[test]
-    fn exact_stub_that_costs_more_than_raw_passthroughs() {
-        let text = "hi";
-        let capsule = make_capsule(text, Mode::Exact, 64, None).expect("capsule");
-        assert_eq!(capsule.text, text);
-        assert_eq!(capsule.visible_tokens, count_tokens(text));
-        assert_eq!(capsule.mode, Mode::Passthrough);
-        assert_eq!(
-            savings_ratio(capsule.raw_tokens, capsule.visible_tokens),
-            0.0
-        );
-    }
-
-    #[test]
-    fn recovery_handle_wrapper_does_not_inflate_tiny_payload() {
-        let text = "hi";
-        let capsule = make_capsule_with_recovery_ref(
-            text,
-            count_tokens(text),
-            Mode::Exact,
-            64,
-            None,
-            Some("z://blob/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa#B0-2"),
-        )
-        .expect("capsule");
-        assert_eq!(capsule.text.trim_end(), text);
-        assert!(
-            capsule.visible_tokens <= count_tokens(text),
-            "visible={} raw={}",
-            capsule.visible_tokens,
-            count_tokens(text)
-        );
-    }
-
-    #[test]
-    fn canonical_line_and_plus_byte_fragments_are_recovery_selectors() {
-        let text = (0..80)
-            .map(|i| format!("tok{i:02}"))
-            .collect::<Vec<_>>()
-            .join(" ");
-        let hash = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
-        for selector in ["#L1-3", "#L1-L3", "#B0+5"] {
-            let handle = format!("tz://blob/{hash}{selector}");
-            let capsule = make_capsule_with_recovery_ref(
-                &text,
-                count_tokens(&text),
-                Mode::Structured,
-                8,
-                None,
-                Some(&handle),
-            )
-            .expect("capsule");
-            assert!(
-                capsule.exact_refs.iter().any(|r| r.contains(selector))
-                    || capsule.text.contains(selector),
-                "expand grammar {selector} must be a recovery selector, got text={:?} refs={:?}",
-                capsule.text,
-                capsule.exact_refs
-            );
-        }
-    }
-}

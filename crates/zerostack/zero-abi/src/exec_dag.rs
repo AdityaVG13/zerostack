@@ -1,16 +1,6 @@
-//! Operation dependency DAG surface (V6-R15, ZS-EXEC-001).
-//!
-//! A plan's operations form an explicit dependency DAG: every node lists the
-//! node ids it depends on, and the DAG is validated fail-closed (unique ids,
-//! existing deps, no self-dep, acyclic). Deterministic traversals --
-//! [`ExecDag::topo_order`], [`ExecDag::layers`] (independent/batchable
-//! groups), [`ExecDag::critical_path`] -- are the dependency-aware
-//! scheduling surface. Decision-boundary nodes mark where execution must
-//! halt for a protected decision; the contingent-policy crossing rule
-//! ([`ExecDag::crossing_rule`]) is the hub-side rule that crossing a
-//! boundary requires an attached contingent policy, fail-closed otherwise.
-//! Per-observation resolution stays with the DecisionGate (zero-codemode);
-//! this module owns the structural rule.
+//! Operation dependency DAG surface. A plan's operations form an explicit
+//! dependency DAG: every node lists the node ids it depends on, and the DAG is validated
+//! fail-closed (unique ids, existing deps, no self-dep, acyclic).
 
 use std::collections::{BTreeSet, HashMap};
 
@@ -79,7 +69,7 @@ impl ExecNode {
     }
 }
 
-/// A plan as an explicit dependency DAG (ZS-EXEC-001).
+/// A plan as an explicit dependency DAG.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ExecDag {
     /// Nodes in arbitrary insertion order; order never affects semantics.
@@ -179,11 +169,9 @@ impl ExecDag {
         Ok(order)
     }
 
-    /// Batchable independent groups (ZS-EXEC-001/005): layer `k` holds the
-    /// nodes whose dependencies all sit in earlier layers. Nodes inside one
-    /// layer are mutually independent and may run concurrently; nodes across
-    /// layers are dependency-ordered and never reordered. Layers are sorted
-    /// by node id, so the grouping is deterministic.
+    /// Batchable independent groups: layer `k` holds the nodes whose dependencies all
+    /// sit in earlier layers. Nodes inside one layer are mutually independent and may run concurrently;
+    /// nodes across layers are dependency-ordered and never reordered.
     pub fn layers(&self) -> Result<Vec<Vec<String>>, ExecDagError> {
         self.validate()?;
         let mut remaining: HashMap<&str, usize> = HashMap::with_capacity(self.nodes.len());
@@ -280,12 +268,9 @@ impl ExecDag {
             .any(|n| n.kind == ExecNodeKind::DecisionBoundary)
     }
 
-    /// Hub-side contingent-policy crossing rule (ZS-EXEC-001): a plan with
-    /// decision-boundary nodes may be executed only with a contingent policy
-    /// attached. No policy and a boundary present => fail closed naming the
-    /// first boundary in deterministic topological order. A policy must
-    /// itself validate; per-observation resolution stays with the
-    /// DecisionGate at runtime.
+    /// Hub-side contingent-policy crossing rule: a plan with decision-boundary nodes may
+    /// be executed only with a contingent policy attached. No policy and a boundary present => fail
+    /// closed naming the first boundary in deterministic topological order.
     pub fn crossing_rule(&self, policy: Option<&ContingentPolicy>) -> Result<(), ExecDagError> {
         if !self.requires_policy() {
             return Ok(());
@@ -320,7 +305,7 @@ impl ExecDag {
     }
 }
 
-/// Fail-closed DAG errors (ZS-EXEC-001).
+/// Fail-closed DAG errors.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ExecDagError {
     /// A node id was empty.

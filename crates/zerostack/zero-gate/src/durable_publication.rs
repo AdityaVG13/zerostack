@@ -1,18 +1,15 @@
-//! Journal-bound durable publication gate.
-//!
-//! The two-phase kernel can release an in-memory buffered commit without a
-//! filesystem claim. A durable claim requires this additional gate and native
-//! profile evidence. Rename alone is never accepted as durable publication.
+//! Journal-bound durable publication gate. The two-phase kernel can release an in-memory
+//! buffered commit without a filesystem claim. A durable claim requires this additional
+//! gate and native profile evidence. Rename alone is never accepted as durable publication.
 
 use std::{collections::BTreeSet, fmt};
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
-use zero_abi::{Sha256Digest as AbiDigest, canonical_json};
+use zero_abi::{DurableProfile, DurableProfileId, Sha256Digest as AbiDigest, canonical_json};
 use zero_cert::{CompletenessWitness, Query, VerifiedEvidence};
 use zero_store::{
-    DurableProfileId, DurableProfile, JournalBinding, JournalFailureCode, PublishedRoot,
-    RecoveryOutcome, RecoveryReceipt,
+    JournalBinding, JournalFailureCode, RecoveryOutcome, RecoveryReceipt, RootPublicationReceipt,
 };
 
 use crate::two_phase::{
@@ -100,9 +97,8 @@ pub enum NativeDurabilityResult {
     NotRun,
 }
 
-/// Canonical payload produced by a native journal runner.
-///
-/// This receipt is data, not authority. The durable gate accepts it only after
+/// Canonical payload produced by a native journal runner. This receipt
+/// is data, not authority. The durable gate accepts it only after
 /// `zero-cert` has returned `VerifiedEvidence` for the exact payload bytes.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -122,10 +118,8 @@ pub struct NativeDurabilityReceipt {
     pub result: NativeDurabilityResult,
 }
 
-/// Owned result of verifying a native receipt through `zero-cert`.
-///
-/// Fields are private so callers cannot turn prose or booleans into trusted
-/// durability evidence.
+/// Owned result of verifying a native receipt through `zero-cert`. Fields are
+/// private so callers cannot turn prose or booleans into trusted durability evidence.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct VerifiedDurableFilesystemEvidence {
     durable_profile_id: DurableProfileId,
@@ -272,7 +266,7 @@ pub struct DurablePublicationEvidence {
     pub schema_version: u16,
     pub journal_binding: JournalBinding,
     pub recovery_receipt: RecoveryReceipt,
-    pub published_root: PublishedRoot,
+    pub published_root: RootPublicationReceipt,
     pub filesystem_evidence: VerifiedDurableFilesystemEvidence,
 }
 impl DurablePublicationEvidence {
@@ -423,4 +417,3 @@ impl CommitReceipt {
         Ok(published)
     }
 }
-

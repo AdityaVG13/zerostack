@@ -1,26 +1,4 @@
-//! ZS-METRIC-006: Frontier Closure decomposition.
-//!
-//! The optimized cost of a task decomposes into exactly three exhaustive
-//! terms, each normalized by the baseline cost:
-//!
-//! - **preparation**: normalized preparation work,
-//! - **prepared-path**: work on the prepared (indexed) path,
-//! - **novelty+fallback**: novel work plus fallback work.
-//!
-//! Invariants enforced here:
-//!
-//! - **Nonnegative terms.** Every term is an unsigned amount; a negative term
-//!   cannot be constructed.
-//! - **Closure.** The three terms sum exactly to the optimized total, so the
-//!   sum of the normalized terms equals the complete optimized/baseline
-//!   ratio. A wire closure whose terms disagree with its optimized total is
-//!   refused on decode.
-//! - **Zero baseline is a refusal.** Without a denominator no normalized term
-//!   exists.
-//! - **Largest limiting burden.** The normalized term with the largest value
-//!   identifies the limiting avenue; ties break in canonical term order.
-//!
-//! All arithmetic is exact reduced rational arithmetic; there are no floats.
+//! Frontier Closure decomposition.
 
 use std::error::Error;
 use std::fmt;
@@ -143,16 +121,7 @@ impl FrontierClosure {
         reduce(self.optimized_total, self.baseline_total)
     }
 
-    /// Closure checker: the normalized terms sum exactly to the complete
-    /// optimized/baseline ratio.
-    ///
-    /// Because construction enforces `preparation + prepared_path +
-    /// novelty_fallback == optimized_total`, the sum of the normalized terms
-    /// is `(t1 + t2 + t3) / baseline == optimized / baseline` exactly. The
-    /// checker recomputes the identity in its unreduced form, which is
-    /// exactly equivalent: all three normalized terms share the baseline
-    /// denominator, so `t1/b + t2/b + t3/b == o/b` holds iff
-    /// `t1 + t2 + t3 == o`.
+    /// Closure checker: the normalized terms sum exactly to the complete optimized/baseline ratio.
     pub fn closure_holds(&self) -> bool {
         self.preparation
             .checked_add(self.prepared_path)
@@ -160,10 +129,8 @@ impl FrontierClosure {
             == Some(self.optimized_total)
     }
 
-    /// The largest limiting burden: the term with the largest normalized
-    /// value; ties break in canonical term order.
-    ///
-    /// `None` when every term is zero: there is no burden to report.
+    /// The largest limiting burden: the term with the largest normalized value; ties break
+    /// in canonical term order. `None` when every term is zero: there is no burden to report.
     pub fn largest_limiting_burden(&self) -> Option<LimitingBurden> {
         let mut best: Option<(FrontierTerm, (u64, u64), u64)> = None;
         for term in FrontierTerm::ALL {
@@ -269,4 +236,3 @@ fn reduce(num: u64, den: u64) -> (u64, u64) {
         den / u64::try_from(divisor).expect("divides den"),
     )
 }
-

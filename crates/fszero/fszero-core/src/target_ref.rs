@@ -1,20 +1,4 @@
-//! Snap-to-file target grammar (bead fszero-snap-to-file-targets-99q7).
-//!
-//! ONE grammar, defined here, adopted by every FSZero discovery surface and by
-//! GraphZero (bead 5htnw). Full prose: docs/design/target-ref-grammar.md.
-//!
-//! Canonical target ref: `<path>#L<start>-L<end>` (1-based, inclusive).
-//! `fs read` accepts that string VERBATIM (see read_ops::do_read).
-//!
-//! Canonical hit record (one per discovery hit):
-//! ```text
-//! HIT <path>#L<start>-L<end> kind=<match-kind> role=<definition|import|other> sym=<enclosing symbol>
-//! | <line-no>: <line text>
-//! ```
-//! The `|` lines are the INLINED content window: a hit is never preview-only
-//! while the payload stays under [`TARGET_INLINE_MAX_BYTES`].
-//! `role` is a cheap byte-heuristic on the matched line (fszero-nqbg) so agents
-//! can jump to declarations first; no AST on the hot path.
+//! Canonical snap-to-file target grammar used by FSZero discovery and GraphZero.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -219,8 +203,8 @@ fn enclosing_symbol(lines: &[&str], line_no: usize) -> Option<String> {
 pub struct HitRenderer {
     root: PathBuf,
     cache: HashMap<String, Option<String>>,
-    /// When set (multi-keyword search), inline windows keep only matching lines
-    /// plus `...` gaps (fszero-04bn progressive disclosure).
+    /// When set (multi-keyword search), inline windows keep only
+    /// matching lines plus `...` gaps ( progressive disclosure).
     keywords: Vec<String>,
 }
 
@@ -247,7 +231,6 @@ impl HitRenderer {
     }
 
     /// One canonical hit record: target ref + intent metadata + inlined window.
-    ///
     /// The enclosing symbol is inferred from the file text.
     pub fn render_hit(&mut self, file_key: &str, line_no: usize, kind: &str) -> String {
         self.render_hit_inner(file_key, line_no, kind, None)

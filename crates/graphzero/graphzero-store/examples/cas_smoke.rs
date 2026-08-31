@@ -10,7 +10,7 @@ fn main() {
     println!("put -> {hash} (idempotent)");
     let resolver = graphzero_store::ExpandResolver::new(std::path::Path::new(&root), None).unwrap();
     let hit = resolver
-        .resolve_blob(&hash, &format!("gz://blob/{hash}"))
+        .resolve_blob(&hash, &format!("z://blob/{hash}"))
         .unwrap();
     println!("resolve -> {} bytes via '{}'", hit.bytes.len(), hit.source);
 }

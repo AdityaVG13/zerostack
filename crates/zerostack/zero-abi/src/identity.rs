@@ -1,25 +1,4 @@
-//! Identity kernel completion (ZS-KERNEL-001/002/003/006/007/008,
-//! ZS-CONTRACT-001/004).
-//!
-//! One rooted ABI version, one canonical byte path per object class, one
-//! parent-rooted authoritative event log, one project-level successor CAS,
-//! structured task contracts with protected-scope obligations, and payload
-//! formation receipts.
-//!
-//! Fail-closed laws:
-//! - [`canonical_object_bytes`] is the ONLY encoding path; unknown object
-//!   classes are rejected, and every root binds class, ABI version, and the
-//!   `sha256` algorithm tag in its preimage (KERNEL-001/002/007).
-//! - A task-contract field change yields a different contract root, which
-//!   invalidates every dependent formation receipt (CONTRACT-001).
-//! - An uncovered required protected obligation is `Unknown` and can never be
-//!   advertised as equivalent (CONTRACT-004).
-//! - A formation receipt never verifies a relabeled payload (KERNEL-003).
-//! - Event-log replay fails closed on missing or reordered events via root
-//!   chaining (KERNEL-006).
-//! - The successor CAS advances only on an exact declared parent with a
-//!   verified new root; any crash before commit leaves the old root
-//!   (KERNEL-008).
+//! Identity kernel completion.
 
 use std::{error::Error, fmt};
 
@@ -28,6 +7,27 @@ use serde_json::Value;
 
 use crate::Sha256Digest;
 use crate::digest::sha256;
+
+/// Closed identity set for the three domain engines composed by ZeroStack.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub enum EngineIdentity {
+    #[serde(rename = "fszero")]
+    FsZero,
+    #[serde(rename = "graphzero")]
+    GraphZero,
+    #[serde(rename = "tokenzero")]
+    TokenZero,
+}
+
+impl EngineIdentity {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::FsZero => "fszero",
+            Self::GraphZero => "graphzero",
+            Self::TokenZero => "tokenzero",
+        }
+    }
+}
 
 pub const ROOTED_ABI_VERSION: &str = "zerostack.racc";
 pub const ROOT_HASH_ALGORITHM: &str = "sha256";
@@ -145,10 +145,7 @@ impl fmt::Display for IdentityKernelError {
 
 impl Error for IdentityKernelError {}
 
-// ---------------------------------------------------------------------------
-// Rooted ABI: versioned canonical bytes + algorithm-tagged object roots
-// (ZS-KERNEL-001/002/007).
-// ---------------------------------------------------------------------------
+// Rooted ABI: versioned canonical bytes + algorithm-tagged object roots.
 
 /// Every object class that can be rooted. `canonical_object_bytes` is the
 /// single canonical encoding path for these classes; unknown classes are
@@ -164,7 +161,7 @@ pub enum ObjectClass {
     ExecuteResult,
     ContinuationHandle,
     ContinuationCompactRecord,
-    /// TokenZero/GraphZero decision-view objects (ZS-ADAPTER-008) rooted
+    /// TokenZero/GraphZero decision-view objects rooted
     /// under the same canonical byte path as every other class.
     DecisionView,
     /// FSZero/GraphZero delta objects (exact-delta roots) rooted under the
@@ -173,11 +170,11 @@ pub enum ObjectClass {
     /// zero-gate authority objects (permits, assets, admission records)
     /// rooted under the same canonical byte path.
     AuthorityObject,
-    /// W9-E trusted safe-expand handle (zerostack-qg2a): the self-rooted
-    /// seal of every authority binding of one exact expansion.
+    /// Trusted safe-expand handle sealing every authority binding
+    /// for one exact expansion.
     SafeExpandHandle,
     /// Rooted receipt for migrating a legacy rooted object into the current
-    /// ABI (ZS-KERNEL-007): pins source and target roots under one receipt.
+    /// ABI: pins source and target roots under one receipt.
     MigrationReceipt,
 }
 
@@ -203,10 +200,9 @@ impl ObjectClass {
     }
 }
 
-/// The versioned, algorithm-tagged preimage for one object root:
-/// `sha256 || domain || abi_version || canonical_payload`. The algorithm tag
-/// is structurally bound inside every root, so a root can never be replayed
-/// under a different digest algorithm.
+/// The versioned, algorithm-tagged preimage for one object root `sha256 || domain ||
+/// abi_version || canonical_payload`. The algorithm tag is structurally bound inside
+/// every root, so a root can never be replayed under a different digest algorithm.
 pub fn root_preimage(class: ObjectClass, abi_version: &str, canonical_payload: &[u8]) -> Vec<u8> {
     let mut preimage = Vec::with_capacity(64 + canonical_payload.len());
     preimage.extend_from_slice(ROOT_HASH_ALGORITHM.as_bytes());
@@ -219,10 +215,9 @@ pub fn root_preimage(class: ObjectClass, abi_version: &str, canonical_payload: &
     preimage
 }
 
-/// Canonical bytes for one object class. The class is bound into the root
-/// preimage by the caller of [`object_root`]; unknown classes are rejected by
-/// construction (closed enum), and wrong ABI versions or structurally
-/// noncanonical payloads fail closed here.
+/// Canonical bytes for one object class. The class is bound into the root preimage by
+/// the caller of [`object_root`]; unknown classes are rejected by construction (closed
+/// enum), and wrong ABI versions or structurally noncanonical payloads fail closed here.
 pub fn canonical_object_bytes(
     _class: ObjectClass,
     abi_version: &str,
@@ -274,9 +269,7 @@ pub fn verify_object_root(
         .unwrap_or(false)
 }
 
-// ---------------------------------------------------------------------------
-// Protected scope obligations (ZS-CONTRACT-004).
-// ---------------------------------------------------------------------------
+// Protected scope obligations.
 
 /// The protected dimensions of a task. A dimension is a property of the
 /// successor state that must hold; an uncovered required dimension is
@@ -360,13 +353,7 @@ impl ScopeObligation {
         Ok(obligation)
     }
 
-    pub fn validate(&self) -> Result<(), IdentityKernelError> {
-        if self.grade.is_unknown() && self.required {
-            // An uncovered REQUIRED obligation is representable (it is the
-            // fail-closed state), but only as Unknown -- callers must never
-            // claim equivalence over it. Validation allows it so the
-            // forbidden claim is what fails, not the representation.
-        }
+    pub const fn validate(&self) -> Result<(), IdentityKernelError> {
         Ok(())
     }
 }
@@ -410,10 +397,9 @@ impl ProtectedScopeObligations {
             .collect()
     }
 
-    /// Whether an equivalent claim is permitted: every REQUIRED obligation
-    /// must be `Proved` or `BoundedComplete` -- never `Unknown` (and never
-    /// merely `Observed` for a required dimension, which is a stronger
-    /// fail-closed rule than the corpus minimum).
+    /// Whether an equivalent claim is permitted: every REQUIRED obligation must be
+    /// `Proved` or `BoundedComplete` -- never `Unknown` (and never merely `Observed` for
+    /// a required dimension, which is a stronger fail-closed rule than the corpus minimum).
     pub fn equivalent_claim_permitted(&self) -> bool {
         self.obligations.iter().all(|obligation| {
             !obligation.required
@@ -424,10 +410,8 @@ impl ProtectedScopeObligations {
         })
     }
 
-    /// Fail-closed equivalent-claim gate: returns the uncovered required
-    /// dimension, or `Ok(())` when the claim is permitted. This is the
-    /// CONTRACT-004 acceptance surface -- an uncovered property is
-    /// `Unknown` and can never be advertised as equivalent.
+    /// Returns the uncovered required dimension, or `Ok()` when the claim is permitted.
+    /// An uncovered property is `Unknown` and cannot be advertised as equivalent.
     pub fn check_equivalent_claim(&self) -> Result<(), IdentityKernelError> {
         if let Some(obligation) = self
             .obligations
@@ -452,9 +436,7 @@ impl ProtectedScopeObligations {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Structured task contract (ZS-CONTRACT-001).
-// ---------------------------------------------------------------------------
+// Structured task contract.
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -538,9 +520,8 @@ impl TaskBudget {
     }
 }
 
-/// The structured task contract: criteria, protected scope, effect policy,
-/// environment, budget, fallback, and the bound model/harness/tool contract
-/// digests. Every field participates in the contract root.
+/// The structured task contract binds criteria, scope, effects, environment, budget, fallback,
+/// model, and tool contracts. Every field participates in the contract root.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct StructuredTaskContract {
@@ -555,7 +536,6 @@ pub struct StructuredTaskContract {
     pub deadline_unix_ms: Option<u64>,
     pub fallback_policy: FallbackPolicy,
     pub subjective_dimensions: Vec<String>,
-    pub harness_contract_digest: Option<Sha256Digest>,
     pub model_contract_digest: Option<Sha256Digest>,
     pub tool_contract_digest: Option<Sha256Digest>,
 }
@@ -572,7 +552,6 @@ impl StructuredTaskContract {
         deadline_unix_ms: Option<u64>,
         fallback_policy: FallbackPolicy,
         subjective_dimensions: Vec<String>,
-        harness_contract_digest: Option<Sha256Digest>,
         model_contract_digest: Option<Sha256Digest>,
         tool_contract_digest: Option<Sha256Digest>,
     ) -> Result<Self, IdentityKernelError> {
@@ -588,7 +567,6 @@ impl StructuredTaskContract {
             deadline_unix_ms,
             fallback_policy,
             subjective_dimensions,
-            harness_contract_digest,
             model_contract_digest,
             tool_contract_digest,
         };
@@ -664,14 +642,11 @@ impl StructuredTaskContract {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Payload formation receipt (ZS-KERNEL-003).
-// ---------------------------------------------------------------------------
+// Payload formation receipt.
 
-/// Binds a payload root to its constructor, contract, dependency roots,
-/// execution record, and epoch. Verifying a payload against a receipt
-/// requires the exact payload root AND the exact contract root; a relabeled
-/// payload with a valid key fails.
+/// Binds a payload root to its constructor, contract, dependency roots, execution
+/// record, and epoch. Verifying a payload against a receipt requires the exact
+/// payload root AND the exact contract root; a relabeled payload with a valid key fails.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct PayloadFormationReceipt {
@@ -749,20 +724,16 @@ impl PayloadFormationReceipt {
         object_root(ObjectClass::FormationReceipt, ROOTED_ABI_VERSION, &bytes)
     }
 
-    /// Verify a payload against this receipt: the payload root must match the
-    /// receipt's payload root AND the contract root must match the receipt's
-    /// contract root. Relabeling an unrelated payload with this receipt's
-    /// roots fails one of the two bindings.
+    /// Verify a payload against this receipt: the payload root must match the receipt's
+    /// payload root AND the contract root must match the receipt's contract root.
+    /// Relabeling an unrelated payload with this receipt's roots fails one of the two bindings.
     pub fn verify_payload(&self, contract_root: Sha256Digest, payload_root: &str) -> bool {
         self.contract_root == contract_root && self.payload_root == payload_root
     }
 
-    /// Fail-closed dependency re-check for cache reuse (ZS-KERNEL-003).
-    /// `verify_payload` alone does not revoke reuse when a dependency mutates
-    /// after formation; this re-checks that the CURRENT dependency roots are
-    /// exactly the set this receipt was formed against. Any added, removed,
-    /// or changed dependency root revokes reuse. Order-insensitive: the
-    /// dependency set is compared as a normalized set.
+    /// Fail-closed dependency re-check for cache reuse. `verify_payload` alone does not
+    /// revoke reuse when a dependency mutates after formation; this re-checks that the CURRENT
+    /// dependency roots are exactly the set this receipt was formed against.
     pub fn verify_against(&self, current_dependency_roots: &[String]) -> bool {
         let mut recorded: Vec<&str> = self.dependency_roots.iter().map(String::as_str).collect();
         let mut current: Vec<&str> = current_dependency_roots
@@ -777,17 +748,9 @@ impl PayloadFormationReceipt {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Parent-rooted authoritative event log (ZS-KERNEL-006).
-// ---------------------------------------------------------------------------
+// Parent-rooted authoritative event log.
 
-/// Typed authoritative event classes (ZS-KERNEL-006). The wire record keeps a
-/// `String` `event_type`; this enum is the typed kernel boundary that
-/// enumerates every authoritative event class -- state transitions, evidence
-/// observations, cache decisions, executions, verification, authority
-/// issuance, commits, rollbacks, and resource charges. Unknown class names
-/// fail closed at the typed boundary (`UnknownEventClass`), so a runtime
-/// journal cannot append an unclassified event.
+/// Typed authoritative event classes.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum EventClass {
@@ -1004,10 +967,9 @@ impl EventLog {
         Self::replay(&self.records)
     }
 
-    /// Verify the log and additionally check that the caller's expected head
-    /// equals the replayed head -- this is how a torn tail is detected after
-    /// a process kill: the persisted prefix replays to a head that does not
-    /// match the sealed head.
+    /// Verify the log and additionally check that the caller's expected head equals
+    /// the replayed head -- this is how a torn tail is detected after a process
+    /// kill: the persisted prefix replays to a head that does not match the sealed head.
     pub fn verify_chain_against(
         &self,
         sealed_head: Sha256Digest,
@@ -1030,9 +992,7 @@ impl Default for EventLog {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Project-level successor CAS (ZS-KERNEL-008).
-// ---------------------------------------------------------------------------
+// Project-level successor CAS.
 
 /// Why the successor CAS did not advance.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1051,12 +1011,9 @@ pub enum SuccessorOutcome {
     Unchanged { reason: SuccessorUnchangedReason },
 }
 
-/// Project-level "verified successor root becomes current XOR unchanged" CAS.
-/// The ONLY mutation is [`ProjectSuccessorCas::try_advance`], which requires
-/// an exact declared parent and a verified successor root. Verification and
-/// authorization are pure observations that never mutate the CAS, so a crash
-/// before commit leaves the old root and a crash after commit leaves the
-/// complete new root -- never a partial state.
+/// Project-level "verified successor root becomes current XOR unchanged" CAS. The ONLY mutation is
+/// [`ProjectSuccessorCas::try_advance`], which requires an exact declared parent and a verified
+/// successor root.
 #[derive(Clone, Copy, Debug)]
 pub struct ProjectSuccessorCas {
     current_root: Sha256Digest,
@@ -1073,10 +1030,9 @@ impl ProjectSuccessorCas {
         self.current_root
     }
 
-    /// Advance the project root. Fails closed:
-    /// - declared parent != current  -> `Unchanged(DeclaredParentMismatch)`
-    /// - verified successor == current -> `Unchanged(NoVerifiedChange)`
-    /// - otherwise advances and returns the new root.
+    /// Advance the project root. Fails closed declared parent != current ->
+    /// `Unchanged(DeclaredParentMismatch)` verified successor == current ->
+    /// `Unchanged(NoVerifiedChange)` otherwise advances and returns the new root.
     pub fn try_advance(
         &mut self,
         declared_parent_root: Sha256Digest,
@@ -1099,9 +1055,7 @@ impl ProjectSuccessorCas {
     }
 }
 
-// ---------------------------------------------------------------------------
 // Successor record (bound for the event log and audit).
-// ---------------------------------------------------------------------------
 
 /// A sealed record of one successor advance (or unchanged decision).
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -1166,146 +1120,13 @@ impl SuccessorRecord {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Harness contract (ZS-CONTRACT-003).
-// ---------------------------------------------------------------------------
-
-/// Serialization scheme for tool arguments/results across the harness.
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum SerializationScheme {
-    CanonicalJson,
-    CompactRefs,
-}
-
-/// Message ordering guarantee the harness promises for tool calls.
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum MessageOrdering {
-    StrictCallOrder,
-    CompletionPermitsReordering,
-}
-
-/// Transcript policy: what the harness records about a session.
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum TranscriptPolicy {
-    FullRecording,
-    DecisionsAndResultsOnly,
-    None,
-}
-
-/// Cancellation semantics the harness guarantees for in-flight calls.
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum CancellationSemantics {
-    CooperativeAtCallBoundaries,
-    HardDeadlineOnly,
-}
-
-/// The harness contract: tool serialization, message ordering, transcript
-/// policy, cancellation semantics, the native tool set digest, and the
-/// adapter renderer version. Any change alters the contract root and
-/// invalidates dependent certificates.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct HarnessContract {
-    pub contract_version: u16,
-    pub harness_name: String,
-    pub serialization: SerializationScheme,
-    pub message_ordering: MessageOrdering,
-    pub transcript_policy: TranscriptPolicy,
-    pub cancellation_semantics: CancellationSemantics,
-    pub native_tool_set_digest: Sha256Digest,
-    pub adapter_renderer_version: u16,
-    pub abi_version: String,
-}
-
-impl HarnessContract {
-    pub fn new(
-        harness_name: impl Into<String>,
-        serialization: SerializationScheme,
-        message_ordering: MessageOrdering,
-        transcript_policy: TranscriptPolicy,
-        cancellation_semantics: CancellationSemantics,
-        native_tool_set_digest: Sha256Digest,
-        adapter_renderer_version: u16,
-    ) -> Result<Self, IdentityKernelError> {
-        let contract = Self {
-            contract_version: CONTRACT_VERSION,
-            harness_name: harness_name.into(),
-            serialization,
-            message_ordering,
-            transcript_policy,
-            cancellation_semantics,
-            native_tool_set_digest,
-            adapter_renderer_version,
-            abi_version: ROOTED_ABI_VERSION.to_owned(),
-        };
-        contract.validate()?;
-        Ok(contract)
-    }
-
-    pub fn validate(&self) -> Result<(), IdentityKernelError> {
-        if self.contract_version != CONTRACT_VERSION {
-            return Err(IdentityKernelError::InvalidTaskContract(format!(
-                "unsupported contract version {}",
-                self.contract_version
-            )));
-        }
-        if self.abi_version != ROOTED_ABI_VERSION {
-            return Err(IdentityKernelError::WrongAbiVersion {
-                actual: self.abi_version.clone(),
-            });
-        }
-        if self.harness_name.is_empty() {
-            return Err(IdentityKernelError::InvalidTaskContract(
-                "harness_name must be nonempty".into(),
-            ));
-        }
-        if self.adapter_renderer_version == 0 {
-            return Err(IdentityKernelError::InvalidTaskContract(
-                "adapter_renderer_version must be nonzero".into(),
-            ));
-        }
-        Ok(())
-    }
-
-    pub fn canonical_bytes(&self) -> Result<Vec<u8>, IdentityKernelError> {
-        let value = serde_json::to_value(self)
-            .map_err(|error| IdentityKernelError::NonCanonicalBytes(error.to_string()))?;
-        canonical_object_bytes(ObjectClass::TaskContract, ROOTED_ABI_VERSION, &value)
-    }
-
-    pub fn contract_root(&self) -> Result<Sha256Digest, IdentityKernelError> {
-        let bytes = self.canonical_bytes()?;
-        object_root(ObjectClass::TaskContract, ROOTED_ABI_VERSION, &bytes)
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Rooted ABI migration receipt (ZS-KERNEL-007).
-// ---------------------------------------------------------------------------
+// Rooted ABI migration receipt.
 
 /// Max canonical bytes for one migration receipt payload.
 pub const MIGRATION_RECEIPT_MAX_CANONICAL_BYTES: usize = 64 * 1024;
 pub const MIGRATION_RECEIPT_MAX_REASON_BYTES: usize = 512;
 
-/// A rooted receipt for migrating one legacy rooted object into the current
-/// ABI (ZS-KERNEL-007). The receipt pins four facts under one root:
-///
-/// - the legacy object's class, declared ABI version, canonical bytes, and
-///   recorded root (verified against the versioned `root_preimage` with the
-///   legacy ABI tag -- legacy payloads are not re-canonicalized);
-/// - the replacement object's class and rooted bytes (verified through
-///   [`canonical_object_bytes`] + [`object_root`], the only current path);
-/// - a real ABI version change (source != target);
-/// - a nonempty migration reason.
-///
-/// Incompatible-version mismatches still fail closed -- this receipt is the
-/// machinery for *recording* a deliberate, audited migration, not a backdoor
-/// around version checks. The receipt itself is rootable under
-/// [`ObjectClass::MigrationReceipt`] like every other object class.
+/// A rooted receipt for migrating one legacy rooted object into the current ABI.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct RootedAbiMigrationReceipt {
@@ -1323,12 +1144,9 @@ pub struct RootedAbiMigrationReceipt {
 }
 
 impl RootedAbiMigrationReceipt {
-    /// Migrate a legacy rooted object into the current ABI.
-    ///
-    /// `source_canonical_bytes` are the legacy object's own canonical bytes
-    /// (already canonical under its legacy ABI); the source root must match
-    /// `sha256(root_preimage(source_class, source_abi_version, source_bytes))`.
-    /// `target_value` is re-canonicalized and rooted through the current path.
+    /// Migrate a legacy rooted object into the current ABI. `source_canonical_bytes` are the legacy
+    /// object's own canonical bytes (already canonical under its legacy ABI); the source root must
+    /// match `sha256(root_preimage(source_class, source_abi_version, source_bytes))`. `target_value`.
     pub fn new(
         source_class: ObjectClass,
         source_abi_version: impl Into<String>,

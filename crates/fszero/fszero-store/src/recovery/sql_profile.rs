@@ -1,8 +1,6 @@
-//! Env-gated fsqlite statement PROFILE aggregation (fszero-sql-stmt-profile-trace-x38n).
-//!
-//! Off by default. Set `FSZERO_SQL_PROFILE=1` before opening a RecoveryStore so
-//! `Connection::trace(TraceMask::PROFILE, …)` records per-SQL elapsed_ns into
-//! a process-global top-N table.
+//! Env-gated fsqlite statement PROFILE aggregation. Off by default. Set `FSZERO_SQL_PROFILE=1`
+//! before opening a RecoveryStore so `Connection::trace(TraceMask::PROFILE, …)` records per-SQL
+//! elapsed_ns into a process-global top-N table.
 
 use fsqlite::{Connection, TraceEvent, TraceMask};
 use serde_json::json;

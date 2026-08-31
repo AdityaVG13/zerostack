@@ -38,13 +38,11 @@ fn bench_search_scan_vs_bigram(c: &mut Criterion) {
     let (_dir, repo, store) = fixture();
     let snapshot = Snapshot::open(&store, Some(&repo)).unwrap();
     let _ = snapshot.name_bigram_index().unwrap();
-    let _lock = graphzero_test_support::lock_env();
+    let mut env = zerostack_test_support::ScopedEnvVars::new();
 
     let mut group = c.benchmark_group("query_surface_search");
     group.bench_function("scan", |b| {
-        unsafe {
-            std::env::remove_var("GRAPHZERO_SEARCH_BIGRAM");
-        }
+        env.remove("GRAPHZERO_SEARCH_BIGRAM");
         b.iter(|| {
             let req = QuerySurfaceRequest {
                 surface: "search".into(),
@@ -56,9 +54,7 @@ fn bench_search_scan_vs_bigram(c: &mut Criterion) {
         });
     });
     group.bench_function("bigram", |b| {
-        unsafe {
-            std::env::set_var("GRAPHZERO_SEARCH_BIGRAM", "1");
-        }
+        env.set("GRAPHZERO_SEARCH_BIGRAM", "1");
         b.iter(|| {
             let req = QuerySurfaceRequest {
                 surface: "search".into(),
@@ -68,9 +64,6 @@ fn bench_search_scan_vs_bigram(c: &mut Criterion) {
             };
             QuerySurfaceRouter::execute(&snapshot, &req).unwrap();
         });
-        unsafe {
-            std::env::remove_var("GRAPHZERO_SEARCH_BIGRAM");
-        }
     });
     group.finish();
 }

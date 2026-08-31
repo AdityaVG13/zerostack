@@ -1,9 +1,6 @@
-//! Certified incremental invalidation.
-//!
-//! Sound overapproximation may invalidate too much; it must never invalidate
-//! too little for protected claims. Incremental recompute of the upward
-//! dependency closure must agree with a full rebuild within the declared
-//! influence class.
+//! Certified incremental invalidation. Sound overapproximation may invalidate too much; it
+//! must never invalidate too little for protected claims. Incremental recompute of the
+//! upward dependency closure must agree with a full rebuild within the declared influence class.
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
@@ -43,10 +40,9 @@ impl InfluenceClass {
     }
 }
 
-/// Declared kind of a dependency edge (GRAPH-002). Optional metadata on top of
-/// the bare content-hash edge: the kind does not change closure computation --
-/// a kinded edge invalidates exactly like an unkinded one -- it records the
-/// declared influence channel for consumers (witness/verifier layering).
+/// Declared kind of a dependency edge. Optional metadata on top of the bare content-hash
+/// edge: the kind does not change closure computation a kinded edge invalidates exactly like an
+/// unkinded one -- it records the declared influence channel for consumers (witness/verifier layering).
 #[derive(
     Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, serde::Serialize, serde::Deserialize,
 )]
@@ -141,7 +137,7 @@ impl DependencyGraph {
         self.forward.entry(output).or_default();
     }
 
-    /// Record a dependency with a declared kind (GRAPH-002). Closure behavior
+    /// Record a dependency with a declared kind. Closure behavior
     /// is identical to [`Self::add_dependency`]; the kind only annotates the
     /// declared influence channel.
     pub fn add_dependency_kinded(
@@ -247,23 +243,14 @@ pub struct RecomputeResult {
     pub recomputed: BTreeSet<ArtifactId>,
 }
 
-/// Honest instrumentation for the equality-boundary early cutoff (GRAPH-007).
-///
-/// The cutoff is an optimization only: for a sound influence graph with
-/// deterministic producers it is semantically invisible (incremental state is
-/// bit-identical to a full rebuild) and it never weakens the fail-closed
-/// equivalence contract. A boundary is declared only when the recomputed
-/// value is byte-equal to the previous value; every case where equality
-/// cannot be established (missing previous value, producer failure)
-/// propagates instead of cutting off.
+/// Honest instrumentation for the equality-boundary early cutoff.
 #[derive(Clone, Debug, Default, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct CutoffReport {
     /// Producers actually re-executed in this pass (producer returned a value).
     pub recomputed: BTreeSet<ArtifactId>,
     /// Dirty producers skipped because an upstream boundary artifact
-    /// recomputed equal to its previous value -- the measured savings of this
-    /// pass (these would have been recomputed unconditionally before the
-    /// cutoff).
+    /// recomputed equal to its previous value -- the measured savings of
+    /// this pass (these would have been recomputed unconditionally before the cutoff).
     pub cut_off: BTreeSet<ArtifactId>,
     /// Boundary artifacts: recomputed to a value byte-equal to the previous
     /// value; downstream propagation stopped at each of these.
@@ -287,11 +274,9 @@ impl RecomputeEngine {
         self.producers.insert(id, Box::new(f));
     }
 
-    /// Full rebuild: recompute every producer to a fixed point.
-    ///
-    /// Uses data availability (producer returns Some) rather than only influence
-    /// edges, so a missing influence edge still yields a correct full rebuild and
-    /// can be compared against an under-invalidating incremental pass.
+    /// Full rebuild: recompute every producer to a fixed point. Uses data availability (producer
+    /// returns Some) rather than only influence edges, so a missing influence edge still yields a
+    /// correct full rebuild and can be compared against an under-invalidating incremental pass.
     pub fn full_recompute(
         &self,
         inputs: &BTreeMap<ArtifactId, Vec<u8>>,
@@ -300,7 +285,7 @@ impl RecomputeEngine {
         let mut state = inputs.clone();
         let mut recomputed = BTreeSet::new();
         let mut pending: BTreeSet<ArtifactId> = self.producers.keys().copied().collect();
-        // Prefer influence topo order when available, then retry leftovers.
+        // Use influence topological order first, then retry unresolved artifacts.
         let order = self.graph.topological_order().unwrap_or_default();
         let mut schedule: Vec<ArtifactId> = order
             .into_iter()
@@ -343,14 +328,6 @@ impl RecomputeEngine {
     }
 
     /// Incremental: update changed inputs, recompute only the upward producer closure.
-    ///
-    /// Equality-boundary early cutoff (GRAPH-007) is active: propagation stops
-    /// at any producer that recomputes byte-equal to its previous value
-    /// (content-hash equality), so downstream dependents are neither
-    /// recomputed nor invalidated. The cutoff never fires on uncertainty -- a
-    /// missing previous value or a producer that cannot run propagates
-    /// (fail-closed). See [`Self::incremental_recompute_with_report`] for the
-    /// cutoff instrumentation.
     pub fn incremental_recompute(
         &self,
         old_state: &BTreeMap<ArtifactId, Vec<u8>>,
@@ -361,22 +338,9 @@ impl RecomputeEngine {
             .0)
     }
 
-    /// Incremental recompute with equality-boundary early cutoff, returning a
-    /// [`CutoffReport`] so savings are measured, not claimed.
-    ///
-    /// Algorithm: process the (unfiltered) upward invalidation closure in
-    /// graph topological order. A dirty producer is *reached* when it is
-    /// itself a changed input or some non-boundary dirty path reaches it. A
-    /// producer that recomputes to a value byte-equal to its previous value
-    /// (from `old_state`) becomes a boundary: its successors are no longer
-    /// reached and are recorded as `cut_off`. Fail-closed cases propagate:
-    /// no previous value in `old_state`, or a producer returning `None`
-    /// (recompute error / cannot run) -- those never cut off downstream.
-    ///
-    /// For a sound influence graph with deterministic producers the returned
-    /// state is bit-identical to [`Self::full_recompute`]; `assert_incremental_equivalence`
-    /// verifies that contract against the full rebuild and fails closed on any
-    /// divergence, so the cutoff is semantically invisible.
+    /// Incremental recompute with equality-boundary early cutoff, returning a [`CutoffReport`] so
+    /// savings are measured, not claimed. Algorithm: process the (unfiltered) upward invalidation
+    /// closure in graph topological order.
     pub fn incremental_recompute_with_report(
         &self,
         old_state: &BTreeMap<ArtifactId, Vec<u8>>,
@@ -409,11 +373,9 @@ impl RecomputeEngine {
             if !dirty.contains(&id) {
                 continue;
             }
-            // A node is reached iff it is a changed input itself or at least
-            // one predecessor propagates: predecessor is not a boundary, and
-            // either it is a non-producer that is dirty (its value may have
-            // changed or it merely carries overapprox invalidation) or it is a
-            // producer that was itself reached this pass.
+            // A node is reached iff it is a changed input itself or at least one predecessor propagates:
+            // predecessor is not a boundary, and either it is a non-producer that is dirty (its value may have
+            // changed or it merely carries overapprox invalidation) or it is a producer that was itself.
             let reached = if changed.contains(&id) {
                 true
             } else {
@@ -456,12 +418,8 @@ impl RecomputeEngine {
             if let Some(value) = prod(&state) {
                 state.insert(id, value.clone());
                 report.recomputed.insert(id);
-                // Content-hash equality: byte-equal to the previous value is
-                // the only trigger for a boundary. A missing previous value
-                // (None) can never establish equality -> propagates.
-                // A node computed from suspect prerequisites (any tainted
-                // predecessor) can never establish trustworthy equality:
-                // recompute, but never mark a boundary.
+                // Content-hash equality: byte-equal to the previous value is the only trigger for a boundary. A
+                // missing previous value (None) can never establish equality -> propagates.
                 if !inputs_tainted && old_state.get(&id) == Some(&value) {
                     boundary.insert(id);
                     report.boundary_nodes.insert(id);
@@ -523,7 +481,7 @@ impl RecomputeEngine {
     }
 }
 
-/// Build a dependency-closure record for a derived artifact (cachezero / y6uu surface).
+/// Build a dependency-closure record for a derived artifact.
 #[must_use]
 pub fn record_dependency_closure(
     artifact: ArtifactId,

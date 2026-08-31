@@ -1,10 +1,5 @@
-//! Opaque reasoning-state transport and protected Decision View headroom.
-//!
-//! Opaque provider bytes are never parsed, summarized, reordered, or serialized
-//! by this module. Metadata binds them to the exact provider/model/backend,
-//! reasoning contract, session, position, sampler, and lineage. Exact replay is
-//! refused unless every binding matches. Headroom arithmetic delegates to the
-//! canonical ZeroStack [`ReasoningContract`] contract.
+//! Opaque reasoning-state transport and protected Decision View headroom. Opaque provider bytes are
+//! never parsed, summarized, reordered, or serialized by this module.
 
 use crate::decision_view::{DecisionView, DecisionViewIdentity};
 use serde::Serialize;
@@ -458,10 +453,8 @@ impl OpaqueReasoningStateEnvelope {
         &self.reference
     }
 
-    /// Exact original provider bytes, with no parse/rewrite step.
-    ///
-    /// This accessor does not upgrade continuation status. Strict replay must
-    /// use [`Self::exact_replay_bytes`].
+    /// Exact original provider bytes, with no parse/rewrite step. This accessor does not
+    /// upgrade continuation status. Strict replay must use [`Self::exact_replay_bytes`].
     pub fn opaque_bytes(&self) -> &[u8] {
         &self.opaque_bytes
     }
@@ -511,9 +504,8 @@ impl fmt::Debug for OpaqueReasoningStateEnvelope {
     }
 }
 
-/// Exactness class for one model-state continuation assessment.
-///
-/// Only `ExactNeutral` describes identical native continuation state. Scoped
+/// Exactness class for one model-state continuation assessment. Only
+/// `ExactNeutral` describes identical native continuation state. Scoped
 /// and empirical evidence stay non-pointwise and never authorize exact replay.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case", tag = "class")]
@@ -671,11 +663,8 @@ impl RawDecisionViewRecoveryRef {
     }
 }
 
-/// In-memory exact raw Decision View carrier for guarded fallback.
-///
-/// This type does not verify or create hub safepoints, persist CAS objects, or
-/// trigger deoptimization. It only binds caller-supplied hub identities to the
-/// exact canonical Decision View bytes and checks them before recovery.
+/// In-memory exact raw Decision View carrier for guarded fallback. This type does not verify or
+/// create hub safepoints, persist CAS objects, or trigger deoptimization.
 pub struct RawDecisionViewRecoveryEnvelope {
     reference: RawDecisionViewRecoveryRef,
     raw_decision_view_bytes: Vec<u8>,
@@ -1257,4 +1246,3 @@ fn nonzero(field: &'static str, digest: Sha256Digest) -> Result<(), ReasoningSta
 fn digest(bytes: &[u8]) -> Sha256Digest {
     Sha256Digest::from_bytes(sha256(bytes))
 }
-

@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-/// Supported assertion kinds (P4.2).
+/// Supported assertion kinds.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ClaimKind {

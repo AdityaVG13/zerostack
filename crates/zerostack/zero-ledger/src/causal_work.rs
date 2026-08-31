@@ -1,9 +1,6 @@
-//! Versioned exclusive causal-work accounting.
-//!
-//! Legacy token classes remain readable but are not complete causal authority.
-//! V3 receipts bind one parent-measured integer counter window, exactly one class
-//! per unique work unit, and an explicit residue policy. Declared estimates use a
-//! distinct type and can never construct a measured receipt.
+//! Exclusive causal-work accounting. Legacy token classes remain readable but do not carry full
+//! causal authority. Receipts bind one parent-measured counter window, one class per unique work
+//! unit, and an explicit residue policy.
 
 use std::{collections::BTreeSet, error::Error, fmt};
 
@@ -419,8 +416,8 @@ impl CausalWorkReceipt {
     }
 
     pub fn compute_digest(&self) -> Result<Sha256Digest, CausalWorkError> {
-        let mut value = serde_json::to_value(self)
-            .map_err(|error| CausalWorkError::Json(error.to_string()))?;
+        let mut value =
+            serde_json::to_value(self).map_err(|error| CausalWorkError::Json(error.to_string()))?;
         value
             .as_object_mut()
             .ok_or_else(|| CausalWorkError::Json("receipt must be object".into()))?
@@ -536,12 +533,8 @@ pub struct LegacyClassMapping {
 
 pub const fn map_legacy_class(legacy: LegacyChargeClass) -> LegacyClassMapping {
     let suggested_causal_class = match legacy {
-        LegacyChargeClass::Billed | LegacyChargeClass::FailedTrial => {
-            CausalWorkClass::Candidate
-        }
-        LegacyChargeClass::Retry | LegacyChargeClass::Reexpansion => {
-            CausalWorkClass::Restoration
-        }
+        LegacyChargeClass::Billed | LegacyChargeClass::FailedTrial => CausalWorkClass::Candidate,
+        LegacyChargeClass::Retry | LegacyChargeClass::Reexpansion => CausalWorkClass::Restoration,
         LegacyChargeClass::Recovery => CausalWorkClass::Verification,
         LegacyChargeClass::Fallback => CausalWorkClass::Fallback,
     };
@@ -618,9 +611,7 @@ impl CausalWorkError {
             Self::TooManyCharges => CausalWorkFailureCode::TooManyCharges,
             Self::DoubleClassifiedWorkUnit(_) => CausalWorkFailureCode::DoubleClassifiedWorkUnit,
             Self::ZeroAmountCharge(_) => CausalWorkFailureCode::ZeroAmountCharge,
-            Self::ChargesForUnmeasuredCounter => {
-                CausalWorkFailureCode::ChargesForUnmeasuredCounter
-            }
+            Self::ChargesForUnmeasuredCounter => CausalWorkFailureCode::ChargesForUnmeasuredCounter,
             Self::ResidueWithoutPolicy => CausalWorkFailureCode::ResidueWithoutPolicy,
             Self::UnclassifiedWork { .. } => CausalWorkFailureCode::UnclassifiedWork,
             Self::NonConservation { .. } => CausalWorkFailureCode::NonConservation,
@@ -667,4 +658,3 @@ pub fn causal_work_contract_digest() -> Sha256Digest {
         canonical_json(&causal_work_contract_manifest()).as_bytes(),
     ))
 }
-

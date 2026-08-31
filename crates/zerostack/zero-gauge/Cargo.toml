@@ -1,14 +1,14 @@
 [package]
 name = "zero-gauge"
-version = "0.1.0"
+version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Canonical ZeroStack ordinal references and provider-locked token certification"
+description = "Provider-locked token identity and analytical token-accounting models"
 
 [dependencies]
 serde.workspace = true
 serde_json.workspace = true
-zero-abi = { path = "../zero-abi" }
+zero-abi = { workspace = true }
 
 [[test]]
 name = "hundredfold"

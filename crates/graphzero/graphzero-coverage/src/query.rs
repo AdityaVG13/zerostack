@@ -5,7 +5,7 @@ use crate::freshness::{LiveBytesProvider, freshness_check};
 use crate::index::CoverageIndex;
 use graphzero_store::{BlobId, Tier};
 
-/// Evidence reference format: gz://blob/<hash>#B<start>-<end>
+/// Evidence reference format: z://blob/<hash>#B<start>-<end>
 pub type EvidenceRef = String;
 
 /// Query answer — one of three mutually exclusive variants.
@@ -55,10 +55,8 @@ pub enum QueryBuildErrorKind {
     MissingEvidenceRef,
 }
 
-/// Builder that generates `QueryResult` from a `CoverageIndex` and query context.
-///
-/// The builder is the *only* public constructor for `QueryResult`; this lets us
-/// enforce the invariant that every answer carries a certificate.
+/// Sole public QueryResult constructor from coverage state and query context.
+/// Every constructed answer carries a certificate.
 pub struct QueryResultBuilder<'a> {
     index: &'a dyn CoverageIndex,
     tier: Tier,
@@ -103,8 +101,8 @@ impl<'a> QueryResultBuilder<'a> {
         self,
         provider: &P,
     ) -> Result<QueryResult, QueryBuildError> {
-        // One full-repo scan builds the certificate and answers full-tier
-        // index coverage (graphzero-wf8za): no second `all_blob_ids` walk.
+        // One full-repo scan builds the certificate and answers
+        // full-tier index coverage: no second `all_blob_ids` walk.
         let (cert, full_tier_indexed) = build_certificate(self.index, self.tier, provider);
 
         if self.found {
@@ -190,11 +188,9 @@ fn scan_blob_coverage<P: LiveBytesProvider>(
     }
 }
 
-/// Internal: build a `CoverageCertificate` by scanning the index.
-///
-/// Returns `(certificate, full_tier_indexed)` where `full_tier_indexed` is true
-/// when every tracked blob is indexed at `tier` (non-empty universe). This
-/// fuses the former second-pass `is_full_coverage` into the certificate scan.
+/// Internal: build a `CoverageCertificate` by scanning the index. Returns `(certificate,
+/// full_tier_indexed)` where `full_tier_indexed` is true when every tracked blob is indexed at
+/// `tier` (non-empty universe).
 fn build_certificate<P: LiveBytesProvider>(
     index: &dyn CoverageIndex,
     tier: Tier,

@@ -1,28 +1,5 @@
-//! Typed `DecisionView`: the model-facing decision view (ZS-VIEW-010).
-//!
-//! Wire shape is closed (`additionalProperties: false`). Required roots
-//! and grades: `task_contract_root`, `project_root`, `causal_lens_root`,
-//! `supported_decisions`, `completeness_grade`, `baseline_escape` -- plus the
-//! optional `evidence_refs`, `omitted_classes`, `expansion_handles`,
-//! `unresolved_question`, and `canonical_render_root`.
-//!
-//! Honesty laws:
-//! - The view is canonical: [`DecisionView::canonical_render_json`] is the
-//!   bounded rendering (sorted-key JSON) and [`DecisionView::root`] is its
-//!   SHA-256 hex. Any mutation of a rendered field changes the root
-//!   ([`DecisionView::verify_root`] detects tampering). No root is ever
-//!   fabricated: construction fails closed on empty roots, and the
-//!   `canonical_render_root` is only carried when a harness actually bound a
-//!   rendering artifact root.
-//! - Completeness is certified, never asserted: [`DecisionView::certificate`]
-//!   verifies the claimed grade against the evidence classes actually
-//!   present. A `Proved` claim with missing classes, declared omissions, or
-//!   no evidence refs fails the certificate; any other claim with a missing
-//!   needed class degrades to `Unknown`.
-//! - Exact expansion is bound, never guessed: [`DecisionViewBinding`] binds
-//!   every listed `expansion_handles` entry to a canonical object, and
-//!   [`DecisionViewBinding::expand_exact`] returns a typed miss for any
-//!   unbound handle (never a silent fabrication).
+//! Typed `DecisionView`: the model-facing decision view. Wire shape is closed
+//! (`additionalProperties: false`).
 
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -39,11 +16,9 @@ use crate::schema::canonical_json;
 /// Canonical schema id of the decision view contract.
 pub const DECISION_VIEW_SCHEMA_ID: &str = "https://zerostack.dev/schemas/decision_view.schema.json";
 
-/// Completeness grade of a decision view's evidence coverage, exactly as the
-/// schema enumerates it. `Observed` records a decision surface without any
-/// coverage claim; `Proved` is the only grade that must never coexist with
-/// omissions or missing evidence (enforced by
-/// [`DecisionView::certificate`]).
+/// Completeness grade of a decision view's evidence coverage, exactly as the schema enumerates it.
+/// `Observed` records a decision surface without any coverage claim; `Proved` is the only grade that
+/// must never coexist with omissions or missing evidence (enforced by [`DecisionView::certificate`]).
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "PascalCase")]
 pub enum CompletenessGrade {
@@ -150,11 +125,9 @@ impl fmt::Display for DecisionViewError {
 
 impl Error for DecisionViewError {}
 
-/// The typed model-facing decision view (ZS-VIEW-010).
-///
-/// Serialization matches `decision_view.schema.json` field for field and
-/// rejects unknown fields on deserialization, exactly like the schema's
-/// `additionalProperties: false`.
+/// The typed model-facing decision view. Serialization matches
+/// `decision_view.schema.json` field for field and rejects unknown fields on
+/// deserialization, exactly like the schema's `additionalProperties: false`.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct DecisionView {
@@ -280,18 +253,9 @@ impl DecisionView {
         }
     }
 
-    /// Certify the claimed completeness grade against the evidence classes
-    /// actually present.
-    ///
-    /// Laws:
-    /// 1. A `Proved` claim must carry evidence refs and must not declare
-    ///    omissions -- either violation fails the certificate.
-    /// 2. Any needed evidence class missing from the present set fails a
-    ///    `Proved` claim and degrades every other claim to `Unknown`:
-    ///    removing a needed evidence class can never leave a higher grade
-    ///    intact.
-    /// 3. With every needed class present, the claimed grade is returned
-    ///    unchanged.
+    /// Certify the claimed completeness grade against the evidence classes actually present. Laws 1. A
+    /// `Proved` claim must carry evidence refs and must not declare omissions -- either violation fails
+    /// the certificate. 2.
     pub fn certificate(
         &self,
         needed_classes: &BTreeSet<String>,
@@ -361,12 +325,9 @@ impl DecisionView {
     }
 }
 
-/// A view bound to its exact expansion objects.
-///
-/// Every handle the view lists in `expansion_handles` must be bound to a
-/// canonical object; a listed-but-unbound handle is a dangling claim and is
-/// rejected at bind time. Expansion returns the bound canonical object
-/// exactly -- never a partial or guessed rendering.
+/// A view bound to its exact expansion objects. Every handle the view lists in `expansion_handles`
+/// must be bound to a canonical object; a listed-but-unbound handle is a dangling claim and is
+/// rejected at bind time.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DecisionViewBinding {
     view: DecisionView,
@@ -404,9 +365,8 @@ impl DecisionViewBinding {
     }
 
     /// Exact expansion of one bound handle: the canonical object bound at
-    /// construction, reproduced byte-exactly. An unbound handle is a typed
-    /// miss ([`DecisionViewError::UnknownExpansionHandle`]) -- never a
-    /// silent fabrication.
+    /// construction, reproduced byte-exactly. An unbound handle is a typed miss
+    /// ([`DecisionViewError::UnknownExpansionHandle`]) -- never a silent fabrication.
     pub fn expand_exact(&self, handle: &str) -> Result<Value, DecisionViewError> {
         let canonical = self
             .expansions

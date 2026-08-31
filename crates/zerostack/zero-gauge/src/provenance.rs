@@ -1,9 +1,6 @@
-//! Deterministic provenance for Wave 16 measurement reports.
-//!
-//! Measurement-only, off the authority path. Every report's provenance root is
-//! the SHA-256 hex over its canonical sorted-key JSON rendering. The same
-//! logical report always yields the same root; any byte difference changes the
-//! root.
+//! Deterministic provenance for measurement reports. Measurement-only, off the authority path.
+//! Every report's provenance root is the SHA-256 hex over its canonical sorted-key JSON rendering.
+//! The same logical report always yields the same root; any byte difference changes the root.
 
 #![forbid(unsafe_code)]
 
@@ -11,11 +8,9 @@ use serde::Serialize;
 use std::error::Error;
 use std::fmt;
 
-/// Render a value as deterministic sorted-key canonical JSON and hash it.
-///
-/// Uses the hub's canonical JSON contract (`zero_abi::canonical_json`) and
-/// `zero_abi::sha256_hex`. This is the only provenance derivation allowed for
-/// savings reports.
+/// Render a value as deterministic sorted-key canonical JSON and hash it. Uses
+/// the hub's canonical JSON contract (`zero_abi::canonical_json`) and
+/// `zero_abi::sha256_hex`. This is the only provenance derivation allowed for savings reports.
 pub fn provenance_root(value: &impl Serialize) -> String {
     let canonical = zero_abi::canonical_json(
         &serde_json::to_value(value).expect("report serializes by construction"),

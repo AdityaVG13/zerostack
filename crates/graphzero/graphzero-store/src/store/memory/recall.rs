@@ -1,5 +1,6 @@
 //! Recall-budget formatting and skeleton attachment for memory hints.
 
+use super::persistence::mem_ref;
 use super::types::{MemoryFact, MemoryHint};
 
 pub fn format_recall_budget_one(target: &str, facts: &[&MemoryFact]) -> String {
@@ -11,10 +12,10 @@ pub fn format_recall_budget_one(target: &str, facts: &[&MemoryFact]) -> String {
     for f in facts.iter().take(2) {
         let preview: String = f.text.chars().take(80).collect();
         lines.push(format!(
-            "  {}: {} (gz://mem/{})",
+            "  {}: {} ({})",
             f.kind.as_str(),
             preview,
-            f.id
+            mem_ref(&f.id)
         ));
     }
     lines.join("\n")

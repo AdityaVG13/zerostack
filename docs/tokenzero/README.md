@@ -1,17 +1,15 @@
 # TokenZero documentation
 
-TokenZero is the output authority for the Zero family.
+TokenZero is ZeroStack's token and output domain library. It owns measurement, bounded projection, exact recovery, and accounting honesty at ZeroKernel operation and response boundaries.
+
+TokenZero is not a separate product. It does not own MCP, process lifecycle, filesystem bytes, or graph structure.
 
 | Document | Purpose |
 | --- | --- |
 | [RACC](../racc/RACC.md) | Projection, protected anchors, exact recovery, and accounting |
-| [Installation](install.md) | Source builds and local setup |
-| [ZeroKernel integration](codemode.md) | TokenZero ownership behind the six-operation host |
-| [Classic MCP](mcp.md) | Noncanonical direct-tool compatibility for clients that cannot embed ZeroKernel |
-| [Pulse](pulse.md) | Local recovery-aware usage ledger |
+| [Contributor setup](install.md) | Build TokenZero as part of ZeroStack |
+| [Pulse](pulse.md) | ZeroStack-owned local accounting ledger |
 | [Benchmarks](benchmarks.md) | Reproducible output and latency evidence |
 | [Development](development.md) | Workspace layout and focused verification |
 
-ZeroStack is source-only. FSZero, GraphZero, and TokenZero will adopt coordinated version parity when joint releases begin.
-
-Contracts shared with TokenZero live in `contracts/` at the repository root. Conformance lives in `crates/zerostack/zerostack-conformance`.
+Normative machine-readable contracts live under the repository-root `contracts/` directory. Shared conformance lives in `crates/zerostack/zerostack-conformance`.

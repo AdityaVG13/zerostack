@@ -22,8 +22,7 @@ impl QuerySurfaceRouter {
             .map_err(|_| QuerySurfaceError::SymbolNotFound(name.into()))?;
         let mut edges = Vec::new();
         if let Some(m) = capsule.matches.iter().find(|m| m.name == name) {
-            // Direct symbol-level import edges (kept for symbols whose import
-            // edges are attributed to the symbol node).
+            // Include import edges attributed directly to the symbol node.
             for e in &m.edges {
                 if e.kind == edge_kind::IMPORTS {
                     push_import_edge(&mut edges, name, &e.to, e.confidence, &e.evidence_ref)?;

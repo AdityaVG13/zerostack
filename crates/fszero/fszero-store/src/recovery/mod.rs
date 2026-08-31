@@ -2,10 +2,10 @@ use fsqlite::{Connection, ConnectionEnv, Row, SqliteValue};
 use sha2::{Digest, Sha256};
 
 use fszero_core::zeroref::{
-    EMITTED_SCHEME, LineEndPolicy, ZeroRef, ZeroRefError, ZeroRefErrorClass, ZeroScheme,
+    EMITTED_SCHEME, LineEndPolicy, ZeroRef, ZeroRefError, ZeroRefErrorClass,
 };
 use std::cell::Cell;
-use std::collections::{BTreeMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -103,7 +103,7 @@ pub fn prepared_cache_metrics_json() -> serde_json::Value {
     })
 }
 
-/// Why a cache entry was not reused (fszero-2uhi / Q99 accounting).
+/// Why a cache entry was not reused for Q99 accounting.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CacheMissCause {
     /// A minimum dependency content root no longer resolves in CAS.
@@ -139,15 +139,10 @@ impl CacheMissCauseSnapshot {
     }
 }
 
-/// Env-gated durable store open phase JSON (fszero-w6l1).
-/// Set `FSZERO_STORE_OPEN_PHASES=1` to emit one stderr line with
-/// `integrity_gate_us`, `sqlite_open_us`, `pack_us`, `ast_us`, `maintenance_us`,
-/// and `total_us` (plus mode / path). Off by default -- no product cost.
+/// Env-gated durable store open phase JSON. Set `FSZERO_STORE_OPEN_PHASES=1` to emit
+/// one stderr line with `integrity_gate_us`, `sqlite_open_us`, `pack_us`, `ast_us`,
+/// `maintenance_us`, and `total_us` (plus mode / path). Off by default -- no product cost.
 fn store_open_phases_enabled() -> bool {
-    #[cfg(test)]
-    if TEST_STORE_OPEN_PHASES.with(|flag| flag.get()) {
-        return true;
-    }
     match std::env::var("FSZERO_STORE_OPEN_PHASES") {
         Ok(v) => {
             let t = v.trim();
@@ -160,21 +155,10 @@ fn store_open_phases_enabled() -> bool {
     }
 }
 
-#[cfg(test)]
-std::thread_local! {
-    static TEST_STORE_OPEN_PHASES: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
-    static LAST_STORE_OPEN_PHASES: std::cell::RefCell<Option<serde_json::Value>> =
-        const { std::cell::RefCell::new(None) };
-}
-
 fn emit_store_open_phases(fields: serde_json::Value) {
     if !store_open_phases_enabled() {
         return;
     }
-    #[cfg(test)]
-    LAST_STORE_OPEN_PHASES.with(|cell| {
-        *cell.borrow_mut() = Some(fields.clone());
-    });
     eprintln!("{fields}");
 }
 
@@ -185,17 +169,9 @@ pub use mutation_log::MutationRow;
 
 pub const MAX_TRANSIENT_PAYLOADS: usize = 256;
 
-/// How long a durable open retries while another process holds the store.
-/// Contention is normal when two engines share a root; only a store that stays
-/// busy past this wall is treated as a real failure.
-///
-/// Policy (fszero-store-no-busy-timeout-fiey): the long-lived RecoveryStore
-/// connection also applies this wall as `PRAGMA busy_timeout` in `init_tables`.
-/// Open-path integrity gate uses a shorter per-attempt wait
-/// (`durable_busy_attempt_wait`); the live conn waits up to the full wall so
-/// multi-process writers share the store without immediate fail-open on the
-/// first SQLite busy. Env: `FSZERO_DURABLE_BUSY_WALL_MS` /
-/// `ZEROSTACK_DURABLE_BUSY_WALL_MS` (default 5000).
+/// How long a durable open retries while another process holds the store. Contention is normal when
+/// two engines share a root; only a store that stays busy past this wall is treated as a real
+/// failure.
 const DEFAULT_DURABLE_BUSY_WALL_MS: u64 = 5_000;
 
 fn durable_busy_wall() -> std::time::Duration {
@@ -209,54 +185,24 @@ fn durable_busy_wall() -> std::time::Duration {
     std::time::Duration::from_millis(ms.max(1))
 }
 
-/// How long a SINGLE gate attempt waits on the writer lock.
-///
-/// This must stay well under the total wall. The gate and the retry loop used
-/// to share one budget, which meant the very first gate attempt consumed all
-/// of it and the retry loop could never run a second attempt — the loop was
-/// effectively dead code. Keeping the per-attempt wait short is what makes
-/// retrying observable, and it also bounds how long a caller blocks before the
-/// loop gets a chance to give up on a non-transient error.
+/// How long a SINGLE gate attempt waits on the writer lock. This must stay well under the total
+/// wall.
 pub(super) fn durable_busy_attempt_wait() -> std::time::Duration {
     (durable_busy_wall() / 8).clamp(
         std::time::Duration::from_millis(25),
         std::time::Duration::from_millis(250),
     )
 }
-/// Legacy scheme rewrite for refs the engine itself stored (e.g. `read/ref`
-/// bytes). Kept ONLY for the internal stored-ref chase in
-/// `expand_current_store`; external inputs never pass through here anymore —
-/// foreign-scheme inputs go through the strict ZeroRef v1 path in
-/// `expand_zeroref` (annex §9 migration-window item 2, closed by
-/// fszero-c6q.2).
-fn normalize_ref_scheme(r: &str) -> String {
-    if let Some(rest) = r.strip_prefix("tz://").or_else(|| r.strip_prefix("gz://")) {
-        format!("fz://{rest}")
-    } else {
-        r.to_string()
-    }
-}
-
-/// ZeroRef v1 jurisdiction gate (fszero-c6q.2): inputs that claim the
-/// portable blob grammar under any engine scheme, plus every other
-/// foreign-scheme ref — under v1, foreign non-blob refs must fail typed as
-/// `unsupported` instead of being retagged and probed against this store.
-/// Engine-owned `fz://` kinds (`fz://codemode/…`, `fz://file/…`) and bare
-/// named keys stay on the legacy compatibility path.
+/// Return true when input claims a product ZeroRef scheme.
 fn claims_zeroref(r: &str) -> bool {
-    r.starts_with("fz://blob/") || r.starts_with("gz://") || r.starts_with("tz://")
+    r.starts_with("z://")
+        || r.starts_with("fz://")
+        || r.starts_with("gz://")
+        || r.starts_with("tz://")
 }
 
-/// Engine-owned `fz://` ref kinds that stay on the legacy compatibility path
-/// (never portable, never cross-engine). Advertised verbatim by the
-/// capability descriptor (fszero-c6q.5) as `ref_kinds.engine_owned`.
-pub const ENGINE_OWNED_KINDS: [&str; 3] = ["seq", "file", "codemode"];
-
-/// Named payload keys served by the legacy string-keyed path and pinned as
-/// priority-0 in [`recovery_key_priority`]. Advertised by the capability
-/// descriptor as accepted legacy aliases, so the descriptor and the lookup
-/// path share one list.
-pub const NAMED_PAYLOAD_KEYS: [&str; 6] = [
+/// Named payload keys receive the highest recovery priority.
+const NAMED_PAYLOAD_KEYS: [&str; 6] = [
     "read",
     "stat",
     "budget_evidence",
@@ -269,11 +215,9 @@ const SQL_SELECT_PAYLOAD_KEYS: &str = "SELECT key FROM payloads";
 const SQL_SELECT_PAYLOAD_KV: &str = "SELECT key, value FROM payloads";
 const SQL_SELECT_PAYLOAD_EXISTS: &str = "SELECT 1 FROM payloads WHERE key = ?1 LIMIT 1";
 const MAX_BATCH_PAYLOAD_KEY_CACHE: usize = 65_536;
-/// Per connection: 16,384 default-size (4 KiB) pages = 64 MiB.
-///
-/// FrankenSQLite otherwise defaults to 262,144 pages (about 1 GiB) and retains
-/// that pool after heavy phases. Two live recovery connections must remain
-/// inside the process-wide 256 MiB steady-idle gate.
+/// Per connection: 16,384 default-size (4 KiB) pages = 64 MiB. FrankenSQLite otherwise
+/// defaults to 262,144 pages (about 1 GiB) and retains that pool after heavy phases. Two
+/// live recovery connections must remain inside the process-wide 256 MiB steady-idle gate.
 const FSQLITE_PAGE_BUFFER_MAX: usize = 16_384;
 
 fn recovery_connection_env() -> ConnectionEnv {
@@ -286,24 +230,13 @@ const SQL_INSERT_PAYLOAD_KV: &str = "INSERT OR REPLACE INTO payloads (key, value
 const SQL_DELETE_PAYLOAD_KEY: &str = "DELETE FROM payloads WHERE key = ?1";
 const SQL_PRAGMA_WAL_CHECKPOINT_TRUNCATE: &str = "PRAGMA wal_checkpoint(TRUNCATE)";
 
-/// Env gate: `FSZERO_WAL_CHECKPOINT_PROFILE=1` records + emits wal_checkpoint TRUNCATE
-/// wall_us and page counts after end_batch / maintain_wal_cadence (fszero-61oe).
+/// Env gate: `FSZERO_WAL_CHECKPOINT_PROFILE=1` records + emits wal_checkpoint
+/// TRUNCATE wall_us and page counts after end_batch / maintain_wal_cadence.
 fn wal_checkpoint_profile_enabled() -> bool {
-    #[cfg(test)]
-    if TEST_WAL_CHECKPOINT_PROFILE.with(|flag| flag.get()) {
-        return true;
-    }
     match std::env::var("FSZERO_WAL_CHECKPOINT_PROFILE") {
         Ok(v) => matches!(v.as_str(), "1" | "true" | "TRUE" | "on" | "yes"),
         Err(_) => false,
     }
-}
-
-#[cfg(test)]
-std::thread_local! {
-    static TEST_WAL_CHECKPOINT_PROFILE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
-    static LAST_WAL_CHECKPOINT_PROFILE: std::cell::RefCell<Option<serde_json::Value>> =
-        const { std::cell::RefCell::new(None) };
 }
 
 const SQL_INSERT_MEMORY_PATHS_IGNORE: &str = "INSERT OR IGNORE INTO memory_paths (path, store_key, content_ref, updated_ts) VALUES (?1, ?2, ?3, ?4)";
@@ -312,8 +245,6 @@ const SQL_DELETE_MEMORY_PATHS_BY_STORE_KEY: &str = "DELETE FROM memory_paths WHE
 const SQL_DELETE_MEMORY_PATHS_BY_PATH: &str = "DELETE FROM memory_paths WHERE path = ?1";
 const SQL_SELECT_MEMORY_PATH_EXISTS: &str = "SELECT 1 FROM memory_paths WHERE path = ?1 LIMIT 1";
 const SQL_SELECT_MEMORY_PATHS_ORDERED: &str = "SELECT path FROM memory_paths ORDER BY path ASC";
-const SQL_DELETE_ACCESS_LOG_BEFORE: &str = "DELETE FROM access_log WHERE ts < ?1";
-const SQL_DELETE_MUTATION_LOG_RETENTION: &str = "DELETE FROM mutation_log WHERE ts < ?1 AND seq < COALESCE((SELECT MAX(seq) FROM mutation_log), 0) - 5000";
 const SQL_SELECT_PAYLOAD_VALUE_BY_KEY: &str = "SELECT value FROM payloads WHERE key = ?1";
 const SQL_INSERT_PAYLOAD_LRU: &str =
     "INSERT OR REPLACE INTO payload_lru (key, tick) VALUES (?1, ?2)";
@@ -327,12 +258,10 @@ const SQL_INSERT_FACT: &str = "INSERT OR REPLACE INTO facts (subject_ref, predic
 const SQL_SELECT_FACTS_BY_SUBJECT: &str = "SELECT predicate, object_ref, evidence_ref, version, agent FROM facts WHERE subject_ref = ?1 ORDER BY version, predicate";
 const SQL_SELECT_MEMORY_PATHS_PREFIX: &str =
     "SELECT path FROM memory_paths WHERE path = ?1 OR path LIKE ?2 ESCAPE '\\' ORDER BY path ASC";
-const SQL_DELETE_PAYLOADS_KEY_RANGE: &str = "DELETE FROM payloads WHERE key >= ?1 AND key < ?2";
-const SQL_COUNT_TRANSIENT_PAYLOADS: &str =
-    "SELECT COUNT(*) FROM payloads WHERE key LIKE 'fz://seq/%'";
-const SQL_DELETE_TRANSIENT_OVERFLOW: &str = "DELETE FROM payloads WHERE key IN (SELECT p.key FROM payloads p LEFT JOIN payload_lru l ON p.key = l.key WHERE p.key LIKE 'fz://seq/%' ORDER BY COALESCE(l.tick, 0), p.key LIMIT ?1)";
+const SQL_COUNT_TRANSIENT_PAYLOADS: &str = "SELECT COUNT(*) FROM payloads WHERE key LIKE 'seq/%'";
+const SQL_DELETE_TRANSIENT_OVERFLOW: &str = "DELETE FROM payloads WHERE key IN (SELECT p.key FROM payloads p LEFT JOIN payload_lru l ON p.key = l.key WHERE p.key LIKE 'seq/%' ORDER BY COALESCE(l.tick, 0), p.key LIMIT ?1)";
 const SQL_DELETE_ORPHAN_TRANSIENT_LRU: &str =
-    "DELETE FROM payload_lru WHERE key LIKE 'fz://seq/%' AND key NOT IN (SELECT key FROM payloads)";
+    "DELETE FROM payload_lru WHERE key LIKE 'seq/%' AND key NOT IN (SELECT key FROM payloads)";
 const SQL_UPDATE_PAYLOAD_VALUE: &str = "UPDATE payloads SET value = ?2 WHERE key = ?1";
 const SQL_SELECT_PAYLOAD_VALUES: &str = "SELECT value FROM payloads";
 const SQL_SELECT_META_V: &str = "SELECT v FROM meta WHERE k = ?1";
@@ -366,7 +295,7 @@ pub fn unix_epoch_secs() -> i64 {
 #[inline]
 pub fn seq_ref_scoped_err(r: &str) -> String {
     format!(
-        "seq_ref_scoped: {r} (fz://seq refs are execution-scoped; expand a fz://blob ref from the result instead)"
+        "seq_ref_scoped: {r} (seq/ keys are execution-scoped; expand a z://blob/ ref from the result instead)"
     )
 }
 
@@ -374,80 +303,6 @@ pub fn seq_ref_scoped_err(r: &str) -> String {
 #[inline]
 pub fn ref_not_found_err(r: &str) -> String {
     format!("ref_not_found: {r} (tiers tried: explicit/env-cache, current-root-store, ref-index)")
-}
-
-/// Store key of the versioned legacy→CAS migration manifest (fszero-c6q.3).
-pub const MIGRATION_MANIFEST_KEY: &str = "cas/migration";
-const MIGRATION_MANIFEST_VERSION: u64 = 1;
-
-/// Counts from one [`RecoveryStore::migrate_blobs_to_cas`] run. Counts only —
-/// never blob contents and never private absolute paths (fszero-c6q.3); the
-/// per-object detail lives in the manifest under [`MIGRATION_MANIFEST_KEY`],
-/// keyed by full content hash.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct MigrationReport {
-    /// Newly published into the canonical CAS this run.
-    pub migrated: u64,
-    /// Already present in the CAS as a verified identical object.
-    pub already: u64,
-    /// Payload rows that are not full-hash `fz://blob/…` keys (named keys,
-    /// view aliases, transients, the manifest itself) — never migrated.
-    pub skipped_nonblob: u64,
-    /// Legacy bytes failed their digest: recorded + reported, NEVER
-    /// published, NEVER deleted.
-    pub corrupt: u64,
-    /// Committed row whose bytes are unreadable (torn pack tail).
-    pub missing: u64,
-}
-
-#[derive(Clone, Copy)]
-enum MigrationStatus {
-    Migrated,
-    Already,
-    Corrupt,
-    Missing,
-}
-
-impl MigrationStatus {
-    fn as_str(self) -> &'static str {
-        match self {
-            Self::Migrated => "migrated",
-            Self::Already => "already",
-            Self::Corrupt => "corrupt",
-            Self::Missing => "missing",
-        }
-    }
-}
-
-struct MigratedObject {
-    hash: String,
-    source: &'static str,
-    size: u64,
-    status: MigrationStatus,
-}
-
-impl MigratedObject {
-    fn manifest_value(&self) -> serde_json::Value {
-        serde_json::json!({ "source": self.source, "size": self.size, "status": self.status.as_str() })
-    }
-}
-
-impl MigrationReport {
-    /// Shared counts object for migrate-cas domain result + store manifest.
-    pub fn counts_json(&self) -> serde_json::Value {
-        serde_json::json!({
-            "migrated": self.migrated, "already": self.already, "skipped_nonblob": self.skipped_nonblob, "corrupt": self.corrupt, "missing": self.missing,
-        })
-    }
-
-    fn record(&mut self, status: MigrationStatus) {
-        match status {
-            MigrationStatus::Migrated => self.migrated += 1,
-            MigrationStatus::Already => self.already += 1,
-            MigrationStatus::Corrupt => self.corrupt += 1,
-            MigrationStatus::Missing => self.missing += 1,
-        }
-    }
 }
 
 /// Durable open variants sharing conn/pack/ast field init.
@@ -458,9 +313,7 @@ enum DurableOpenMode {
     ExistingLight,
 }
 
-/// Why a durable open failed, kept typed until the retry loop has classified
-/// it. Rendering to a string first is what forced the retry loop to guess from
-/// substrings whether contention or corruption had been hit.
+/// Typed durable-open failure retained through retry classification.
 #[derive(Debug)]
 enum DurableOpenError {
     Gate(durable_integrity::GateError),
@@ -481,37 +334,26 @@ pub struct RecoveryStore {
     pub(super) next_id: u32,
     pub(super) last_store_error: Option<String>,
     store_writes: Cell<u64>,
-    /// Set when the CURRENT explicit transaction has written anything outside
-    /// the execution-scoped key class, i.e. anything a reopen must still see.
-    /// Drives the commit barrier choice in `commit_exec_txn` (fszero-5u7):
-    /// clean means the whole transaction is CodeMode scratch and does not need
-    /// `synchronous=FULL`. Defaults to dirty and is only cleared when a
-    /// transaction opens, so a write through a path that forgets to classify
-    /// itself keeps the barrier rather than silently losing it.
+    /// Set when the current explicit transaction writes durable state.
     exec_txn_durable_dirty: Cell<bool>,
     cache_hits: Cell<u64>,
     cache_misses: Cell<u64>,
     bytes_materialized: Cell<u64>,
-    /// Misses attributed to dependency-root CAS gap (fszero-2uhi / Q99).
+    /// Misses attributed to a dependency-root CAS gap.
     cache_miss_dependency_root: Cell<u64>,
-    /// Misses attributed to witness/toolchain unverifiable (fszero-2uhi).
+    /// Misses attributed to witness/toolchain unverifiable.
     cache_miss_witness: Cell<u64>,
-    /// Misses from full search/compound wipe (coarse invalidation) (fszero-2uhi).
+    /// Misses from full search/compound wipe (coarse invalidation).
     cache_miss_coarse_wipe: Cell<u64>,
     /// Batch-mode write buffer: payloads staged here and flushed to sqlite in
     /// sorted key order (see try_put_key). `None` outside begin/end_batch.
     pending_payloads: Option<BTreeMap<String, Arc<[u8]>>>,
     pending_bytes: usize,
     pub exec_txn_active: Cell<bool>,
-    pub exec_txn_force_full: Cell<bool>,
-    /// True only when synchronous=NORMAL was selected before the active txn.
-    exec_txn_relaxed: Cell<bool>,
-    /// Scoped allowance for one CodeMode envelope blob in a relaxed receipt txn.
-    exec_txn_receipt_blob: Cell<bool>,
     /// In-memory key cache populated during begin_batch to avoid a SQL
     /// page-read per has_payload check during bulk indexing.
     payload_key_cache: Option<HashSet<String>>,
-    /// Blob sidecar for durable stores; `None` for :memory: (all inline).
+    /// Blob sidecar for durable stores; `None` for an in-memory store.
     pack: Option<PackFile>,
     /// Pack generation this handle opened. Writers re-check it while holding
     /// SQLite's write transaction before every packed append.
@@ -521,17 +363,14 @@ pub struct RecoveryStore {
     /// Instance-local opt-out for isolated conformance fixtures. Product stores
     /// still obey the normal FSZERO_REF_INDEX process configuration.
     ref_index_disabled: bool,
-    /// One cross-root locator per CodeMode execution covers all child artifacts.
-    /// Bounded in-memory dedup avoids four sidecar appends on every execution.
-    indexed_execution_bases: std::cell::RefCell<HashSet<String>>,
     /// Set when a durable pack locator cannot be read (torn/short pack).
     /// Surfaced by `expand_with_tiers` as `pack_torn:` instead of a silent miss.
     pack_integrity_error: Cell<Option<String>>,
-    /// Last immediate put's pack barrier timing (fszero-atup; for phase emit).
+    /// Last immediate put's pack barrier timing for phase metrics.
     last_pack_sync_us: Option<u64>,
     last_pack_dirty: bool,
     last_put_bytes: usize,
-    /// Last wal_checkpoint(TRUNCATE) wall + page counts (fszero-61oe; env-gated emit).
+    /// Last `wal_checkpoint(TRUNCATE)` duration and page counts.
     last_wal_checkpoint_us: Option<u64>,
     last_wal_checkpoint_log: Option<i64>,
     last_wal_checkpoint_checkpointed: Option<i64>,
@@ -541,24 +380,16 @@ pub struct RecoveryStore {
     /// Rows inspected by this handle's bounded open maintenance (test evidence).
     open_pack_rows_scanned: usize,
     open_memory_rows_scanned: usize,
-    /// Executions since the last explicit WAL truncate (see maintain_wal_cadence).
-    exec_since_maintenance: Cell<u32>,
-    /// Ring of recent execution base refs; oldest records are range-deleted
-    /// when the ring overflows (see record_execution_base).
-    exec_history: VecDeque<String>,
-    /// Rebuildable AST rows live on real SQLite (src/core/ast_store.rs):
-    /// fsqlite's insert path made AST persistence the dominant cold-index
-    /// cost (fszero-v5n / fszero-1zi). Callers use this field directly for
-    /// pure AST ops (no RecoveryStore twin wrappers).
+    /// Rebuildable AST rows use SQLite directly because intermediary inserts dominated cold indexing.
+    /// Callers use this field for AST operations without `RecoveryStore` wrappers.
     pub ast: super::ast_store::AstStore,
-    /// Canonical shared CAS tier (fszero-zjt): consulted FIRST for blob
+    /// Canonical shared CAS tier: consulted FIRST for blob
     /// reads when attached; mint dual-writes into it. None = feature off
     /// (the blobs/ dir under the store root is the explicit opt-in).
     cas: Option<super::cas::CasStore>,
-    /// Loud-failure channel (fszero-ku8): count + last detail of every
-    /// integrity violation seen on the read path — blob hash mismatches,
-    /// torn pack locators, unparseable ref-index lines. Read via
-    /// integrity_report(); never silently cleared.
+    /// Loud-failure channel: count + last detail of every integrity violation
+    /// seen on the read path — blob hash mismatches, torn pack locators,
+    /// unparseable ref-index lines. Read via integrity_report; never silently cleared.
     integrity_violations: Cell<u64>,
     last_integrity_error: std::cell::RefCell<Option<String>>,
     /// Buffered access_log rows (same semantics as per-op INSERT; flushed on
@@ -574,7 +405,7 @@ impl Default for RecoveryStore {
 }
 
 impl RecoveryStore {
-    /// Shared field init for :memory: / durable open constructors (no twin structs).
+    /// Initialize fields shared by in-memory and durable stores.
     fn from_parts(
         conn: Connection,
         next_id: u32,
@@ -598,15 +429,11 @@ impl RecoveryStore {
             pending_payloads: None,
             pending_bytes: 0,
             exec_txn_active: Cell::new(false),
-            exec_txn_force_full: Cell::new(false),
-            exec_txn_relaxed: Cell::new(false),
-            exec_txn_receipt_blob: Cell::new(false),
             payload_key_cache: None,
             pack,
             pack_generation,
             db_path,
             ref_index_disabled: false,
-            indexed_execution_bases: std::cell::RefCell::new(HashSet::new()),
             pack_integrity_error: Cell::new(None),
             last_pack_sync_us: None,
             last_pack_dirty: false,
@@ -617,8 +444,6 @@ impl RecoveryStore {
             repaired_torn_pack_blobs: Vec::new(),
             open_pack_rows_scanned: 0,
             open_memory_rows_scanned: 0,
-            exec_since_maintenance: Cell::new(0),
-            exec_history: VecDeque::new(),
             ast,
             cas: None,
             integrity_violations: Cell::new(0),
@@ -655,14 +480,9 @@ impl RecoveryStore {
         Self::try_open_existing_durable_with_options(db_path, true)
     }
 
-    /// True when a durable-open error is SQLite busy/locked contention rather
-    /// than a fatal condition. Busy is transient by construction — another
-    /// process holds the store right now — so the caller must retry instead of
-    /// failing closed. Corruption, EACCES and integrity-gate refusals are NOT
-    /// busy and must keep failing immediately.
-    ///
-    /// The gate reports its own classification; only the paths that never see
-    /// the gate (fsqlite's own open) still have to read the message.
+    /// True when a durable-open error is SQLite busy/locked contention rather than a fatal condition.
+    /// Busy is transient by construction — another process holds the store right now — so the caller
+    /// must retry instead of failing closed.
     fn is_transient_busy(error: &DurableOpenError) -> bool {
         match error {
             DurableOpenError::Gate(gate) => gate.is_busy(),
@@ -673,11 +493,9 @@ impl RecoveryStore {
         }
     }
 
-    /// Open a durable store, retrying while another process holds it.
-    ///
-    /// Without this, two engines on one root race on `store.sqlite3` and the
-    /// loser takes a hard error on a condition SQLite defines as retryable.
-    /// The budget is bounded so a genuinely wedged store still surfaces.
+    /// Open a durable store, retrying while another process holds it. Without this, two engines
+    /// on one root race on `store.sqlite3` and the loser takes a hard error on a condition
+    /// SQLite defines as retryable. The budget is bounded so a genuinely wedged store still surfaces.
     fn open_durable_store_retrying(db_path: &Path, mode: DurableOpenMode) -> Result<Self, String> {
         // The loop owns the TOTAL budget; each gate attempt gets only a slice
         // of it (see `durable_busy_attempt_wait`).
@@ -699,10 +517,9 @@ impl RecoveryStore {
         }
     }
 
-    /// Open an existing durable store. When `run_open_maintenance` is false,
-    /// skip pack repair + memory backfill (full-table scans). Expand via
-    /// ref-index must use the light path — otherwise each miss reloads a
-    /// multi-MB store and pegs CPU.
+    /// Open an existing durable store. When `run_open_maintenance` is false, skip
+    /// pack repair + memory backfill (full-table scans). Expand via ref-index must
+    /// use the light path — otherwise each miss reloads a multi-MB store and pegs CPU.
     fn try_open_existing_durable_with_options(
         db_path: &Path,
         run_open_maintenance: bool,
@@ -818,7 +635,7 @@ impl RecoveryStore {
             ast,
         );
         store.restore_integrity_report();
-        // fszero-9smz: hub-aligned store schema version stamp + skew check.
+        // hub-aligned store schema version stamp + skew check.
         if let Err(error) = store.ensure_store_schema_version() {
             return Err(DurableOpenError::Other(error));
         }
@@ -860,12 +677,9 @@ impl RecoveryStore {
         self.db_path.is_some()
     }
 
-    /// Advance the integrity-gate mutation epoch after a durable COMMIT.
-    ///
-    /// Read-only opens must not call this: the epoch is the attestation
-    /// identity, so bumping it forces the next open through `integrity_check`
-    /// (fszero-kflx.6). A failed bump deletes the attestation rather than
-    /// leaving a stale epoch that would skip the check after a real write.
+    /// Advance the integrity-gate mutation epoch after a durable COMMIT. Read-only opens must not call
+    /// this: the epoch is the attestation identity, so bumping it forces the next open through
+    /// `integrity_check`.
     pub(super) fn note_durable_mutation(&self) {
         let Some(path) = &self.db_path else {
             return;
@@ -878,9 +692,8 @@ impl RecoveryStore {
         }
     }
 
-    /// Current `PRAGMA synchronous` as SQLite's numeric mode (2 == FULL).
-    /// Exposed so durability tests can assert that the transient-commit
-    /// relaxation is scoped and always restored (fszero-5u7).
+    /// Current `PRAGMA synchronous` as SQLite's numeric mode (2 == FULL). Exposed so
+    /// durability tests can assert that the transient-commit relaxation is scoped and always restored.
     pub fn synchronous_pragma(&self) -> Option<i64> {
         match self.conn.query("PRAGMA synchronous").ok()?.first()?.get(0) {
             Some(SqliteValue::Integer(n)) => Some(*n),
@@ -894,7 +707,7 @@ impl RecoveryStore {
         }
     }
 
-    /// Current `PRAGMA busy_timeout` in milliseconds (fszero-store-no-busy-timeout-fiey).
+    /// Current `PRAGMA busy_timeout` in milliseconds.
     /// Set at open from `durable_busy_wall`; used by contention tests and diagnostics.
     pub fn busy_timeout_ms(&self) -> Option<i64> {
         match self.conn.query("PRAGMA busy_timeout").ok()?.first()?.get(0) {
@@ -1171,7 +984,7 @@ impl RecoveryStore {
             return Err(format!("memory backfill payload unavailable: {key}"));
         };
         let content_ref = format!(
-            "fz://blob/{}",
+            "z://blob/{}",
             fszero_core::hexutil::sha256_hex_of(Sha256::digest(&bytes).into())
         );
         self.exec_params_ctx(
@@ -1223,12 +1036,12 @@ impl RecoveryStore {
         );
     }
 
-    /// Public open for session store-map expand (fszero-store-root-fragmentation-jdl).
+    /// Public open for session store-map expand.
     pub fn try_open_existing_durable_pub(db_path: &Path) -> Result<Self, String> {
         Self::try_open_existing_durable(db_path)
     }
 
-    /// Attach the canonical shared CAS tier (fszero-zjt). Reads consult it
+    /// Attach the canonical shared CAS tier. Reads consult it
     /// first; mints dual-write into it.
     pub fn attach_cas(&mut self, cas: super::cas::CasStore) {
         self.cas = Some(cas);
@@ -1248,7 +1061,7 @@ impl RecoveryStore {
         }
     }
 
-    /// Whether the canonical shared CAS tier is attached (fszero-c6q.5).
+    /// Whether the canonical shared CAS tier is attached.
     pub fn cas_attached(&self) -> bool {
         self.cas.is_some()
     }
@@ -1285,43 +1098,13 @@ impl RecoveryStore {
         Ok(hashes)
     }
 
-    /// Blob hashes from the versioned `cas/migration` manifest that were
-    /// successfully published (`migrated` / `already`). Unioned into GC roots
-    /// so peer collectors retain migrated objects even across transient ref
-    /// churn (fszero-c6q.9).
-    fn migration_manifest_cas_hashes(&self) -> HashSet<String> {
-        let Some(bytes) = self.payload(MIGRATION_MANIFEST_KEY) else {
-            return HashSet::new();
-        };
-        let Ok(value) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
-            return HashSet::new();
-        };
-        let Some(objects) = value.get("objects").and_then(|o| o.as_object()) else {
-            return HashSet::new();
-        };
-        let mut hashes = HashSet::new();
-        for (hash, meta) in objects {
-            if !super::cas::is_full_lower_hex(hash) {
-                continue;
-            }
-            let status = meta.get("status").and_then(|s| s.as_str()).unwrap_or("");
-            if status == "migrated" || status == "already" {
-                hashes.insert(hash.clone());
-            }
-        }
-        hashes
-    }
-
-    /// Full FSZero reachability root set: live refs ∪ successful migration
-    /// manifest entries (fszero-c6q.9).
+    /// Full FSZero reachability root set from live references.
     fn reachability_root_hashes(&self) -> Result<HashSet<String>, String> {
-        let mut roots = self.live_cas_hashes()?;
-        roots.extend(self.migration_manifest_cas_hashes());
-        Ok(roots)
+        self.live_cas_hashes()
     }
 
-    /// Publish `gc/roots/fszero/<project_id>/current.json` for the live root
-    /// set (fszero-c6q.9 / zerostack.cas-gc.legacy). No-op when CAS is detached.
+    /// Publish `gc/roots/fszero/<project_id>/current.json` for the live root set.
+    /// No-op when CAS is detached.
     pub fn publish_cas_gc_roots(&self) -> Result<Option<super::cas::GcRootsPublish>, String> {
         let Some(cas) = self.cas.as_ref() else {
             return Ok(None);
@@ -1362,30 +1145,11 @@ impl RecoveryStore {
         let report = self.run_cas_gc()?;
         std::fs::write(
             &marker,
-            b"fszero-cas-gc-v1
+            b"fszero-cas-gc
 ",
         )
         .map_err(|e| format!("write CAS GC marker {}: {e}", marker.display()))?;
         Ok(Some(report))
-    }
-
-    /// Count full-hash `fz://blob/<hash>` payload rows that could be migrated
-    /// to the canonical CAS. Used by doctor/telemetry; does not write or
-    /// move any bytes.
-    pub fn legacy_blob_count(&self) -> u64 {
-        let Ok(rows) = self.conn.query(SQL_SELECT_PAYLOAD_KEYS) else {
-            return 0;
-        };
-        let mut count = 0u64;
-        for row in rows {
-            let Some(key) = text_col_opt(&row, 0) else {
-                continue;
-            };
-            if super::cas::full_blob_hash(&key).is_some() {
-                count += 1;
-            }
-        }
-        count
     }
 }
 
@@ -1485,12 +1249,9 @@ fn remove_stale_pack_generation(path: &Path) -> Result<(), String> {
 }
 
 impl RecoveryStore {
-    /// Pack sidecar GC (fszero-qzt): copy every live packed payload into a
-    /// fresh generation, fsync the file and its directory entry, then publish
-    /// every locator plus `pack_gen` in one FULL-synchronous SQLite commit.
-    /// The SQLite writer lock serializes rotation with packed appends. A crash
-    /// before commit leaves the old generation authoritative; a crash after
-    /// commit leaves the fully durable new generation authoritative.
+    /// Pack sidecar GC: copy every live packed payload into a fresh generation, fsync the file and its
+    /// directory entry, then publish every locator plus `pack_gen` in one FULL-synchronous SQLite
+    /// commit. The SQLite writer lock serializes rotation with packed appends.
     pub fn compact_pack(&mut self) -> Result<(u64, u64), String> {
         if self.pending_payloads.is_some() {
             return Err("compact_pack: refusing mid-batch".to_string());
@@ -1643,12 +1404,9 @@ impl RecoveryStore {
         (live, pack_len)
     }
 
-    /// Re-open the durable connection in place so subsequent reads observe
-    /// other processes' committed writes (fszero-fi2): a connection opened
-    /// before another process's index build commit can serve stale manifest
-    /// reads, making a blocked single-indexer loser re-run the entire cold
-    /// build the winner just finished. Refuses mid-batch (staged payloads
-    /// must never be dropped). Metrics carry over.
+    /// Re-open the durable connection in place so subsequent reads observe other processes' committed
+    /// writes: a connection opened before another process's index build commit can serve stale manifest
+    /// reads, making a blocked single-indexer loser re-run the entire cold build the winner.
     pub fn reopen_durable(&mut self) -> bool {
         if self.pending_payloads.is_some() {
             return false;
@@ -1669,10 +1427,6 @@ impl RecoveryStore {
                     .cache_miss_coarse_wipe
                     .set(self.cache_miss_coarse_wipe.get());
                 fresh.bytes_materialized.set(self.bytes_materialized.get());
-                fresh
-                    .exec_since_maintenance
-                    .set(self.exec_since_maintenance.get());
-                fresh.exec_history = std::mem::take(&mut self.exec_history);
                 fresh.next_id = fresh.next_id.max(self.next_id);
                 fresh.cas = self.cas.take();
                 *self = fresh;
@@ -1683,150 +1437,6 @@ impl RecoveryStore {
                 false
             }
         }
-    }
-
-    /// Explicit legacy→CAS migration (fszero-c6q.3): publish every verified
-    /// full-hash `fz://blob/<64-hex>` payload row — inline (TAG 0x01),
-    /// packed (TAG 0x00 locator into `store.sqlite3.pack[.gN]`), and legacy
-    /// UNTAGGED rows — into the attached canonical CAS.
-    ///
-    /// Contract:
-    /// - Reads go through the existing digest-verifying path (`get_payload`
-    ///   decode + `verified_blob` whole-object digest check); corrupt legacy
-    ///   bytes are recorded in the manifest and via `note_integrity`, NEVER
-    ///   published and NEVER deleted. Unreadable (torn-pack) rows are
-    ///   recorded `missing`.
-    /// - Idempotent + resumable: `CasStore::put_prehashed` verifies an
-    ///   existing identical object (`already`), and nothing legacy is ever
-    ///   deleted or rewritten, so interruption at any point is safe — a
-    ///   re-run picks up where it stopped. Cleanup of legacy rows is a
-    ///   separate explicit user action, out of scope here.
-    /// - A versioned per-object manifest (JSON: version, objects keyed by
-    ///   FULL content hash — never prefixes — with source/size/status,
-    ///   counts) is written under [`MIGRATION_MANIFEST_KEY`].
-    pub fn migrate_blobs_to_cas(&mut self) -> Result<MigrationReport, String> {
-        if self.pending_payloads.is_some() {
-            return Err("cas_migration: refusing mid-batch".to_string());
-        }
-        if self.cas.is_none() {
-            return Err("cas_unattached: no canonical CAS attached — create <store root>/blobs (the explicit opt-in, docs/design/shared-cas.md) and re-open, or call attach_cas".to_string());
-        }
-        let (mut report, mut objects, blob_rows) = self.migration_inventory()?;
-        for (key, source) in blob_rows {
-            let object = self.migrate_blob_object(&key, source)?;
-            report.record(object.status);
-            let value = object.manifest_value();
-            objects.insert(object.hash, value);
-        }
-        let manifest = serde_json::json!({
-            "version": MIGRATION_MANIFEST_VERSION,
-            "objects": objects,
-            "counts": report.counts_json(),
-        });
-        self.try_put_key(MIGRATION_MANIFEST_KEY, manifest.to_string().as_bytes())?;
-        // FSQLite connections can retain a pre-migration read snapshot after
-        // legacy rows arrived through another process. The manifest commit is
-        // durable and visible to a fresh connection, so rebind this handle to
-        // that committed generation before returning it to the caller.
-        if self.is_durable() && !self.reopen_durable() {
-            return Err("cas_migration: committed manifest could not be reopened".to_string());
-        }
-        Ok(report)
-    }
-
-    fn migration_inventory(
-        &self,
-    ) -> Result<
-        (
-            MigrationReport,
-            BTreeMap<String, serde_json::Value>,
-            Vec<(String, &'static str)>,
-        ),
-        String,
-    > {
-        let rows = self
-            .conn
-            .query(SQL_SELECT_PAYLOAD_KV)
-            .map_err(|error| format!("cas_migration: {error}"))?;
-        let mut report = MigrationReport::default();
-        let mut objects = BTreeMap::new();
-        for key in &self.repaired_torn_pack_blobs {
-            let object = MigratedObject {
-                hash: super::cas::full_blob_hash(key)
-                    .expect("repair records only full blob refs")
-                    .to_string(),
-                source: "packed",
-                size: 0,
-                status: MigrationStatus::Missing,
-            };
-            report.record(object.status);
-            let value = object.manifest_value();
-            objects.insert(object.hash, value);
-        }
-        let mut blob_rows = Vec::new();
-        for row in rows {
-            let Some((key, value)) = text_blob0_1(&row) else {
-                continue;
-            };
-            if super::cas::full_blob_hash(key).is_none() {
-                report.skipped_nonblob += 1;
-                continue;
-            }
-            let source = if decode_packed_locator(value).is_some() {
-                "packed"
-            } else {
-                "inline"
-            };
-            blob_rows.push((key.to_string(), source));
-        }
-        Ok((report, objects, blob_rows))
-    }
-
-    fn migrate_blob_object(
-        &mut self,
-        key: &str,
-        source: &'static str,
-    ) -> Result<MigratedObject, String> {
-        let hash = super::cas::full_blob_hash(key)
-            .expect("migration inventory keeps only full blob refs")
-            .to_string();
-        let Some(raw) = self.get_payload(key) else {
-            return Ok(MigratedObject {
-                hash,
-                source,
-                size: 0,
-                status: MigrationStatus::Missing,
-            });
-        };
-        let size = raw.len() as u64;
-        let Some(bytes) = self.verified_blob(key, raw) else {
-            return Ok(MigratedObject {
-                hash,
-                source,
-                size,
-                status: MigrationStatus::Corrupt,
-            });
-        };
-        let published = self
-            .cas
-            .as_ref()
-            .expect("checked before migration inventory")
-            .put_prehashed(&hash, &bytes);
-        let status = match published {
-            Ok(outcome) if outcome.created => MigrationStatus::Migrated,
-            Ok(_) => MigrationStatus::Already,
-            Err(error @ super::cas::CasError::Corrupt { .. }) => {
-                self.note_integrity(format!("cas_corrupt: {error}"));
-                MigrationStatus::Corrupt
-            }
-            Err(error) => return Err(format!("cas_migration: publish failed: {error}")),
-        };
-        Ok(MigratedObject {
-            hash,
-            source,
-            size,
-            status,
-        })
     }
 }
 
@@ -1847,10 +1457,9 @@ fn ensure_column(conn: &Connection, probe_sql: &str, alter_sql: &str) {
 const AST_NODES_DDL: &str = "CREATE TABLE IF NOT EXISTS ast_nodes (id INTEGER PRIMARY KEY, file_key TEXT, kind TEXT, span_start INTEGER, span_end INTEGER, symbol TEXT, parent INTEGER, version INTEGER DEFAULT 0)";
 
 fn init_tables(conn: &Connection) {
-    // 64MB page cache: bulk indexing of multi-hundred-MB corpora thrashes a
-    // small cache into a read-modify-write storm (profiled: 26% of a fresh
-    // 23k-file (208MB) scale index was pager re-reads). Memory is transient and bounded.
-    // Mutation journal: durable basis for fs.history / fs.undo (blobs in payloads).
+    // 64MB page cache: bulk indexing of multi-hundred-MB corpora thrashes a small cache into a
+    // read-modify-write storm (profiled: 26% of a fresh 23k-file (208MB) scale index was pager
+    // re-reads). Memory is transient and bounded.
     let _ = conn.execute_batch(
         "PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA temp_store=MEMORY; PRAGMA cache_size=-65536;\
          CREATE TABLE IF NOT EXISTS payloads (key TEXT PRIMARY KEY, value BLOB);\
@@ -1860,7 +1469,7 @@ fn init_tables(conn: &Connection) {
          CREATE TABLE IF NOT EXISTS integrity_state (id INTEGER PRIMARY KEY, violations INTEGER NOT NULL, detail TEXT NOT NULL);CREATE TABLE IF NOT EXISTS edit_intents (id INTEGER PRIMARY KEY, root TEXT NOT NULL, path TEXT NOT NULL, state TEXT NOT NULL, pre BLOB NOT NULL, post BLOB NOT NULL, pre_ref TEXT NOT NULL, post_ref TEXT NOT NULL, pre_mtime_ns INTEGER NOT NULL, pre_mode INTEGER NOT NULL, pre_xattrs TEXT NOT NULL, created_ns INTEGER NOT NULL);\
          CREATE TABLE IF NOT EXISTS mutation_log (seq INTEGER PRIMARY KEY, ts INTEGER NOT NULL, op TEXT NOT NULL, path TEXT NOT NULL, pre_ref TEXT NOT NULL, post_ref TEXT NOT NULL, created INTEGER NOT NULL DEFAULT 0, session_window INTEGER NOT NULL DEFAULT 0, agent TEXT NOT NULL DEFAULT '', pre_mtime_ns INTEGER NOT NULL DEFAULT 0, pre_mode INTEGER NOT NULL DEFAULT -1, pre_xattrs TEXT NOT NULL DEFAULT '');",
     );
-    // Steady-state multi-writer wait policy (fszero-store-no-busy-timeout-fiey):
+    // Steady-state multi-writer wait policy:
     // stock/fsqlite default is fail-immediate on busy; that made begin_txn_core
     // fail-open without waiting. Align with durable_busy_wall (env-overridable).
     let busy_ms = durable_busy_wall().as_millis().max(1);
@@ -1884,22 +1493,16 @@ fn init_tables(conn: &Connection) {
     );
     let _ = conn.execute("CREATE INDEX IF NOT EXISTS idx_mutation_log_path ON mutation_log(path)");
     let _ = conn.execute(AST_NODES_DDL);
-    // Legacy migration: pre-version stores lack the column. Probe before
-    // altering — fsqlite accepts a duplicate ADD COLUMN silently (stock
-    // SQLite errors), which writes a malformed schema (two `version`
-    // columns) that spec-compliant readers then refuse to prepare against.
+    // Legacy migration: pre-version stores lack the column. Probe before altering — fsqlite
+    // accepts a duplicate ADD COLUMN silently (stock SQLite errors), which writes a malformed
+    // schema (two `version` columns) that spec-compliant readers then refuse to prepare against.
     ensure_column(
         conn,
         "SELECT version FROM ast_nodes LIMIT 0",
         "ALTER TABLE ast_nodes ADD COLUMN version INTEGER DEFAULT 0",
     );
-    // Repair (fszero-cqen): stores written before the probe-before-ALTER
-    // discipline above can carry a malformed ast_nodes schema (duplicate
-    // `version` column). Spec-compliant SQLite readers then refuse to
-    // prepare ANY statement against the store ("malformed database schema"),
-    // which breaks external tooling (checkpoint/vacuum/inspection). Detect
-    // via the stored CREATE TABLE sql and rebuild the table; its rows are a
-    // derived index, repopulated by the ast indexer.
+    // Repair: stores written before the probe-before-ALTER discipline above can carry a malformed
+    // ast_nodes schema (duplicate `version` column).
     if let Ok(rows) =
         conn.query("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'ast_nodes'")
         && let Some(sql) = rows.first().and_then(|row| text_col_opt(row, 0))
@@ -2033,7 +1636,7 @@ pub fn recovery_key_priority(key: &str) -> u8 {
         0
     } else if key.ends_with("/ref") {
         1
-    } else if key.starts_with("fz://blob/") {
+    } else if key.starts_with("z://blob/") {
         2
     } else {
         3
@@ -2068,8 +1671,8 @@ impl RecoveryStore {
         )
     }
 
-    /// Stamp / check store schema version (fszero-store-schema-version-9smz).
-    /// Overall + per-segment (journal, bookmarks, quarantine) meta keys.
+    /// Stamp / check store schema version. Overall +
+    /// per-segment (journal, bookmarks, quarantine) meta keys.
     pub fn ensure_store_schema_version(&mut self) -> Result<(), String> {
         use super::store_schema_version::{
             META_STORE_SCHEMA_VERSION, STORE_SCHEMA_VERSION, SchemaSkew, check_schema_skew,
@@ -2103,18 +1706,13 @@ impl RecoveryStore {
         Ok(())
     }
 
-    #[cfg(test)]
-    pub fn meta_i64_for_test(&self, k: &str) -> Option<i64> {
-        meta_i64(&self.conn, k)
-    }
-
     pub fn put(&mut self, kind: &str, data: &[u8]) -> String {
         let id = self.next_id;
         self.next_id += 1;
-        let r = format!("fz://seq/{}/{}", kind, id);
+        let r = format!("seq/{}/{}", kind, id);
         if let Err(e) = self.try_put_key(&r, data) {
             self.last_store_error = Some(e);
-            return format!("fz://seq/{kind}/error");
+            return format!("seq/{kind}/error");
         }
         r
     }
@@ -2129,24 +1727,7 @@ impl RecoveryStore {
             Ok(r) => r,
             Err(e) => {
                 self.last_store_error = Some(e);
-                "fz://blob/error".to_string()
-            }
-        }
-    }
-
-    /// Persist the final CodeMode envelope in the same process-kill-durable
-    /// NORMAL class as its read-only execution receipts. Only valid inside a
-    /// relaxed execution transaction; all other blob mints remain FULL-durable.
-    pub fn put_codemode_receipt_content_ref(&mut self, data: &[u8]) -> String {
-        let allowed = self.exec_txn_active.get() && self.exec_txn_relaxed.get();
-        self.exec_txn_receipt_blob.set(allowed);
-        let result = self.try_put_content_ref(data);
-        self.exec_txn_receipt_blob.set(false);
-        match result {
-            Ok(reference) => reference,
-            Err(error) => {
-                self.last_store_error = Some(error);
-                "fz://blob/error".to_string()
+                "z://blob/error".to_string()
             }
         }
     }
@@ -2156,16 +1737,14 @@ impl RecoveryStore {
         h.update(data);
         let hash = fszero_core::hexutil::sha256_hex_of(h.finalize().into());
         let r = format!("{}://blob/{hash}", EMITTED_SCHEME.as_str());
-        // Warm hit: payload already durable — skip CAS dual-write and ref-index
-        // append (idempotent identity; no new mint work). Still hash once so the
-        // address is content-bound (fszero-w2g warm path).
+        // Warm hit: payload already durable — skip CAS dual-write and ref-index append (idempotent
+        // identity; no new mint work). Still hash once so the address is content-bound ( warm path).
         if self.has_payload(&r) {
             return Ok(r);
         }
         self.try_put_key(&r, data)?;
-        // Canonical CAS dual-write (fszero-zjt): the shared tier is what
-        // makes identical checkouts dedup. Fail-open — the legacy store
-        // already holds the bytes; a CAS write failure only costs sharing.
+        // The shared CAS deduplicates identical checkouts. The primary store already owns the
+        // bytes, so a CAS write failure only costs sharing.
         if let Some(cas) = &self.cas {
             let _ = cas.put_prehashed(&hash, data);
         }
@@ -2223,15 +1802,14 @@ impl RecoveryStore {
         self.last_store_error.take()
     }
 
-    /// Test/harness: queue a store fault consumed by the next `take_store_error`.
+    /// Test hook that queues a store fault for the next `take_store_error`.
     pub fn inject_store_error_for_test(&mut self, msg: impl Into<String>) {
         self.last_store_error = Some(msg.into());
     }
 
-    /// Payload-store presence counters, not a 3C (compulsory/capacity/conflict) hit rate.
-    ///
-    /// `cache_hits` / `cache_misses` count whether a recovery payload key was already
-    /// present. They are not SQLite page-cache stats and have no reuse-distance.
+    /// Payload-store presence counters, not a 3C (compulsory/capacity/conflict) hit
+    /// rate. `cache_hits` / `cache_misses` count whether a recovery payload key was
+    /// already present. They are not SQLite page-cache stats and have no reuse-distance.
     pub fn metric_snapshot(&self) -> (u64, u64, u64, u64) {
         (
             self.cache_hits.get(),
@@ -2241,11 +1819,9 @@ impl RecoveryStore {
         )
     }
 
-    /// Payload cache hits/misses plus Q99 miss-cause split (fszero-2uhi).
-    ///
-    /// Causes are additive detail under aggregate `cache_misses` when the miss
-    /// path attributes a reason; unattributed cold misses only bump the
-    /// aggregate. `coarse_wipe` counts entries dropped by full query-cache clear.
+    /// Payload cache hits/misses plus Q99 miss-cause split. Causes are additive detail under
+    /// aggregate `cache_misses` when the miss path attributes a reason; unattributed cold
+    /// misses only bump the aggregate. `coarse_wipe` counts entries dropped by full query-cache clear.
     pub fn cache_miss_cause_snapshot(&self) -> CacheMissCauseSnapshot {
         CacheMissCauseSnapshot {
             hits: self.cache_hits.get(),
@@ -2308,13 +1884,12 @@ impl RecoveryStore {
         sql_explain::maybe_capture_sql_explains(&self.conn, out_dir)
     }
 
-    /// Record that the open transaction wrote something a reopen must still
-    /// see, so its commit keeps the FULL barrier (fszero-5u7).
+    /// Record that the open transaction wrote state a reopen must still see.
     pub(super) fn mark_exec_txn_durable_dirty(&self) {
         self.exec_txn_durable_dirty.set(true);
     }
 
-    /// Test hook: is the open exec txn carrying non-execution-scoped writes?
+    /// Test hook for durable-dirty transaction state.
     pub fn exec_txn_durable_dirty_for_test(&self) -> bool {
         self.exec_txn_durable_dirty.get()
     }
@@ -2347,9 +1922,8 @@ impl RecoveryStore {
         }
     }
 
-    /// Record an integrity violation loudly (fszero-ku8): counted, detailed,
-    /// and surfaced through integrity_report() / expand errors — a damaged
-    /// record is reported and skipped, never served or silently absorbed.
+    /// Record an integrity violation loudly: counted, detailed, and surfaced through integrity_report
+    /// / expand errors — a damaged record is reported and skipped, never served or silently absorbed.
     fn note_integrity(&self, detail: String) {
         let violations = self.integrity_violations.get().saturating_add(1);
         self.integrity_violations.set(violations);
@@ -2373,54 +1947,37 @@ impl RecoveryStore {
         )
     }
 
-    /// Shared store_health / migration_legacy / peer_incompatibility / layout
-    /// fields for session and embedded root_report (byte-identical fragments).
+    /// Shared store-health, peer-compatibility, and layout fields for root reports.
     pub fn root_report_store_fragments(
         &self,
         durable_degraded: bool,
         capabilities: &serde_json::Value,
-    ) -> (
-        String,
-        serde_json::Value,
-        serde_json::Value,
-        serde_json::Value,
-        Option<String>,
-    ) {
+    ) -> (String, serde_json::Value, serde_json::Value, Option<String>) {
         let layout_version = capabilities
-            .pointer("/contract/version")
-            .and_then(|v| v.as_str())
-            .unwrap_or("v1")
-            .to_string();
+            .pointer("/shared_cas/layout_version")
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| zero_store::CAS_LAYOUT_VERSION.to_string());
         let (integrity_violations, last_integrity_error) = self.integrity_report();
-        let cas_attached = self.cas_attached();
-        let cas_writable = self.cas_writable();
-        let legacy_blob_rows = self.legacy_blob_count();
-        let migration_available = cas_attached && legacy_blob_rows > 0;
         let store_health = serde_json::json!({
-            "durable": self.store_db_path().is_some() && !durable_degraded, "cas_attached": cas_attached, "cas_writable": cas_writable,
+            "durable": self.store_db_path().is_some() && !durable_degraded,
+            "cas_attached": self.cas_attached(),
+            "cas_writable": self.cas_writable(),
             "integrity_violations": integrity_violations,
         });
-        let migration_legacy = serde_json::json!({
-            "legacy_blob_rows": legacy_blob_rows, "migration_manifest_key": MIGRATION_MANIFEST_KEY, "migration_available": migration_available,
-        });
-        let peer_incompatibility = serde_json::json!({
-            "foreign_blob_reads": "same_store_retag", "note": capabilities.pointer("/interop/note").and_then(|v| v.as_str()).unwrap_or(""),
-        });
+        let peer_incompatibility = serde_json::json!({});
         (
             layout_version,
             store_health,
-            migration_legacy,
             peer_incompatibility,
             last_integrity_error,
         )
     }
 
-    /// Content-addressed reads verify the complete object digest before the
-    /// bytes are served (fszero-ku8 / ZeroRef v1): a blob whose sha256 does
-    /// not match its key is corruption — report it and treat as missing so
-    /// outer tiers (ref-index) can supply a good copy.
+    /// Content-addressed reads verify the complete object digest before the bytes are
+    /// served through ZeroRef: a blob whose SHA-256 does not match its key is corruption;
+    /// report it and treat as missing so outer tiers (ref-index) can supply a good copy.
     fn verified_blob(&self, key: &str, bytes: Vec<u8>) -> Option<Vec<u8>> {
-        let Some(expected) = key.strip_prefix("fz://blob/") else {
+        let Some(expected) = key.strip_prefix("z://blob/") else {
             return Some(bytes);
         };
         let actual = fszero_core::hexutil::sha256_hex_of(Sha256::digest(&bytes).into());
@@ -2436,34 +1993,23 @@ impl RecoveryStore {
     }
 
     pub fn expand_with_tiers(&self, r: &str) -> Result<Vec<u8>, String> {
-        let key = normalize_ref_scheme(r);
         self.pack_integrity_error.set(None);
-        // Execution-scoped refs are never durable — give a corrective message
-        // that names the next call, not a dead-end not-found. Kept ahead of
-        // the v1 gate so tz/gz seq refs keep the guidance error too.
-        if ZeroScheme::ALL.iter().any(|s| {
-            r.strip_prefix(s.as_str())
-                .is_some_and(|rest| rest.starts_with("://seq/"))
-        }) {
+        if r.starts_with("seq/") {
             return Err(seq_ref_scoped_err(r));
         }
 
-        // Strict ZeroRef v1 path (fszero-c6q.2): one parser/canonicalizer and
-        // one fragment algebra for every surface that reaches this store.
-        // Typed error classes render as "class: message" strings here.
+        // Product-scheme refs use one parser and fragment algebra.
         if claims_zeroref(r) {
             return self.expand_zeroref(r).map_err(|e| e.to_string());
         }
-        // Legacy compatibility path (annex §9 migration window): opaque
-        // payload keys, named keys ("search", "read"), view aliases, and
-        // engine-owned fz:// kinds (fz://codemode/…, fz://file/…).
+        // Engine-local payload keys and view aliases stay in the recovery store.
         if let Some(payload) = self.expand_current_store(r) {
             return Ok(payload);
         }
         if let Some(err) = self.pack_integrity_error.take() {
             return Err(err);
         }
-        if let Some(payload) = self.expand_from_ref_index(&key) {
+        if let Some(payload) = self.expand_from_ref_index(r) {
             return Ok(payload);
         }
         if let (n, Some(detail)) = self.integrity_report() {
@@ -2474,24 +2020,13 @@ impl RecoveryStore {
         Err(ref_not_found_err(r))
     }
 
-    /// Strict ZeroRef v1 expansion (fszero-c6q.2): parse through `ZeroRef`
-    /// (typed grammar errors, full-hash only, foreign non-blob kinds
-    /// `unsupported`), resolve the WHOLE object through the digest-verifying
-    /// tiers (`verified_blob`, fszero-ku8), and only then apply the `#B`/`#L`
-    /// fragment to the verified bytes. A corrupt stored object therefore
-    /// fails with `digest_mismatch` even when the requested fragment bytes
-    /// happen to be intact.
-    ///
-    /// `gz://blob/…`/`tz://blob/…` inputs are looked up under the local
-    /// `fz://blob/<hash>` key: a same-store provenance convenience for hub
-    /// sessions, NOT cross-engine interop — the scheme is an identity claim
-    /// and this store can only serve content it already holds (annex
-    /// "Same-store limitation"). Errors carry the canonical full ref, never a
-    /// truncated hash and never a private store path.
+    /// Parse and resolve a full canonical ZeroRef before applying its fragment.
+    /// Digest verification covers the complete object, so corruption outside the
+    /// selected fragment still fails with `digest_mismatch`.
     pub fn expand_zeroref(&self, r: &str) -> Result<Vec<u8>, ZeroRefError> {
         let parsed = ZeroRef::parse(r)?;
         let canonical = parsed.to_string();
-        let key = format!("fz://blob/{}", parsed.hash);
+        let key = format!("z://blob/{}", parsed.hash);
         // Canonical CAS corruption is terminal; a clean miss falls through.
         if let Some(bytes) = self.expand_zeroref_from_cas(&parsed, &canonical)? {
             return Ok(bytes);
@@ -2590,19 +2125,12 @@ impl RecoveryStore {
     }
 
     fn expand_current_store(&self, key: &str) -> Option<Vec<u8>> {
-        if key == "read" {
-            if let Some(ref_bytes) = self
-                .get_payload("read/ref")
-                .or_else(|| self.get_payload("read"))
-            {
-                let maybe_ref = String::from_utf8_lossy(&ref_bytes);
-                if maybe_ref.starts_with("fz://blob/")
-                    || maybe_ref.starts_with("tz://blob/")
-                    || maybe_ref.starts_with("gz://blob/")
-                {
-                    return self.expand_current_store(&normalize_ref_scheme(&maybe_ref));
-                }
-                return Some(ref_bytes);
+        if key == "read"
+            && let Some(ref_bytes) = self.get_payload("read/ref")
+        {
+            let content_ref = String::from_utf8_lossy(&ref_bytes);
+            if content_ref.starts_with("z://blob/") {
+                return self.expand_zeroref(&content_ref).ok();
             }
         }
         if let Some(payload) = self.get_payload(key) {
@@ -2620,31 +2148,29 @@ impl RecoveryStore {
                 .and_then(|rest| rest.strip_suffix("/bytes"))
                 .map(|view_id| format!("r{view_id}/ref"))
         };
-        if let Some(ref_key) = alias_ref_key {
-            if let Some(ref_bytes) = self.get_payload(&ref_key) {
-                let content_ref = normalize_ref_scheme(&String::from_utf8_lossy(&ref_bytes));
-                return self.expand_current_store(&content_ref);
+        if let Some(ref_key) = alias_ref_key
+            && let Some(ref_bytes) = self.get_payload(&ref_key)
+        {
+            let content_ref = String::from_utf8_lossy(&ref_bytes);
+            if content_ref.starts_with("z://blob/") {
+                return self.expand_zeroref(&content_ref).ok();
             }
         }
         None
     }
 
     fn expand_from_ref_index(&self, key: &str) -> Option<Vec<u8>> {
-        // Blobs + fz://codemode/execution/… (and other indexable fz:// keys).
-        // Named store-local keys stay current-root only.
+        // Only canonical durable refs enter the cross-root index.
         if self.ref_index_disabled || !ref_index_enabled() || !ref_indexable(key) {
             return None;
         }
-        let mut locator_refs = vec![key.to_string()];
-        if let Some(base) = codemode_execution_base_ref(key) {
-            locator_refs.push(base);
-        }
-        for locator_ref in locator_refs {
-            if let Some(shard) = ref_index_shard_path(&locator_ref) {
-                let (_, damaged) = read_ref_index_entries_reporting(&shard);
-                if damaged > 0 {
-                    self.note_integrity(format!("ref_index_damaged: {damaged} unparseable line(s) in {} (valid lines still served)", shard.display() ));
-                }
+        if let Some(shard) = ref_index_shard_path(key) {
+            let (_, damaged) = read_ref_index_entries_reporting(&shard);
+            if damaged > 0 {
+                self.note_integrity(format!(
+                    "ref_index_damaged: {damaged} unparseable line(s) in {} (valid lines still served)",
+                    shard.display()
+                ));
             }
         }
         for _ in 0..2 {
@@ -2821,11 +2347,9 @@ impl RecoveryStore {
         self.ast.fn_span(symbol, version)
     }
 
-    /// Group many small writes into one transaction. fsqlite autocommits per
-    /// statement otherwise, which turns index persistence into thousands of
-    /// individual commits — 41% of a fresh-index run (16.7s on a 61-file
-    /// corpus). Fail-open: if BEGIN fails (e.g. already in a txn) the writes
-    /// simply run autocommitted like before.
+    /// Group many small writes into one transaction. fsqlite autocommits per statement otherwise, which
+    /// turns index persistence into thousands of individual commits — 41% of a fresh-index run (16.7s
+    /// on a 61-file corpus).
     pub fn begin_batch(&mut self) -> bool {
         self.begin_txn_core(true)
     }
@@ -2891,10 +2415,6 @@ impl RecoveryStore {
             "log_pages": log_pages,
             "checkpointed_pages": checkpointed,
         });
-        #[cfg(test)]
-        LAST_WAL_CHECKPOINT_PROFILE.with(|cell| {
-            *cell.borrow_mut() = Some(doc.clone());
-        });
         eprintln!("{doc}");
     }
 
@@ -2903,8 +2423,8 @@ impl RecoveryStore {
     }
 
     pub fn end_batch(&mut self, began: bool) {
-        // Nested index builds borrow the outer CodeMode transaction. A false
-        // begin with a live overlay means the outer owner must flush/commit it.
+        // Nested index builds borrow the outer transaction. A false begin with
+        // a live overlay leaves flush and commit to the outer owner.
         if !began && self.pending_payloads.is_some() {
             return;
         }
@@ -2920,10 +2440,8 @@ impl RecoveryStore {
                 self.last_store_error = Some(e.clone());
                 self.note_integrity(format!("batch_flush_failed: {e}"));
             } else if let Err(e) = self.conn.execute("COMMIT") {
-                // A silently-failed bulk COMMIT is the prime suspect for
-                // cross-process losers re-running cold builds (fszero-fi2):
-                // the whole batch — index rows, manifest — evaporates with
-                // no trace. Make it loud on both channels.
+                // A silently-failed bulk COMMIT is the prime suspect for cross-process losers re-running cold builds
+                // the whole batch — index rows, manifest — evaporates with no trace. Make it loud on both channels.
                 let _ = self.conn.execute("ROLLBACK");
                 eprintln!("fszero: bulk batch COMMIT failed: {e}");
                 self.last_store_error = Some(format!("batch commit failed: {e}"));
@@ -2936,7 +2454,7 @@ impl RecoveryStore {
         }
         self.run_wal_checkpoint_truncate("end_batch");
         let _ = self.conn.execute("PRAGMA wal_autocheckpoint=1000");
-        // Opportunistic pack GC (fszero-qzt): batch boundaries are the rare,
+        // Opportunistic pack GC: batch boundaries are the rare,
         // already-heavy moments; reclaim when over half the pack is dead and
         // the file is big enough to matter.
         let (live, pack_len) = self.pack_report();
@@ -2948,20 +2466,9 @@ impl RecoveryStore {
         }
     }
 
-    /// Lightweight per-execution write batch: one BEGIN IMMEDIATE..COMMIT
-    /// around a CodeMode execution's many small put_keys. finish() alone
-    /// persists up to ~9 keys and the runtime adds per-step writes; with
-    /// fsqlite autocommit each was its own WAL commit, so a long-lived
-    /// codemode server hit the 1000-page autocheckpoint ON the request path
-    /// every ~40 executions — profiled as a periodic ~300ms/request window
-    /// that was 54% File::sync_all + 28% read_at (88% kernel time).
-    /// Unlike begin_batch: no payload-key preload, no checkpoint on commit —
-    /// WAL maintenance runs on a cadence via maintain_wal_cadence().
-    /// Fail-open like begin_batch: if BEGIN fails, writes autocommit.
-    fn initialize_exec_txn_state(&mut self, relaxed: bool) {
+    /// Initialize a FULL-synchronous transaction for a group of related writes.
+    fn initialize_exec_txn_state(&mut self) {
         self.exec_txn_durable_dirty.set(false);
-        self.exec_txn_force_full.set(false);
-        self.exec_txn_relaxed.set(relaxed);
         self.exec_txn_active.set(true);
     }
 
@@ -2978,181 +2485,47 @@ impl RecoveryStore {
         }
         let began = self.begin_txn_core(false);
         if began {
-            self.initialize_exec_txn_state(false);
-        }
-        began
-    }
-
-    /// NORMAL is allowed only for audited read receipts and final CodeMode
-    /// envelope blobs. Any other durable payload makes commit roll back.
-    pub fn relaxed_exec_txn_active(&self) -> bool {
-        self.exec_txn_active.get() && self.exec_txn_relaxed.get()
-    }
-
-    pub fn begin_exec_txn_relaxed(&mut self) -> bool {
-        if self.pending_payloads.is_some() || !self.set_synchronous("NORMAL") {
-            return false;
-        }
-        let began = self.begin_txn_core(false);
-        if began {
-            self.initialize_exec_txn_state(true);
-        } else if !self.set_synchronous("FULL") {
-            self.last_store_error = Some(
-                "failed to restore synchronous=FULL after relaxed execution BEGIN failure".into(),
-            );
+            self.initialize_exec_txn_state();
         }
         began
     }
 
     fn clear_exec_txn_state(&mut self) {
         self.exec_txn_active.set(false);
-        self.exec_txn_force_full.set(false);
         self.exec_txn_durable_dirty.set(true);
-        self.exec_txn_relaxed.set(false);
-        self.exec_txn_receipt_blob.set(false);
-    }
-
-    fn restore_exec_txn_full_after_end(&mut self, relaxed: bool) {
-        if relaxed && !self.set_synchronous("FULL") {
-            self.last_store_error =
-                Some("failed to restore synchronous=FULL after execution transaction".into());
-        }
     }
 
     pub fn rollback_exec_txn(&mut self, began: bool) {
         if !began || !self.exec_txn_active.get() {
             return;
         }
-        let relaxed = self.exec_txn_relaxed.get();
         let _ = self.conn.execute("ROLLBACK");
         self.pending_payloads = None;
         self.pending_bytes = 0;
-        self.restore_exec_txn_full_after_end(relaxed);
         self.clear_exec_txn_state();
-    }
-
-    pub fn mark_exec_txn_full(&self) {
-        self.exec_txn_force_full.set(true);
-        self.exec_txn_durable_dirty.set(true);
-    }
-
-    pub fn suspend_exec_txn(&mut self) -> Result<(), String> {
-        if !self.exec_txn_active.get() {
-            return Ok(());
-        }
-        if self.exec_txn_durable_dirty.get() {
-            if self.exec_txn_relaxed.get() {
-                self.rollback_exec_txn(true);
-            }
-            return Err(
-                "crash-atomic edit must be the first durable mutation in a CodeMode plan".into(),
-            );
-        }
-        let relaxed = self.exec_txn_relaxed.get();
-        if let Err(error) = self.flush_pending_payloads() {
-            self.rollback_exec_txn(true);
-            return Err(error);
-        }
-        self.pending_payloads = None;
-        self.pending_bytes = 0;
-        let result = self
-            .conn
-            .execute("COMMIT")
-            .map(|_| ())
-            .map_err(|error| format!("execution suspension commit failed: {error}"));
-        if result.is_err() {
-            let _ = self.conn.execute("ROLLBACK");
-        }
-        self.restore_exec_txn_full_after_end(relaxed);
-        self.clear_exec_txn_state();
-        result
     }
 
     pub fn commit_exec_txn(&mut self, began: bool) {
         if !began {
             return;
         }
-        let relaxed = self.exec_txn_relaxed.get();
-        // Fail closed rather than publishing any non-receipt data at NORMAL.
-        if relaxed && (self.exec_txn_force_full.get() || self.exec_txn_durable_dirty.get()) {
+        if let Err(error) = self.flush_pending_payloads() {
+            self.last_store_error = Some(error);
             let _ = self.conn.execute("ROLLBACK");
             self.pending_payloads = None;
             self.pending_bytes = 0;
-            self.restore_exec_txn_full_after_end(true);
-            self.clear_exec_txn_state();
-            self.last_store_error =
-                Some("relaxed execution transaction became durable-dirty; rolled back".into());
-            return;
-        }
-        if let Err(e) = self.flush_pending_payloads() {
-            self.last_store_error = Some(e);
-            let _ = self.conn.execute("ROLLBACK");
-            self.pending_payloads = None;
-            self.pending_bytes = 0;
-            self.restore_exec_txn_full_after_end(relaxed);
             self.clear_exec_txn_state();
             return;
         }
         self.pending_payloads = None;
         self.pending_bytes = 0;
         let durable = self.exec_txn_durable_dirty.get();
-        if let Err(e) = self.conn.execute("COMMIT") {
+        if let Err(error) = self.conn.execute("COMMIT") {
             let _ = self.conn.execute("ROLLBACK");
-            self.last_store_error = Some(format!("exec txn commit failed: {e}"));
+            self.last_store_error = Some(format!("exec txn commit failed: {error}"));
         } else if durable {
             self.note_durable_mutation();
         }
-        self.restore_exec_txn_full_after_end(relaxed);
         self.clear_exec_txn_state();
-    }
-
-    /// Move WAL bytes into the main db between requests. Called after every
-    /// execution reply; actually truncates every 32nd execution, so each
-    /// checkpoint moves a bounded, small WAL instead of letting the
-    /// autocheckpoint fire mid-request on an unbounded one.
-    pub fn maintain_wal_cadence(&mut self) {
-        let n = self.exec_since_maintenance.get() + 1;
-        if n >= 32 {
-            self.exec_since_maintenance.set(0);
-            // Retention for the access ledger: one row per read/search/edit
-            // with three indexes and no GC meant real repo stores grew
-            // without bound (and every insert paid the growth). Two weeks
-            // fully covers the hot/recent orientation surfaces.
-            let cutoff = unix_epoch_secs().saturating_sub(14 * 24 * 3600);
-            let cp = [sql_int(cutoff)];
-            let _ = self
-                .conn
-                .execute_with_params(SQL_DELETE_ACCESS_LOG_BEFORE, &cp);
-            // mutation_log GC (fszero-lim): drop old journal rows but keep the
-            // newest 5000 so recent history/undo still works.
-            let _ = self
-                .conn
-                .execute_with_params(SQL_DELETE_MUTATION_LOG_RETENTION, &cp);
-            self.run_wal_checkpoint_truncate("maintain_wal_cadence");
-        } else {
-            self.exec_since_maintenance.set(n);
-        }
-    }
-
-    /// Bound execution-history growth. Every execution persists ~5 immutable
-    /// keys under codemode/execution/<id>/; a warm server accretes them
-    /// without bound and payload-btree growth showed up as linear
-    /// per-request drift (2.4ms -> 8ms over 600 executions). Keep the last
-    /// 256 executions; range-delete the overflow's keys (<= 5 rows each).
-    pub fn record_execution_base(&mut self, base: &str) {
-        const KEEP: usize = 256;
-        self.exec_history.push_back(base.to_string());
-        while self.exec_history.len() > KEEP {
-            if let Some(old) = self.exec_history.pop_front() {
-                // '0' is the first ASCII byte after '/', so [base+"/", base+"0")
-                // covers exactly the record's key subtree.
-                let lo = format!("{old}/");
-                let hi = format!("{old}0");
-                let _ = self.conn.execute_with_params(
-                    SQL_DELETE_PAYLOADS_KEY_RANGE,
-                    &[sql_text(&lo), sql_text(&hi)],
-                );
-            }
-        }
     }
 }

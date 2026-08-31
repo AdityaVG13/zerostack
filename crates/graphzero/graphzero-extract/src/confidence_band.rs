@@ -1,6 +1,5 @@
-//! Confidence band constants (DEC-001, ADR-004).
-//!
-//! Contains=1.0, rust-analyzer exact calls=0.99, typed inferred calls outrank local calls, imports=0.8, implements-local=0.85, default=0.7.
+//! Confidence band constants. Contains=1.0, rust-analyzer exact calls=0.99,
+//! typed inferred calls outrank local calls, imports=0.8, implements-local=0.85, default=0.7.
 
 /// File-to-symbol containment is certain: the definition is in the blob.
 pub const CONTAINS: f64 = 1.0;
@@ -38,7 +37,7 @@ pub const IMPORTS: f64 = 0.8;
 /// Local impl block: trait and implementor are both in the blob.
 pub const IMPLEMENTS_LOCAL: f64 = 0.85;
 
-// Compile-time ordering invariants (DEC-001): typed inferred calls outrank local calls.
+// Compile-time ordering invariants: typed inferred calls outrank local calls.
 const _: () = assert!(RUST_ANALYZER_INFERRED_CALL > LOCAL_CALL);
 const _: () = assert!(TSSERVER_INFERRED > LOCAL_CALL);
 

@@ -11,7 +11,6 @@ pub mod path;
 pub mod recovery;
 pub mod replication;
 pub mod runtime_metrics;
-pub mod store_migration;
 pub mod store_pack;
 pub mod store_schema_version;
 pub mod validity;

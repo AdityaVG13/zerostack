@@ -1,6 +1,5 @@
-//! CI crash+roundtrip harness for `ZbfObject::from_bytes`.
-//! Bounded garbage campaign + round-trip identity. Reuses public parser only.
-//! Bead: zerostack-zbf-from-bytes-ci-harness-8ok8
+//! CI crash+roundtrip harness for `ZbfObject::from_bytes`. Bounded garbage campaign + round-trip
+//! identity. Reuses public parser only.
 
 use proptest::prelude::*;
 use proptest::test_runner::{Config, FileFailurePersistence};
@@ -8,9 +7,7 @@ use zero_abi::{
     ArtifactOwner, DurableProfile, DurableProfileId, Sha256Digest, ZbfArtifactKind, ZbfObject,
 };
 
-// ---------------------------------------------------------------------------
 // Config - bounded, CI-friendly. Same WithSource style as abi_proptest.rs
-// ---------------------------------------------------------------------------
 fn config() -> Config {
     Config {
         cases: if cfg!(miri) { 8 } else { 128 },
@@ -26,9 +23,7 @@ fn config() -> Config {
     }
 }
 
-// ---------------------------------------------------------------------------
 // Helpers
-// ---------------------------------------------------------------------------
 fn arb_kind() -> impl Strategy<Value = ZbfArtifactKind> {
     prop_oneof![
         Just(ZbfArtifactKind::AssemblyManifest),
@@ -186,9 +181,7 @@ fn valid_container_fixture() -> (ZbfObject, DurableProfile, Sha256Digest, Vec<u8
     (container, profile, assembly, bytes)
 }
 
-// ---------------------------------------------------------------------------
 // Crash oracle: garbage bytes never panic
-// ---------------------------------------------------------------------------
 proptest! {
     #![proptest_config(config())]
 
@@ -231,9 +224,7 @@ proptest! {
     }
 }
 
-// ---------------------------------------------------------------------------
 // Deterministic E2E smoke: one valid fixture + one truncated buffer
-// ---------------------------------------------------------------------------
 #[test]
 fn e2e_valid_leaf_roundtrip() {
     let (obj, profile, assembly, bytes) = valid_leaf_fixture();
@@ -253,10 +244,9 @@ fn e2e_valid_container_roundtrip() {
 #[test]
 fn e2e_truncated_buffer_is_error_not_panic() {
     let (_, profile, assembly, bytes) = valid_leaf_fixture();
-    // Truncate to header-1 (should be UnexpectedEof, not panic)
+    // A truncated header must return an error instead of panicking.
     let truncated = &bytes[..10];
     let err = ZbfObject::from_bytes(truncated, assembly, profile).unwrap_err();
-    // Just assert it's an error; code mapping is not the focus here.
     let _ = err.code();
 }
 

@@ -1,4 +1,4 @@
-//! Worktree view: shared snapshot + per-id overlay (FR-016, G-023).
+//! Worktree view: shared snapshot + per-id overlay.
 
 use std::path::Path;
 
@@ -58,7 +58,7 @@ impl WorktreeView {
     }
 }
 
-/// Certified absence through overlay paths with lazy freshness (FR-027).
+/// Certified absence through overlay paths with lazy freshness.
 pub fn absence_overlay(
     snapshot: &Snapshot,
     overlay: &PendingFacts,
@@ -151,7 +151,7 @@ pub fn absence_overlay(
     })
 }
 
-/// Lazy content-hash check for overlay-indexed paths (P2.1 + FR-027).
+/// Lazily verify content hashes for overlay-indexed paths.
 pub fn overlay_staleness_diagnostic(snapshot: &Snapshot, overlay: &PendingFacts) -> Option<String> {
     let repo = snapshot.repo_root.as_ref()?;
     for (blob, rel) in &overlay.paths {

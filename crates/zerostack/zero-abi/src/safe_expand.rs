@@ -1,40 +1,6 @@
-//! Trusted `SafeExpandHandle` ABI for W9-E exact expansion (hub authority
-//! only; zerostack-qg2a).
-//!
-//! A `SafeExpandHandle` is an opaque, unforgeable, read-only credential for
-//! exactly one exact expansion. It binds every authority root the expansion
-//! was certified against: project, request, protected scope, demand-plan
-//! root, index root/version, renderer contract, tenant, epoch, projection,
-//! and the completeness certificate (root, trivalent verdict, checker
-//! identity/version, first-attempt law). Guest JS and models cannot construct
-//! it: the only constructor is [`SafeExpandIssuer::issue`], which requires
-//! the hub-owned issuance key, and every use revalidates the keyed issuance
-//! MAC plus every live binding.
-//!
-//! Fail-closed laws (ZS-KERNEL-004 lattice: `Unsafe` dominates `Unknown`
-//! dominates `Safe`):
-//! - Issuance requires a total completeness check whose verdict is exactly
-//!   [`SafetyVerdict::Safe`] with a certificate root and a first-attempt
-//!   checker (no hidden retry). `Unsafe`, `Unknown`, a missing certificate
-//!   root, or a hidden retry refuse issuance with a typed error.
-//! - A handle verifies two independent seals before use: the keyed issuance
-//!   MAC (forgery requires the issuer secret) and the self-rooted handle id
-//!   (any tamper changes the id).
-//! - Revalidation ([`SafeExpandIssuer::revalidate`]) checks every binding
-//!   against the live hub state. Stale epoch/index, cross-project or
-//!   cross-tenant use, altered scope/projection, renderer mismatch,
-//!   missing/mismatched/Unknown evidence, or a hidden retry after issue
-//!   yields a typed `Unsafe`/`Unknown` outcome; a guessed subset is never
-//!   labeled complete. Only `Safe` carries the read-only [`ExpandPermit`].
-//! - The permit encodes read-only authority only: it carries the bound
-//!   roots and projection, never any write, edit, transaction, or commit
-//!   capability.
-//!
-//! The completeness certificate is bound by root: this module pins the
-//! certificate root, verdict, checker identity/version, and first-attempt
-//! law. The certificate object itself (rooted evidence, finite witness,
-//! resource ledger) is the V7 certificate ABI (zerostack-4lfp); certificate
-//! composition (W7-T03) plugs into the same bound fields when it lands.
+//! Trusted `SafeExpandHandle` ABI for exact expansion (hub authority only;). A
+//! `SafeExpandHandle` is an opaque, unforgeable, read-only credential for exactly one exact
+//! expansion.
 
 use std::{error::Error, fmt};
 
@@ -183,14 +149,12 @@ impl fmt::Display for SafeExpandError {
 
 impl Error for SafeExpandError {}
 
-/// The completeness certificate binding of one handle.
-///
-/// `first_attempt` is always bound `true`: a handle may only ever be issued
-/// from a first-attempt (no hidden retry) total completeness check.
+/// The completeness certificate binding of one handle. `first_attempt` is always bound `true`: a
+/// handle may only ever be issued from a first-attempt (no hidden retry) total completeness check.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct CompletenessBinding {
-    /// Root of the V7 completeness certificate (zerostack-4lfp object).
+    /// Root of the completeness certificate.
     certificate_root: Sha256Digest,
     /// Must be exactly `SafetyVerdict::Safe`; revalidation re-checks the
     /// live verdict.
@@ -468,11 +432,6 @@ impl ExpandPermit {
 }
 
 /// The opaque, unforgeable, read-only safe-expand credential.
-///
-/// Fields are private to this module: the only constructor is
-/// [`SafeExpandIssuer::issue`], and the wire form carries two independent
-/// seals (issuance MAC + self-rooted id) so deserializing or altering a
-/// handle never grants authority by itself.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct SafeExpandHandle {
@@ -621,10 +580,9 @@ impl SafeExpandIssuer {
         Self { secret }
     }
 
-    /// Issue one handle after the hub's total completeness check returned
-    /// `Safe`. Every binding is validated fail-closed; `Unsafe`/`Unknown`
-    /// evidence, a missing certificate root, or a hidden retry refuse
-    /// issuance with a typed error.
+    /// handle after the hub's total completeness check returned `Safe`. Every
+    /// binding is validated fail-closed; `Unsafe`/`Unknown` evidence, a missing
+    /// certificate root, or a hidden retry refuse issuance with a typed error.
     pub fn issue(
         &self,
         request: &SafeExpandIssueRequest,
@@ -688,10 +646,9 @@ impl SafeExpandIssuer {
         Ok(())
     }
 
-    /// Live revalidation of every handle binding. Total function: seal
-    /// failures, binding mismatches, stale/missing/Unknown evidence, and
-    /// hidden retries all fold into a typed `Unsafe`/`Unknown` outcome;
-    /// only full positive revalidation returns `Safe(permit)`.
+    /// Live revalidation of every handle binding. Total function: seal failures, binding
+    /// mismatches, stale/missing/Unknown evidence, and hidden retries all fold into a typed
+    /// `Unsafe`/`Unknown` outcome; only full positive revalidation returns `Safe(permit)`.
     pub fn revalidate(&self, handle: &SafeExpandHandle, live: &LiveExpandState) -> ExpandOutcome {
         let mut unsafe_reasons: Vec<String> = Vec::new();
         let mut unknown_reasons: Vec<String> = Vec::new();

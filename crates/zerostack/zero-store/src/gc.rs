@@ -1,7 +1,5 @@
-//! Canonical `zerostack.cas-gc` protocol with read-only v1 compatibility.
-//!
-//! This module owns only store metadata and immutable CAS lifecycle. It has no
-//! engine-specific authority; engines publish roots, pins, and leases here.
+//! Canonical `zerostack.cas-gc` protocol. This module owns only store metadata and immutable CAS
+//! lifecycle. It has no engine-specific authority; engines publish roots, pins, and leases here.
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -22,11 +20,6 @@ use zero_abi::zbf::{
     ZBF_MAX_OBJECT_BYTES, ZBF_SCHEMA_MAJOR, ZBF_SCHEMA_MINOR,
 };
 
-pub const GC_SCHEMA_VERSION_LEGACY: &str = "zerostack.cas-gc.legacy";
-const GC_SCHEMA_VERSION_V1: &str = "zerostack.cas-gc.v1";
-const GC_SCHEMA_VERSION_V2: &str = "zerostack.cas-gc.v2";
-const GC_CONTRACT_DIGEST_V2: &str =
-    "ad931317c574795866b794c67dc4067415decc91113dae699e692c69d64aea0e";
 pub const GC_SCHEMA_VERSION: &str = "zerostack.cas-gc";
 /// Hard bounds keep malformed metadata from turning collection into an
 /// unbounded allocation or path traversal surface.
@@ -44,24 +37,17 @@ pub const GC_RECORD_TYPE_LEASE: &str = "lease";
 pub const GC_RECORD_TYPE_DRY_RUN: &str = "gc-run-receipt";
 pub const GC_RECORD_TYPE_SWEEP_PROGRESS: &str = "sweep-progress";
 pub const GC_RECORD_TYPE_REPAIR: &str = "repair-receipt";
-/// The only refs carrier the GC proof reads: ZBF container children.
-///
-/// Refs are always content-derived from verified object bytes; no metadata
-/// record can widen or narrow the reachable set.
+/// The only refs carrier the GC proof reads: ZBF container children. Refs are always
+/// content-derived from verified object bytes; no metadata record can widen or narrow the reachable
+/// set.
 pub const GC_REFS_FORMAT: &str = "zbf-container-children";
 pub const GC_MIN_GRACE_SECONDS: u64 = 60;
 pub const DEFAULT_GC_REPORT_LIMIT: usize = 32;
 
-/// Machine-readable semantics bound into every v2 GC record.
+/// Machine-readable semantics bound into every GC record.
 pub fn gc_contract_manifest() -> serde_json::Value {
     serde_json::json!({
         "schema_version": GC_SCHEMA_VERSION,
-        "legacy_read_versions": [GC_SCHEMA_VERSION_LEGACY],
-        "legacy_read_record_types": [
-            GC_RECORD_TYPE_REACHABILITY,
-            GC_RECORD_TYPE_PIN,
-            GC_RECORD_TYPE_LEASE
-        ],
         "store": {
             "cas_layout": crate::CAS_LAYOUT,
             "cas_layout_version": crate::CAS_LAYOUT_VERSION,
@@ -171,7 +157,7 @@ impl From<CasError> for GcError {
 pub struct ReachabilitySnapshot {
     pub schema_version: String,
     pub record_type: String,
-    /// Producer namespace. The `engine` wire key remains for v1 compatibility.
+    /// Producer namespace.
     pub engine: String,
     pub project_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -186,7 +172,7 @@ pub struct ReachabilitySnapshot {
 pub struct PinRecord {
     pub schema_version: String,
     pub record_type: String,
-    /// Producer namespace. The `engine` wire key remains for v1 compatibility.
+    /// Producer namespace.
     pub engine: String,
     pub project_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -210,7 +196,7 @@ pub struct LeaseOwner {
 pub struct LeaseRecord {
     pub schema_version: String,
     pub record_type: String,
-    /// Producer namespace. The `engine` wire key remains for v1 compatibility.
+    /// Producer namespace.
     pub engine: String,
     pub project_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -295,10 +281,9 @@ pub struct GcConfig {
     pub fault_after_deletes: Option<usize>,
     /// Maximum completed JSON reports retained in `gc/reports`.
     pub report_limit: usize,
-    /// Test seam: invoked with each hash immediately before it is unlinked,
-    /// while the exclusive coordinator lock is held. Lets a regression pin the
-    /// sweeper at the exact TOCTOU window without relying on timing
-    /// (zerostack-rhd). Always `None` in production.
+    /// Test seam: invoked with each hash immediately before it is unlinked, while the
+    /// exclusive coordinator lock is held. Lets a regression pin the sweeper at the
+    /// exact TOCTOU window without relying on timing. Always `None` in production.
     pub before_unlink: Option<BeforeUnlinkHook>,
 }
 
@@ -338,9 +323,7 @@ pub fn project_id(store_root: &Path) -> Result<String, GcError> {
 }
 
 fn ensure_real_directory_tree(dir: &Path) -> io::Result<()> {
-    // RCH and developer installs can place the checkout below a symlinked
-    // machine-level prefix. Confinement starts at this store's nearest `gc`
-    // namespace, not at the filesystem root.
+    // Confinement starts at the nearest GC namespace and permits symlinked ancestors.
     let gc_root = dir
         .ancestors()
         .find(|candidate| candidate.file_name().and_then(|name| name.to_str()) == Some("gc"))
@@ -555,22 +538,8 @@ pub(crate) fn content_sha256_hex(bytes: &[u8]) -> String {
     lower_hex(Sha256::digest(bytes).as_ref())
 }
 
-/// Structurally extract the transitive content-derived refs of one verified
-/// CAS object.
-///
-/// Refs are the digests of every object embedded in a ZBF container (direct
-/// and nested children). The input must already be verified against its CAS
-/// identity: refs are derived from content, never from metadata.
-///
-/// Fail-closed contract:
-/// - Bytes that cannot be a ZBF object (wrong magic) are leaves with no refs.
-/// - Bytes that carry the ZBF magic but violate the ZBF structure (size beyond
-///   the ZBF object bound, truncated header or children, unknown flags,
-///   unsupported schema, nonzero reserved bytes, payload length mismatch,
-///   payload digest mismatch, or a ref set beyond [`GC_MAX_BLOB_HASHES`]) are
-///   corrupt refs evidence: the referenced set is unknown, so a collector must
-///   fail closed (retain uncertain) and must never collect on this object's
-///   subtree.
+/// Structurally extract the transitive content-derived refs of one verified CAS object. Refs are
+/// the digests of every object embedded in a ZBF container (direct and nested children).
 pub fn refs_from_verified_bytes(bytes: &[u8]) -> Result<Vec<String>, String> {
     if bytes.len() < ZBF_MAGIC.len() || &bytes[..ZBF_MAGIC.len()] != ZBF_MAGIC.as_slice() {
         return Ok(Vec::new());
@@ -581,14 +550,9 @@ pub fn refs_from_verified_bytes(bytes: &[u8]) -> Result<Vec<String>, String> {
     Ok(refs)
 }
 
-/// Structural ZBF walk: every embedded object contributes its digest, and
-/// container payloads are walked recursively under the ZBF depth bound.
-///
-/// Only structure needed to *name* refs is validated: magic, schema version,
-/// flags, reserved bytes, payload length, and payload digest. Kind and owner
-/// do not change the referenced set and are intentionally not part of refs
-/// evidence. The durable profile and assembly manifest are unknown to the
-/// collector and are deliberately not checked here.
+/// Structural ZBF walk: every embedded object contributes its digest, and container payloads are
+/// walked recursively under the ZBF depth bound. Only structure needed to *name* refs is validated:
+/// magic, schema version, flags, reserved bytes, payload length, and payload digest.
 fn collect_zbf_refs(
     bytes: &[u8],
     depth: u16,
@@ -868,11 +832,7 @@ fn write_gc_json<T: Serialize>(path: &Path, value: &T) -> Result<(), GcError> {
 }
 
 fn bound_gc_contract_matches(schema_version: &str, contract_digest: &str) -> bool {
-    match schema_version {
-        GC_SCHEMA_VERSION_V2 => contract_digest == GC_CONTRACT_DIGEST_V2,
-        GC_SCHEMA_VERSION => contract_digest == gc_contract_digest_hex(),
-        _ => false,
-    }
+    schema_version == GC_SCHEMA_VERSION && contract_digest == gc_contract_digest_hex()
 }
 
 fn validate_record_schema(
@@ -881,7 +841,7 @@ fn validate_record_schema(
     path: &Path,
     expected_type: &str,
 ) -> Result<(), GcError> {
-    let reason = if schema_version != GC_SCHEMA_VERSION && schema_version != GC_SCHEMA_VERSION_V2 {
+    let reason = if schema_version != GC_SCHEMA_VERSION {
         Some(format!("unsupported schema_version {schema_version}"))
     } else if record_type != expected_type {
         Some(format!("record_type {record_type}"))
@@ -900,27 +860,14 @@ fn validate_record_common<R: GcRecord>(
     if record_type != expected_type {
         return Err(corrupt(path, format!("record_type {record_type}")));
     }
-    match schema_version {
-        GC_SCHEMA_VERSION_LEGACY | GC_SCHEMA_VERSION_V1 if contract_digest.is_none() => {}
-        GC_SCHEMA_VERSION_V2 | GC_SCHEMA_VERSION => {
-            if !contract_digest
-                .is_some_and(|digest| bound_gc_contract_matches(schema_version, digest))
-            {
-                return Err(corrupt(path, "store_contract_digest mismatch".into()));
-            }
-        }
-        GC_SCHEMA_VERSION_LEGACY | GC_SCHEMA_VERSION_V1 => {
-            return Err(corrupt(
-                path,
-                "legacy record unexpectedly binds a v2 store contract".into(),
-            ));
-        }
-        _ => {
-            return Err(corrupt(
-                path,
-                format!("unsupported schema_version {schema_version}"),
-            ));
-        }
+    if schema_version != GC_SCHEMA_VERSION {
+        return Err(corrupt(
+            path,
+            format!("unsupported schema_version {schema_version}"),
+        ));
+    }
+    if !contract_digest.is_some_and(|digest| bound_gc_contract_matches(schema_version, digest)) {
+        return Err(corrupt(path, "store_contract_digest mismatch".into()));
     }
     if !is_valid_producer_id(producer_id) {
         return Err(corrupt(path, format!("invalid producer id {producer_id}")));
@@ -1327,19 +1274,9 @@ fn load_mark_state(
     Ok(state)
 }
 
-/// Extend liveness to the transitive content-derived refs closure.
-///
-/// Every live seed (reachability root, pin, or lease) is read once and
-/// verified, then its embedded child digests are marked live with `ref-child`
-/// evidence. Fail-closed evidence rules:
-/// - A seed absent from the CAS is incomplete evidence: its refs cannot be
-///   evaluated, so the run is uncertain and collection must not commit.
-/// - A seed that cannot be verified (digest mismatch, non-regular entry, I/O
-///   or policy failure) is corrupt evidence: the run is uncertain.
-/// - Verified bytes carrying the ZBF magic but violating the ZBF structure are
-///   corrupt refs evidence: the referenced set is unknown, so the run is
-///   uncertain. No size shortcut is used: a shrunken or oversized corrupt
-///   file is indistinguishable from a leaf without reading and verifying it.
+/// Extend liveness to the transitive content-derived refs closure. Every live seed (reachability
+/// root, pin, or lease) is read once and verified, then its embedded child digests are marked live
+/// with `ref-child` evidence.
 fn trace_refs(cas: &SharedCas, state: &mut MarkState) -> Result<(), GcError> {
     let seeds: Vec<String> = state.live.keys().cloned().collect();
     for seed in seeds {
@@ -1892,7 +1829,7 @@ pub fn validate_dry_run_report(value: &serde_json::Value) -> Result<(), GcError>
     serialize_gc_json(value)?;
     exact_keys(value, DRY_RUN_FIELDS, "extra top-level keys")?;
     let schema_version = require_str(value, "schema_version")?;
-    if schema_version != GC_SCHEMA_VERSION && schema_version != GC_SCHEMA_VERSION_V2 {
+    if schema_version != GC_SCHEMA_VERSION {
         return Err(GcError::SchemaViolation("schema_version".into()));
     }
     if value.get("record_type").and_then(serde_json::Value::as_str) != Some(GC_RECORD_TYPE_DRY_RUN)
@@ -1982,7 +1919,7 @@ pub fn validate_repair_receipt(value: &serde_json::Value) -> Result<(), GcError>
     serialize_gc_json(value)?;
     exact_keys(value, REPAIR_RECEIPT_FIELDS, "extra repair receipt keys")?;
     let schema_version = require_str(value, "schema_version")?;
-    if schema_version != GC_SCHEMA_VERSION && schema_version != GC_SCHEMA_VERSION_V2 {
+    if schema_version != GC_SCHEMA_VERSION {
         return Err(GcError::SchemaViolation("schema_version".into()));
     }
     if require_str(value, "record_type")? != GC_RECORD_TYPE_REPAIR {
@@ -2029,13 +1966,9 @@ pub fn gc_repair_receipt_digest_hex(receipt: &RepairReceipt) -> Result<String, G
     Ok(zero_abi::contract_digest_hex(&value))
 }
 
-/// Publish one complete producer-owned reachability set.
-///
-/// An empty `blob_hashes` slice is an explicit declaration that this producer
-/// and project retain no CAS objects. Epochs are strictly monotonic, including
-/// across legacy v1 records.
-/// Require that publishing at `path` would move the reachability epoch
-/// strictly forward. A missing snapshot admits any epoch >= 1.
+/// Publish one complete producer-owned reachability set. An empty `blob_hashes` slice is an
+/// explicit declaration that this producer and project retain no CAS objects. Epochs are strictly
+/// monotonic, including across existing records.
 fn require_strictly_newer_epoch(path: &Path, epoch: u64) -> Result<(), GcError> {
     match fs::symlink_metadata(path) {
         Ok(metadata) if !metadata.file_type().is_file() => Err(corrupt(
@@ -2352,10 +2285,9 @@ impl SharedCas {
     }
 }
 
-/// Verify an immutable object and restore it from authoritative bytes.
-/// Corrupt content is quarantined before replacement. This compatibility API
-/// returns only whether bytes changed; use [`repair_object_receipted`] when an
-/// auditable producer receipt is required.
+/// Verify an immutable object and restore it from authoritative bytes. Corrupt content is
+/// quarantined before replacement. This compatibility API returns only whether bytes
+/// changed; use [`repair_object_receipted`] when an auditable producer receipt is required.
 pub fn repair_object(store_root: &Path, blob_hash: &str, bytes: &[u8]) -> Result<bool, GcError> {
     validate_repair_bytes(blob_hash, bytes)?;
     let cas = SharedCas::open(store_root.to_path_buf());

@@ -1,8 +1,6 @@
-//! rust-analyzer typed-call edge adapter.
-//!
-//! This module is deliberately optional: tree-sitter extraction remains the
-//! baseline and callers may enrich Rust facts with rust-analyzer/LSP resolved
-//! call targets when that side channel is available.
+//! rust-analyzer typed-call edge adapter. This module is deliberately optional:
+//! tree-sitter extraction remains the baseline and callers may enrich Rust facts
+//! with rust-analyzer/LSP resolved call targets when that side channel is available.
 
 use crate::confidence_band;
 use crate::{
@@ -111,23 +109,17 @@ impl RustAnalyzerLiveStatus {
     }
 }
 
-/// Probe the real rust-analyzer executable used for live LSP enrichment.
-///
-/// Contract fixtures call apply_rust_analyzer_calls directly with synthetic
-/// resolutions. Live integration callers/tests use this probe first, so reports
-/// distinguish "rust-analyzer was unavailable" from "the adapter contract
-/// passed on hand-written data". GRAPHZERO_RUST_ANALYZER_BIN overrides the
-/// executable for CI and developer shells.
+/// Probe the real rust-analyzer executable used for live LSP enrichment. Contract fixtures call
+/// apply_rust_analyzer_calls directly with synthetic resolutions.
 pub fn probe_live_rust_analyzer() -> RustAnalyzerLiveStatus {
     let binary = std::env::var("GRAPHZERO_RUST_ANALYZER_BIN")
         .unwrap_or_else(|_| "rust-analyzer".to_string());
     probe_live_rust_analyzer_binary(binary)
 }
 
-/// Spawn contract: the executable and `--version` are discrete argv entries;
-/// the probe inherits the caller's environment, blocks until the diagnostic
-/// command exits, and reports spawn failures or non-zero status with the exact
-/// executable name rather than treating missing output as success.
+/// Spawn contract: the executable and `--version` are discrete argv entries; the probe inherits the
+/// caller's environment, blocks until the diagnostic command exits, and reports spawn failures or
+/// non-zero status with the exact executable name rather than treating missing output as success.
 fn probe_live_rust_analyzer_binary(binary: String) -> RustAnalyzerLiveStatus {
     match probe_binary_version(&binary) {
         Ok(version) => RustAnalyzerLiveStatus::available(binary, version),

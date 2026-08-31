@@ -1,28 +1,28 @@
 [package]
 name = "zero-kernel-node"
-version = "0.1.0"
+version.workspace = true
 edition.workspace = true
 license.workspace = true
 description = "N-API binding for daemonless in-process ZeroKernel"
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
 
 [lib]
 crate-type = ["cdylib"]
 name = "zero_kernel_node"
 
 [dependencies]
-napi = { version = "3.12.1", features = ["serde-json", "napi6"] }
-napi-derive = "3.6.3"
-parking_lot = "0.12"
+napi = { workspace = true, features = ["serde-json", "napi6"] }
+napi-derive = { workspace = true }
+parking_lot = { workspace = true }
 serde_json.workspace = true
-zero-abi = { path = "../zero-abi" }
-zero-kernel = { path = "../zero-kernel", default-features = false }
-zero-store = { path = "../zero-store" }
+zero-abi = { workspace = true }
+zero-kernel = { workspace = true }
+zero-store = { workspace = true }
 
 [build-dependencies]
-napi-build = "2.4.1"
-
-[dev-dependencies]
-tempfile = "3"
+napi-build = { workspace = true }
 
 [lints]
 workspace = true
