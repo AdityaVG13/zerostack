@@ -257,17 +257,17 @@ A structured handle returned inside a snapshot or projection is accepted by late
 
 ## Guarantees
 
-**Effects and atomicity.** The first file mutation lazily opens one cell transaction. FSZero returns exact preimages and typed receipts. A completed cell publishes effects and a successor state root at the terminal boundary. Failure, cancellation, verification failure, state publication failure, or output publication failure restores receipts in reverse order and leaves the prior state root authoritative. `z.edit` changes one file. `z.apply` changes an atomic set.
+**Effects and atomicity.** The first file mutation opens one cell transaction. FSZero returns exact preimages and typed receipts. A completed cell publishes effects and a successor state root together. Any failure or cancellation restores receipts in reverse order and keeps the prior state root. `z.edit` changes one file; `z.apply` changes an atomic set.
 
-**Cancellation and cleanup.** One cancellation token reaches the interpreter, engine calls, concurrent promises, and the owned process tree. On failure or cancellation ZeroKernel requests sibling cancellation, terminates the exact child tree, waits for task and process counters to reach zero within a bounded window, rolls back staged effects and session state, records one terminal event, and destroys the frame. A response cannot report completion while its frame still owns tasks or child processes.
+**Cancellation and cleanup.** One cancellation token covers the interpreter, domain calls, concurrent promises, and the owned process tree. On failure or cancellation, ZeroKernel cancels siblings, terminates the child tree, waits for task and process counts to hit zero, rolls back staged effects and session state, records one terminal event, and destroys the frame. A response cannot claim completion while the frame still owns work.
 
-**Process ownership.** `z.run` belongs to ZeroStack. It validates the working directory, starts the exact child tree, captures bounded output, and terminates and reaps descendants on timeout, cancellation, frame failure, shutdown, or object destruction. TokenZero projects captured output but never owns the process lifecycle.
+**Process ownership.** `z.run` belongs to ZeroStack: working-directory checks, process start, bounded capture, and exact child-tree reap on timeout, cancel, failure, or shutdown. TokenZero may project captured output; it does not own process lifecycle.
 
-**Determinism and exact recovery.** Source bytes are authoritative through FSZero snapshots and CAS content addressing. Outputs pass through TokenZero measurement and projection at operation and response boundaries. Small values pass through unchanged. Larger values return a bounded projection plus an opaque `z://blob/<digest>` handle whose recovery returns exact bytes. Handles are content-addressed and recovery contributes to recovery-aware accounting. The terminal event records the exact projection or structured error digest.
+**Determinism and exact recovery.** FSZero snapshots and CAS digests own source bytes. TokenZero measures and projects outputs at operation and response boundaries. Small values pass through. Larger values return a bounded projection plus a `z://blob/<digest>` handle that recovers the exact bytes. Recovery is part of the ledger. The terminal event records the exact projection or structured error digest.
 
-**State.** `z.state` is a bounded session-scoped JSON map for small facts that must survive fresh frames, such as a selected path or workflow checkpoint. The host hydrates state from the committed CAS root before evaluation and commits a successor root with compare-and-set only on completed dirty cells. Interpreter variables, imports, and promises never persist across cells.
+**State.** `z.state` holds small session-scoped JSON facts across otherwise fresh frames (for example a selected path). The host loads state from the committed CAS root before evaluation and commits a successor root only for completed dirty cells. Interpreter variables, imports, and promises do not survive a cell.
 
-**Terminal response.** Every accepted cell returns one structured response. Completed `value` is the exact JSON-text TokenZero projection recorded by the terminal event. No extra model-visible envelope is added.
+**Terminal response.** Every accepted cell returns one structured response. On success, `value` is the exact JSON text TokenZero recorded for that terminal event. There is no extra model-visible wrapper.
 
 ```typescript
 interface ZeroKernelResponse {
@@ -362,121 +362,121 @@ The binding exposes `initialize()`, `executeCell(source, signal?)`, `status()`, 
 
 ## Troubleshooting
 
-TokenZero exposes enough accounting to explain why a value passed through, compressed, spilled, or later lost some of its apparent savings. Start with content kind, tokenizer identity, raw and visible counts, recovery handles, and any subsequent expansion events.
+Start with content kind, tokenizer identity, raw and visible counts, recovery handles, and any later expansion events. TokenZero's ledger is usually enough to explain pass-through, compression, spill, or lost savings.
 
 <details>
 <summary><strong>A small read was not compressed</strong></summary>
 
-This is expected when raw output is already below the visibility budget, or when capsule framing, anchors, and refs would cost as much as the original. TokenZero optimizes total task cost, not the percentage shown on every operation.
+Expected when the raw value is already under the visibility budget, or when framing, anchors, and refs would cost as much as the original. TokenZero optimizes total task cost, not a compression badge on every call.
 
-Inspect the accounting block to confirm raw and visible counts are equal and the content kind was classified correctly. Do not lower thresholds solely to force a compression badge; tiny capsules add indirection without saving context. If a genuinely large repetitive value passes through, capture its content classification and projection decision for diagnosis.
+Confirm raw and visible counts match and the content kind looks right. Do not lower thresholds just to force a capsule; tiny capsules add indirection without saving context. If a large repetitive value still passes through, capture its classification and projection decision.
 
 </details>
 
 <details>
 <summary><strong>An exact handle does not expand</strong></summary>
 
-The handle identifies content. It does not carry the content or guarantee that every process can reach its store. Expansion fails when the configured recovery root lacks the object, the object was evicted, the handle belongs to another isolated store, or digest verification detects corruption.
+The handle names content. It does not carry the bytes or guarantee every process can reach the store. Expansion fails if the recovery root lacks the object, the object was evicted, the handle belongs to another store, or digest verification fails.
 
-Run `zero-kernel doctor -C <workspace>` and inspect the recovery root, store health, and handle scheme. Confirm that the resolving process uses the same durable store or an explicitly shared verified store. Do not rewrite the scheme or fabricate a new digest. If the object was pruned, regenerate it from the original source rather than treating a similar payload as equivalent.
+Run `zero-kernel doctor -C <workspace>` and check the recovery root, store health, and handle scheme. Use the same durable store (or an explicitly shared verified store). Do not invent a new digest. If the object was pruned, regenerate it from the source.
 
-Pass the `z://blob/<digest>` handle back to `z.read`. Do not write an outline or preview back to disk as if it were the source.
+Pass the `z://blob/<digest>` handle back to `z.read`. Do not write an outline or preview back to disk as if it were the file.
 
 </details>
 
 <details>
 <summary><strong>Reported savings dropped after an expand</strong></summary>
 
-That is the intended recovery-aware accounting model. The original projection avoided sending some tokens, but expansion later sent a subset back to the model. Those recovered tokens are subtracted from net savings.
+That is recovery-aware accounting. The first projection hid some tokens; expansion later spent a subset of them. Recovered tokens reduce net savings.
 
-Compare raw, initially visible, recovered, and final spent counts rather than only the first response. A task that eventually expands everything may still benefit from delayed selection, but it should not claim the original headline percentage as net savings. This prevents compression from looking successful merely because its cost moved to a later turn.
+Compare raw, initially visible, recovered, and final spent counts, not only the first response. A task that expands everything may still benefit from delayed selection, but it should not keep the original headline percentage as net savings.
 
 </details>
 
 <details>
 <summary><strong>Telemetry is missing</strong></summary>
 
-Shareable usage telemetry is off by default, and TokenZero has no exporter. Normal operation still returns per-call accounting in the ZeroKernel ledger; what is absent is the optional local cross-call ledger.
+Shareable telemetry is off by default, and TokenZero has no exporter. Per-call accounting still appears in the ZeroKernel ledger. What is missing is the optional local cross-call JSONL ledger.
 
-Set `TOKENZERO_TELEMETRY=1` before starting the process if you want the local three-field JSONL ledger. Confirm the recovery directory is writable. The setting is not retroactive, and enabling it does not upload records or recover calls made while it was disabled.
+Set `TOKENZERO_TELEMETRY=1` before starting the process if you want that ledger, and confirm the recovery directory is writable. The setting is not retroactive and does not upload anything.
 
 </details>
 
 ## FAQ
 
-RACC separates what the model needs to see now from what the system must preserve exactly. These answers explain where that differs from summarization, caching, shell execution, and ordinary token-count claims.
+RACC keeps what the model must see now separate from what the system must preserve exactly. The questions below cover the usual confusion points.
 
 <details>
 <summary><strong>How is RACC different from summarization?</strong></summary>
 
-Summarization replaces source detail with an interpretation chosen before the task is complete. When that interpretation omits the wrong fact, the agent must re-read, re-run, or guess, and there may be no way to prove what the summary changed.
+A summary replaces source detail with an interpretation chosen before the task finishes. If it drops the wrong fact, the agent has to re-read, re-run, or guess, often with no proof of what changed.
 
-RACC keeps omitted bytes in a content-addressed local store and returns exact handles plus protected anchors. The visible capsule can therefore be aggressive without becoming the only copy. Expansion returns original bytes, not a second summary.
+RACC stores omitted bytes in a content-addressed local store and returns exact handles plus protected anchors. The visible capsule can stay small without becoming the only copy. Expansion returns the original bytes, not another summary.
 
 </details>
 
 <details>
 <summary><strong>How is the recovery store different from a cache?</strong></summary>
 
-The recovery store retains content-addressed objects, which is cache-like. RACC also classifies content, measures serialized values, chooses projection policy, preserves anchors, enforces output budgets, and accounts for later recovery.
+The store is content-addressed, so it looks like a cache. RACC also classifies content, measures serialized values, chooses projection, preserves anchors, enforces budgets, and charges later recovery.
 
-A cache primarily avoids recomputation or I/O. TokenZero's contract is model-visible output economics with exact recovery. Eviction policy bounds local storage, but a cache hit alone does not establish token savings.
+A normal cache mainly avoids recomputation or I/O. TokenZero's job is model-visible output economics with exact recovery. A store hit alone is not proof of token savings.
 
 </details>
 
 <details>
 <summary><strong>Does TokenZero own shell execution?</strong></summary>
 
-No. ZeroStack owns command admission, working-directory validation, process creation, timeout, cancellation, exact child-tree termination, and reaping. Those responsibilities determine whether an execution is safe and complete.
+No. ZeroStack owns admission, working-directory checks, process creation, timeout, cancellation, child-tree termination, and reaping. That is what makes an execution safe and complete.
 
-TokenZero receives captured stdout and stderr, measures their serialized form, projects a bounded visible result, and preserves omitted stream bytes behind exact handles. Keeping these boundaries separate prevents output formatting from changing process lifecycle semantics.
+TokenZero only sees captured stdout and stderr: it measures them, projects a bounded view, and keeps omitted stream bytes behind exact handles. Output formatting must not change process lifecycle.
 
-`z.run` is the ZeroKernel operation for that process.
+Use `z.run` for that path.
 
 </details>
 
 <details>
 <summary><strong>Can a capsule cost more than raw output?</strong></summary>
 
-The policy should pass through content when capsule framing, anchors, and refs do not reduce the visible cost. That is why small files and path-only outputs often look unchanged.
+If framing, anchors, and refs do not reduce visible cost, the policy should pass the content through. That is why small files and path-only outputs often look unchanged.
 
-There can still be local storage and measurement overhead, so "visible tokens did not increase" is not a universal performance claim. Benchmark token counting, projection latency, storage, and end-to-end task behavior separately.
+Local storage and measurement still have overhead, so "visible tokens did not increase" is not a blanket performance claim. Measure token counts, projection latency, storage, and end-to-end task behavior separately.
 
 </details>
 
 <details>
 <summary><strong>How are token savings calculated after recovery?</strong></summary>
 
-The raw count measures the original serialized value. The visible count measures what entered context initially. Expansion adds recovered tokens to the task's spent total. Net savings compare raw cost with visible plus recovered cost under the same tokenizer.
+Raw is the original serialized value. Visible is what entered context first. Expansion adds recovered tokens to the spent total. Net savings compare raw with visible plus recovered under the same tokenizer.
 
-Exact handle tokens and framing also belong in the visible side of the accounting. Cached or estimated values must be labeled by count kind rather than mixed into exact totals.
+Handle tokens and framing count on the visible side. Cached or estimated counts must stay labeled; do not mix them into exact totals.
 
 </details>
 
 <details>
 <summary><strong>Do recovery handles expose private content?</strong></summary>
 
-A `z://blob/<digest>` handle is an identifier, not a public endpoint or an encoded copy of the payload. Someone who sees the string still needs access to a store containing the object.
+A `z://blob/<digest>` handle is an identifier, not a public endpoint and not an encoded copy of the payload. Seeing the string still requires access to a store that holds the object.
 
-The underlying bytes remain sensitive and should be protected with the same filesystem permissions and retention policy as other local agent data. Sharing a store or exporting a pack is an explicit data transfer; digest verification proves identity, not authorization.
+Treat the bytes like other local agent data: filesystem permissions and retention still apply. Sharing a store or exporting a pack is an explicit transfer. Digest verification proves identity, not authorization.
 
 </details>
 
 <details>
 <summary><strong>Should classic MCP be registered beside ZeroKernel?</strong></summary>
 
-No. Multi-engine agent workflows should use ZeroKernel so filesystem, graph, output, state, cancellation, and transactions share one lifecycle. Registering classic MCP beside ZeroKernel in the same session creates overlapping read and recovery paths and makes accounting harder to interpret.
+No. Use ZeroKernel so files, structure, tokens, state, cancellation, and transactions share one lifecycle. Putting classic MCP beside ZeroKernel in the same session creates overlapping read and recovery paths and muddies accounting.
 
-The optional `zero-kernel mcp` command is a diagnostic stdio carrier when built with `mcp-carrier`. It is not a second binary or model-facing catalog.
+The optional `zero-kernel mcp` command (built with `mcp-carrier`) is a diagnostic stdio carrier. It is not a second model-facing catalog.
 
 </details>
 
 <details>
 <summary><strong>Why not cut reasoning tokens or switch to a smaller model?</strong></summary>
 
-Those tactics save tokens by reducing the decision maker. RACC-R treats reasoning capacity and reasoning continuation state as protected objects. The strict profile preserves them and minimizes only avoidable repeated work: re-reading stable files, re-emitting unchanged output, replaying certified continuations.
+Those tactics save tokens by weakening the decision maker. RACC-R treats reasoning capacity and continuation state as protected. The strict profile keeps them and cuts only avoidable repeated work: re-reading stable files, re-emitting unchanged output, replaying certified continuations.
 
-The guarded publication protocol $P$ emits a candidate $C$ only with a sound acceptance certificate $A$; otherwise it deoptimizes to the frozen same-model baseline $B$. Under those assumptions, protected utility is pointwise no worse than baseline. There is no theorem that "shorter implies same quality."
+The guarded publication protocol $P$ emits a candidate $C$ only with a sound acceptance certificate $A$; otherwise it falls back to the frozen same-model baseline $B$. Under those assumptions, protected utility is no worse than baseline pointwise. There is no theorem that "shorter implies same quality."
 
 </details>
 
