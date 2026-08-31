@@ -10,11 +10,19 @@
 
 </div>
 
-ZeroStack is the product in this repository. It includes a daemonless in-process kernel (ZeroKernel) that runs files, structure, and token accounting behind one six-operation API.
+ZeroStack is a daemonless agent runtime for local codebases. Its in-process host, **ZeroKernel**, exposes six operations (`z.read`, `z.find`, `z.edit`, `z.apply`, `z.run`, `z.state`) so a model can work with exact files, structural search, and honest token accounting without a machine-wide service.
 
-ZeroKernel is that kernel: a reusable host creates one fresh, bounded JavaScript or TypeScript frame per cell. ZeroStack owns lifecycle, budgets, cancellation, transactions, child processes, session state, and the terminal response. File, graph, and token libraries are domain surfaces ZeroStack uses; they never import one another. They are not separate products. MCP exists only as a lossy adapter (`zero-mcp`) for harnesses that cannot embed the kernel.
+Those capabilities come from three domain libraries that ZeroKernel composes. They live in this repo, share one workspace, and never import one another:
 
-Large results are projected with **byte-aware recovery-aware context compression (RACC)**. The model sees a compact capsule. The original bytes stay recoverable behind content-addressed handles. Quality is guarded by exact recovery and fallback, not by summarization, reasoning-token cuts, or a weaker model.
+| Domain | Owns | Reached through |
+| --- | --- | --- |
+| **FSZero** | Exact bytes, snapshots, guarded file effects, restoration | `z.read`, `z.edit`, `z.apply` |
+| **GraphZero** | Syntax, symbols, relationships, freshness, coverage | `z.find` |
+| **TokenZero** | Measurement, projection, compression, exact expansion | Automatic at operation and response boundaries |
+
+ZeroStack owns the host around them: frame lifecycle, budgets, cancellation, transactions, child processes, session state, and the terminal response. Each cell runs in a fresh, bounded JavaScript or TypeScript frame. Clients that cannot embed the kernel can use `zero-mcp`, a lossy single-tool adapter.
+
+Large results use **recovery-aware context compression (RACC)**. The model sees a compact capsule; the original bytes stay recoverable behind content-addressed handles. Quality is enforced by exact recovery and fallback, not by summarization or a weaker model.
 
 ## Contents
 
@@ -35,17 +43,17 @@ Large results are projected with **byte-aware recovery-aware context compression
 
 ## What ZeroKernel is
 
-An embedding application creates one `ZeroKernel` host for a workspace, session, and budget. The host retains initialized engine adapters and durable roots. Every call creates a fresh frame that owns its interpreter values, promises, cancellation token, staged filesystem transaction, child processes, and dirty state. Completion, failure, or cancellation settles every owned resource and destroys the frame.
+Create one `ZeroKernel` host per workspace, session, and budget. The host keeps the FSZero, GraphZero, and TokenZero adapters warm, along with durable roots. Each call opens a fresh frame that owns its interpreter values, promises, cancellation token, staged filesystem transaction, child processes, and dirty state. When the cell completes, fails, or is cancelled, every owned resource settles and the frame is destroyed.
 
 ```mermaid
 flowchart TB
   App[Embedding application] --> Host[Reusable ZeroKernel host]
   Host --> Frame[Fresh bounded frame]
-  subgraph engines [Domain surfaces]
+  subgraph engines [Domain libraries]
     direction LR
-    FS[files]
-    GZ[structure]
-    TZ[tokens]
+    FS[FSZero]
+    GZ[GraphZero]
+    TZ[TokenZero]
   end
   subgraph runtime [Host-owned runtime]
     direction LR
@@ -69,9 +77,9 @@ ZeroKernel opens no network listener and starts no machine-wide daemon. Rust hos
 | ZeroGate | Proof-carrying exact scenario closure and read-only Snap-to-File decisions | `z.read({snapToFile: ...})` after trusted GraphZero evidence registration |
 | ZeroGauge | Comparable native/Zero observations and exact savings reports | Rust host API and `zero-kernel savings-report` |
 
-Authority is narrow by design. A graph result does not become file content. A compact projection does not become source bytes. A staged receipt does not commit the cell on its own. See `docs/architecture.md` and `docs/components.md` for the full boundary table and flow.
+Authority is narrow on purpose. A GraphZero hit is not file content. A TokenZero capsule is not the source bytes. A staged FSZero receipt does not commit the cell by itself. See `docs/architecture.md` and `docs/components.md` for the full boundary table and flow.
 
-Engines never import one another. Hub composition lives under `crates/zerostack`. Cross-engine behavior has one place to audit.
+FSZero, GraphZero, and TokenZero never import one another. Composition lives under `crates/zerostack`, so cross-domain behavior has one place to audit.
 
 ## Recovery-aware context compression
 
