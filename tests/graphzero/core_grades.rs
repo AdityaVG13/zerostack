@@ -338,7 +338,7 @@ fn append_only_history_ordering_across_artifacts() {
 }
 
 #[test]
-fn v6_mapping_divergence_rules() {
+fn hub_mapping_divergence_rules() {
     // Lossless rows.
     assert_eq!(
         hub_equivalent(GradeName::Complete, ClaimKind::Absence),
@@ -370,7 +370,7 @@ fn v6_mapping_divergence_rules() {
         grade_from_hub(HubGradeName::BoundedComplete, ClaimKind::Positive),
         Some(GradeName::SoundOverapproximation)
     );
-    // V6 Observed never promotes; Unknown is terminal both ways.
+    // Hub Observed never promotes; Unknown is terminal both ways.
     assert_eq!(
         grade_from_hub(HubGradeName::Observed, ClaimKind::Positive),
         Some(GradeName::ObservedOnly)

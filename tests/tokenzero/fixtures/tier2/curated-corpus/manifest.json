@@ -1,5 +1,5 @@
 {
-  "schema": "gauntlet.golden.manifest",
+  "schema": "tokenzero.golden.manifest",
   "tier": "Tier2Canonical",
   "source": "curated-corpus",
   "reference_version": "tokenzero-spec@HEAD-fb73416",

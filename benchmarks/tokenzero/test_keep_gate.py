@@ -344,7 +344,7 @@ def _attribution(
 
 def _window(
     sha: str = "4ad6f579e6d9dab99722f1ca538c8009a14199cc",
-    machine: str = "gauntlet-host",
+    machine: str = "tokenzero-host",
     ts: str = "2026-08-24T19:00:00Z",
 ) -> dict:
     return {"git_sha": sha, "machine": machine, "timestamp": ts}

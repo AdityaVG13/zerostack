@@ -38,7 +38,7 @@ fn unique_root(prefix: &str) -> PathBuf {
 fn put_reaps_stale_tmp() {
     let root = unique_root("reap");
     let cas = SharedCas::open(&root);
-    let payload = b"surf-0013-reap-payload";
+    let payload = b"quarantine-reap-payload";
     // Independently computed digest, not via production helper.
     let hash = sha256_hex(payload);
     let parent = cas
@@ -93,7 +93,7 @@ fn quarantine_moves_digest_mismatch() {
     let root = unique_root("quarantine");
     let cas = SharedCas::open(&root);
 
-    let good_bytes = b"surf-0013-good-bytes-for-hash";
+    let good_bytes = b"quarantine-reap-good-bytes-for-hash";
     let hash = sha256_hex(good_bytes);
     let dest = cas.object_path(&hash);
     fs::create_dir_all(dest.parent().expect("object parent"))

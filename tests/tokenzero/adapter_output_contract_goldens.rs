@@ -312,7 +312,7 @@ fn tiktoken_bpe_is_certified_but_not_pulse_exact_identity() {
     );
     let recorded = PulseEvent::tool_call("measure", "auto", 1, 1, 0, 0, 0, None)
         .with_tokenizer_id(&measured.tokenizer)
-        .expect("kernel tiktoken: must be Pulse-legal after Pass 10 grammar");
+        .expect("kernel tiktoken: must be Pulse-legal tokenizer grammar");
     assert_eq!(recorded.tokenizer_id, "tiktoken:o200k_base");
     assert!(
         !measured.tokenizer.contains('@'),
@@ -376,7 +376,7 @@ fn checked_in_goldens_match_checksums_and_tier_labels() {
     ] {
         let v = parse_json(manifest);
         assert_eq!(v["tier"], tier);
-        assert_eq!(v["schema"], "gauntlet.golden.manifest");
+        assert_eq!(v["schema"], "tokenzero.golden.manifest");
         let ids: Vec<&str> = v["entries"]
             .as_array()
             .expect("entries")

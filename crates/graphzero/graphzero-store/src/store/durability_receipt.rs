@@ -35,7 +35,7 @@ pub const REQUIRED_FEEDER_IDS: &[&str] = &[
     "hub:Z4",
     "hub:Z5",
     "hub:Z6",
-    "graphzero-zerostack-parity-b5ci.6",
+    "hub:parity",
 ];
 
 /// Metadata supplied by the assembly/verifier caller.

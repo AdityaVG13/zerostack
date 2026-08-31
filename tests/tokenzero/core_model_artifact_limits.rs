@@ -32,11 +32,11 @@ impl ExactTokenizerAdapter for ByteAdapter {
 }
 
 fn adapter() -> ByteAdapter {
-    let manifest = b"gauntlet-fake-tokenizer-revision";
+    let manifest = b"tokenzero-fake-tokenizer-revision";
     let digest = sha256_hex(std::str::from_utf8(manifest).expect("ascii manifest"));
     let identity = ExactTokenizerIdentity::new(
         ProviderLock {
-            provider: "gauntlet".to_string(),
+            provider: "tokenzero-test".to_string(),
             model: "fake-tokenizer".to_string(),
             tokenizer_revision_digest: digest,
         },
@@ -78,10 +78,10 @@ fn tokenizer_id_preflight_refuses_unlabeled_estimate_and_q99_as_exact() {
 
 #[test]
 fn exact_tokenizer_identity_rejects_revision_digest_mismatch() {
-    let expected = sha256_hex("gauntlet-expected-manifest");
+    let expected = sha256_hex("tokenzero-expected-manifest");
     let err = ExactTokenizerIdentity::new(
         ProviderLock {
-            provider: "gauntlet".to_string(),
+            provider: "tokenzero-test".to_string(),
             model: "fake-tokenizer".to_string(),
             tokenizer_revision_digest: expected.clone(),
         },
