@@ -37,7 +37,7 @@ samply record --save-only -o "$OUT_DIR/cpu.json" -- \
 | Path | Role |
 | --- | --- |
 | `tests/artifacts/perf/<run-id>/` | Local scratch output; ignored by Git |
-| `benchmarks/fszero/` | Tracked claim artifacts approved under the benchmark integrity policy |
+| `benchmarks/files/` | Tracked claim artifacts approved under the benchmark integrity policy |
 
 A promoted package contains a fingerprint, scenario, compact profile artifact, hotspot table, and interpretation. Raw multi-megabyte traces stay local unless the owner approves their publication.
 

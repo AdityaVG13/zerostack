@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "GraphZero crash-boundary case",
+  "title": "Structure crash-boundary case",
   "type": "object",
   "required": ["id", "component", "crash_point", "recovery_contract", "evidence"],
   "properties": {

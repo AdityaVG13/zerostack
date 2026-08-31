@@ -65,7 +65,7 @@ fn elapsed_ms(start: Instant) -> f64 {
 
 fn enforce_gate(result: &serde_json::Value) -> Result<()> {
     let gate: serde_json::Value = serde_json::from_str(include_str!(
-        "../../../../benchmarks/graphzero/latency/wal_open_compaction_gate.json"
+        "../../../../benchmarks/structure/latency/wal_open_compaction_gate.json"
     ))?;
     ensure!(
         gate["schema_version"] == 1,

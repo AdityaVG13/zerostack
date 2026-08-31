@@ -53,7 +53,7 @@ fn impossible_section_offset_is_rejected_after_restart() {
 
 #[test]
 fn crash_boundary_corpus_lists_store_recovery_cases() {
-    let corpus = include_str!("../../../benchmarks/graphzero/crash-boundary/cases.jsonl");
+    let corpus = include_str!("../../../benchmarks/structure/crash-boundary/cases.jsonl");
     assert!(corpus.contains("\"component\":\"shard_write\""));
     assert!(corpus.contains("partial_shard_header_is_rejected_before_mmap"));
 }

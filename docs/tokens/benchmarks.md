@@ -1,6 +1,6 @@
 # Tokens benchmarks
 
-TokenZero benchmarks exercise the internal domain library and make no product claim without current, same-unit evidence.
+Tokens-domain benchmarks exercise the internal domain library and make no product claim without current, same-unit evidence.
 
 Current benchmarks exercise typed crates directly:
 

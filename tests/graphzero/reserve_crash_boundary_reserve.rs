@@ -42,7 +42,7 @@ fn malformed_reservation_entry_returns_structured_error() {
 
 #[test]
 fn crash_boundary_corpus_lists_reservation_recovery_cases() {
-    let corpus = include_str!("../../../benchmarks/graphzero/crash-boundary/cases.jsonl");
+    let corpus = include_str!("../../../benchmarks/structure/crash-boundary/cases.jsonl");
     assert!(corpus.contains("\"component\":\"reservation\""));
     assert!(corpus.contains("empty_wal_directory_replays_as_empty"));
 }

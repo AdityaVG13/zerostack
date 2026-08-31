@@ -1,6 +1,6 @@
-# TokenZero benchmarks
+# Tokens benchmarks
 
-This directory contains the keep-gate logic for typed TokenZero benchmark artifacts.
+This directory contains the keep-gate logic for typed tokens-domain benchmark artifacts.
 Benchmark execution is crate-owned. No alternate per-domain runner is supported.
 
 The live benchmark target is:
@@ -12,4 +12,4 @@ the exact command, source revision, profile, host class, corpus, tokenizer ident
 sample vectors, and every dropped sample.
 
 `keep_gate.py` validates retained benchmark artifacts. `test_keep_gate.py` tests that
-validator. Neither file proves the removed CLI surfaces.
+validator.

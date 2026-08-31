@@ -1,6 +1,6 @@
 # Structure benchmarks
 
-GraphZero benchmarks exercise internal domain libraries. Historical measurements from other execution surfaces are not product claims.
+Structure-domain benchmarks exercise internal domain libraries. Historical measurements from other execution surfaces are not product claims.
 
 Current benchmarks exercise typed domain crates directly:
 
