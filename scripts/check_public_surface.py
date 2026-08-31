@@ -10,20 +10,16 @@ ROOT = Path(__file__).resolve().parents[1]
 EXPECTED = {"read", "find", "edit", "apply", "run", "state"}
 PUBLIC_FILES = (
     "README.md",
+    "docs/README.md",
     "docs/architecture.md",
     "docs/components.md",
+    "docs/build.md",
     "contracts/README.md",
-    "docs/fszero/README.md",
-    "docs/fszero/architecture.md",
-    "docs/fszero/filesystem-contract.md",
-    "docs/fszero/install.md",
-    "docs/graphzero/README.md",
-    "docs/graphzero/architecture.md",
-    "docs/graphzero/query-contract.md",
-    "docs/graphzero/install.md",
-    "docs/tokenzero/README.md",
-    "docs/tokenzero/development.md",
-    "docs/tokenzero/install.md",
+    "docs/files/architecture.md",
+    "docs/files/filesystem-contract.md",
+    "docs/structure/architecture.md",
+    "docs/structure/query-contract.md",
+    "docs/tokens/development.md",
 )
 FORBIDDEN = (
     "zsx",

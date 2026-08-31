@@ -1,5 +1,5 @@
 //! ZeroRef: the portable cross-domain blob ref subset. The contract implementation lives in the
-//! shared zero-ref foundation crate (canonical annex: docs/fszero/design/zeroref-annex.md, golden
+//! shared zero-ref foundation crate (canonical annex: docs/files/design/zeroref-annex.md, golden
 //! vectors contracts/zeroref-fixtures.json, asserted verbatim inside the shared crate).
 
 pub use zero_ref::{

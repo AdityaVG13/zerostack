@@ -489,11 +489,12 @@ The RACC statements in this README come from a research series on recovery-aware
 | --- | --- |
 | `docs/README.md` | Index of the published documentation set |
 | `docs/architecture.md` | Authority boundaries, lifecycle, effects, and scheduling |
-| `docs/components.md` | FSZero, GraphZero, TokenZero, and hub responsibilities |
+| `docs/components.md` | Hub crates and domain responsibilities |
+| `docs/build.md` | Contributor build and focused verification |
 | `docs/racc/RACC.md` | Recovery-aware output projection and exact expansion |
-| `docs/fszero/` | Filesystem and byte authority |
-| `docs/graphzero/` | Structure and query authority |
-| `docs/tokenzero/` | Output economics and accounting |
+| `docs/files/` | Filesystem and byte authority |
+| `docs/structure/` | Structure and query authority |
+| `docs/tokens/` | Output economics and accounting |
 | `contracts/README.md` | Machine-readable contract inventory and change rules |
 | `crates/zerostack/zerostack-conformance/CONTRACT.md` | Shared executable conformance contract |
 | `packaging/README.md` | Not a public distribution root; no installable packages |
@@ -503,7 +504,7 @@ Typed contracts live in `contracts/` and `crates/zerostack/zero-abi`. Historical
 
 ## Contributing and security
 
-Read `CONTRIBUTING.md` before changing engine contracts or the six-operation surface. Report vulnerabilities through `SECURITY.md`. ZeroStack is harness-agnostic and can be embedded by any compatible caller.
+Read `CONTRIBUTING.md` before changing domain contracts or the six-operation surface. Report vulnerabilities through `SECURITY.md`. ZeroStack is harness-agnostic and can be embedded by any compatible caller.
 
 ## License
 

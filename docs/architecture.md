@@ -1,6 +1,6 @@
 # Architecture
 
-ZeroStack composes three independent domain libraries behind one reusable in-process host. One monorepo stores the hub under `crates/zerostack/` and the domain libraries under `crates/fszero/`, `crates/graphzero/`, and `crates/tokenzero/`. The domains never import one another. ZeroGate and ZeroGauge are hub features, not independent engines or products.
+ZeroStack is one product. It composes three independent domain libraries behind one reusable in-process host. The hub lives under `crates/zerostack/`; the files, structure, and tokens domains live under `crates/fszero/`, `crates/graphzero/`, and `crates/tokenzero/`. The domains never import one another. ZeroGate and ZeroGauge are hub features, not independent products.
 
 ZeroStack is harness-agnostic and can be embedded by any compatible caller.
 

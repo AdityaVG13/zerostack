@@ -1,4 +1,4 @@
-# GraphZero threat model
+# Structure threat model
 
 ## Scope and security posture
 

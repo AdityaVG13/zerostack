@@ -1,4 +1,4 @@
-# FSZero telemetry boundary
+# Files telemetry boundary
 
 FSZero records filesystem-domain measurements needed to diagnose reads, indexing, cache behavior, mutations, and recovery. TokenZero owns token accounting and output projection. ZeroStack owns response-wide reporting.
 

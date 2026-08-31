@@ -1,4 +1,4 @@
-# FSZero filesystem contract
+# Filesystem contract
 
 Status: normative behavior summary. `zero-abi` defines the typed file-engine boundary, and `zero-fs` behavior tests enforce these invariants. FSZero has no separate operation catalog.
 

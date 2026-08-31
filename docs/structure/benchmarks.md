@@ -1,4 +1,4 @@
-# GraphZero benchmarks
+# Structure benchmarks
 
 GraphZero benchmarks exercise internal domain libraries. Historical measurements from other execution surfaces are not product claims.
 

@@ -1,6 +1,6 @@
 # Components
 
-ZeroStack is one product composed from three domain subprojects. FSZero owns files, GraphZero owns structure, and TokenZero owns token and output economics. Domain crates may depend on crates in their own subproject and on shared ZeroStack contracts. They never import another domain subproject.
+ZeroStack is one product. Its files domain (`crates/fszero/`) owns bytes and filesystem effects, its structure domain (`crates/graphzero/`) owns relationships and coverage, and its tokens domain (`crates/tokenzero/`) owns measurement and output economics. Domain crates may depend on crates in their own tree and on shared ZeroStack contracts. They never import another domain tree.
 
 ZeroStack adapters are the only composition boundary. The model sees `z.read`, `z.find`, `z.edit`, `z.apply`, `z.run`, and `z.state`, never a crate or engine selector.
 

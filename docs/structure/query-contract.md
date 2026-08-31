@@ -1,4 +1,4 @@
-# GraphZero query contract
+# Structure query contract
 
 GraphZero exposes typed Rust query contracts to ZeroKernel. The model-facing entry is `z.find`; engine names and transport catalogs remain internal.
 

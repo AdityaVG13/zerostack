@@ -1,4 +1,4 @@
-# GraphZero architecture
+# Structure domain architecture
 
 GraphZero owns repository structure, relationship evidence, index freshness, coverage, and blast radius. It supplies a typed engine adapter to ZeroKernel. It is not an installable product and has no product CLI. Indexing happens inside `z.find` through the structural engine.
 

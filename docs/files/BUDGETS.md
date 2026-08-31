@@ -1,4 +1,4 @@
-# FSZero performance budgets
+# Files performance budgets
 
 Only ZeroKernel-owned execution is a current product gate. Historical results from
 per-domain runners do not establish a current wall-time, RSS, or binary-size threshold.

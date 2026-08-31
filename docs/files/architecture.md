@@ -1,4 +1,4 @@
-# FSZero architecture
+# Files domain architecture
 
 FSZero owns exact bytes and filesystem effects. It supplies typed engine methods to ZeroKernel. It is not an installable product and has no product CLI.
 

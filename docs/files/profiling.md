@@ -1,4 +1,4 @@
-# FSZero profiling
+# Files profiling
 
 Profile one named FSZero operation or benchmark scenario at a time. Performance claims follow [benchmark-integrity.md](benchmark-integrity.md).
 

@@ -1,4 +1,4 @@
-# GraphZero API errors
+# Structure API errors
 
 Public callers branch on stable error classes rather than parsing prose. Detailed diagnostics may add context without changing the class.
 

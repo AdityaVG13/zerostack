@@ -1,4 +1,4 @@
-# FSZero durability and failure contract
+# Files durability and failure contract
 
 Persistent FSZero state fails closed on corruption or unavailable storage. An in-memory
 session is allowed only when the caller explicitly sets `FSZERO_ALLOW_EPHEMERAL=1`.
